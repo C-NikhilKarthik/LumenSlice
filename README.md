@@ -35,34 +35,129 @@ Built with a minimalist game-engine philosophy, LumenSlice eliminates the heavy 
 
 ### 1. Prerequisites
 
-Ensure your build machine has a modern C++17/20-compliant compiler toolchain installed, alongside CMake and Ninja.
+Phase 1 (macOS) needs the Xcode command-line tools (Swift 5.9+) and DCMTK:
 
 ```bash
-# Ubuntu / Debian Linux
-sudo apt-get install build-essential cmake ninja-build libx11-dev libxi-dev libgl1-mesa-dev
-
 # macOS (via Homebrew)
-brew install cmake ninja
-
-# Windows
-# Install Visual Studio Community Edition (select "Desktop development with C++")
+xcode-select --install   # if not already installed
+brew install dcmtk
 ```
 
-### 2. Clone and Configure Workspace
+> The future Windows/Linux cross-platform targets will use the C++/CMake/Ninja
+> toolchain described in [`docs/timelines.md`](docs/timelines.md); only the macOS
+> SwiftUI shell is built today.
+
+### 2. Build & Run (Phase 1 — macOS, SwiftUI shell)
+
+Phase 1 ships a native **SwiftUI** macOS app driven by Swift Package Manager. The
+C++ data core (DICOM ingestion, slice extraction) is reused unchanged behind a
+small C bridge — see [Architecture note](#architecture-note-swiftui-shell).
 
 ```bash
 git clone --recursive https://github.com/yourusername/LumenSlice.git
 cd LumenSlice
-mkdir build && cd build
 
-# Configure build scripts via Ninja
-cmake -G Ninja -DCMAKE_BUILD_TYPE=Release ..
+# Build the C++ core + Swift app
+swift build
 
-# Execute native multi-threaded compilation
-ninja
+# Generate a synthetic CT phantom series to test ingestion (optional)
+python3 -m pip install --user pydicom numpy
+python3 tools/make_test_series.py testdata/phantom
+
+# Launch the viewer; pass a folder to auto-load, or drag a DICOM folder onto the window
+swift run LumenSlice testdata/phantom
+
+# Headless ingestion check (no window) — exercises the same C bridge
+swift run IngestTest testdata/phantom
 ```
 
-> **Status:** Early scaffolding. This repository currently contains the architecture docs and project layout. Source implementation follows the [8-week plan](docs/timelines.md).
+#### Try it on a real scan
+
+The loader reads **uncompressed** DICOM. A clean, directly-downloadable example is
+the datalad T1-weighted MRI (384 single-frame slices, uncompressed):
+
+```bash
+curl -sL -o /tmp/t1.zip \
+  https://codeload.github.com/datalad/example-dicom-structural/zip/refs/heads/master
+unzip -q /tmp/t1.zip -d /tmp/t1
+cp /tmp/t1/example-dicom-structural-master/dicoms/*.dcm testdata/t1_mri/   # mkdir first
+
+swift run LumenSlice testdata/t1_mri        # open in the app
+swift run SliceShot testdata/t1_mri out.png # or render the 3 centre slices to a PNG
+```
+
+`SliceShot` renders the axial/coronal/sagittal centre slices through the same
+bridge + window/level + CGImage path as the app — handy for a quick headless
+preview or CI snapshot. For more datasets (and how to decompress JPEG/JPEG2000
+series with `dcmdjpeg`/`gdcmconv`), see the dataset notes discussed in the project
+chat / `docs`.
+
+#### Run from Xcode
+
+The package opens directly in Xcode — no `.xcodeproj` needed:
+
+```bash
+open Package.swift     # or: xed .
+```
+
+Then in Xcode:
+
+1. Wait for package resolution to finish.
+2. **In the scheme selector (top toolbar), choose `LumenSlice` — _not_ `LumenSlice-Package`.**
+   The auto-generated `…-Package` scheme builds every target but launches nothing,
+   so running it shows no window. `IngestTest` is a headless console target with no
+   window either — pick `LumenSlice`.
+3. Set the destination to **My Mac**.
+4. Press **⌘R** to build and run.
+5. *(Optional)* To auto-load a folder on launch: **Product ▸ Scheme ▸ Edit Scheme… ▸ Run ▸ Arguments**, and add the folder path. Otherwise use **Open Folder** or drag a DICOM folder onto the window.
+
+> DCMTK is linked from Homebrew with absolute library paths, so the app finds it
+> at runtime under Xcode without any extra `DYLD`/rpath configuration.
+
+> **Status — Phase 1 (Week 1–2 milestone) complete on macOS.** DCMTK-based DICOM
+> ingestion (recursive folder crawl, `DICM` signature filter, HU rescale,
+> geometric Z-sort by Image Position/Orientation), a flat contiguous voxel core,
+> and a native tri-axis slice viewer (Axial/Coronal/Sagittal) with live
+> window/level, presets, physical-aspect rendering, a folder picker, and
+> drag-and-drop. Segmentation, marching cubes, and STL export follow the
+> [8-week plan](docs/timelines.md).
+
+### Share the app with someone (self-contained .app)
+
+```bash
+tools/make_app.sh
+```
+
+This builds a release, wraps it in `dist/LumenSlice.app`, and zips it to
+`dist/LumenSlice.zip` (~640 KB). DCMTK is linked **statically** and its data
+dictionary is bundled in `Contents/Resources`, so the app has **no Homebrew or
+DCMTK dependency** — it runs on a clean Mac. The bundle is ad-hoc code-signed
+(required for arm64 to launch at all).
+
+Send `dist/LumenSlice.zip`. The recipient unzips it, drags `LumenSlice.app` to
+`/Applications`, and on first launch **right-clicks → Open** (to get past
+Gatekeeper, since it isn't notarized), or runs:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/LumenSlice.app
+```
+
+Caveats: the bundle targets the **build host's architecture** (Apple Silicon →
+arm64; an Intel Mac can't run it). For a Gatekeeper-clean, double-click-able app
+with no warning, you need an Apple **Developer ID** certificate + notarization
+(`codesign` with your cert, then `xcrun notarytool submit`).
+
+### Architecture note (SwiftUI shell)
+
+The original blueprint specified a Sokol + Dear ImGui shell for a single
+cross-platform binary. Phase 1 instead uses a **SwiftUI** front-end for a cleaner,
+fully-native macOS look. Crucially, this only swaps the *presentation layer*: the
+data-oriented C++ core (`src/core`, `src/io`, `src/visualization`) is untouched
+and stays UI-agnostic per [`docs/agent.md`](docs/agent.md) §1, exposed to Swift
+through a thin C API (`src/bridge`). The Sokol/ImGui path can be revived for the
+Windows/Linux targets in the weeks 7–8 cross-platform work without changing the
+core. (`docs/context.md` and the stack table above still describe the original
+Sokol plan and will be reconciled as cross-platform work resumes.)
 
 ## License
 

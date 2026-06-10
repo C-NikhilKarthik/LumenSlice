@@ -1,7 +1,13 @@
 # Build output
 build/
 out/
+dist/
 cmake-build-*/
+
+# Swift Package Manager
+.build/
+.swiftpm/
+Package.resolved
 *.o
 *.obj
 *.a

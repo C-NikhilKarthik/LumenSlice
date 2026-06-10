@@ -1,0 +1,6 @@
+[submodule "external/sokol"]
+	path = external/sokol
+	url = https://github.com/floooh/sokol.git
+[submodule "external/imgui"]
+	path = external/imgui
+	url = https://github.com/ocornut/imgui.git
