@@ -4,6 +4,9 @@ out/
 dist/
 cmake-build-*/
 
+# Python virtualenv (used by CI to generate the test phantom)
+.venv/
+
 # Swift Package Manager
 .build/
 .swiftpm/

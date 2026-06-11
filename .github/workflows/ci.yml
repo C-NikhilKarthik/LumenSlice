@@ -26,9 +26,13 @@ jobs:
         run: swift build -c release
 
       - name: Generate synthetic CT phantom
+        # The runner's Python is Homebrew-managed (PEP 668 "externally managed"),
+        # so install into a throwaway venv instead of the system interpreter.
         run: |
-          python3 -m pip install --user --quiet pydicom numpy
-          python3 tools/make_test_series.py testdata/phantom
+          python3 -m venv .venv
+          .venv/bin/python -m pip install --quiet --upgrade pip
+          .venv/bin/python -m pip install --quiet pydicom numpy
+          .venv/bin/python tools/make_test_series.py testdata/phantom
 
       - name: Headless ingestion test
         run: swift run -c release IngestTest testdata/phantom
