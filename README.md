@@ -142,10 +142,55 @@ Gatekeeper, since it isn't notarized), or runs:
 xattr -dr com.apple.quarantine /Applications/LumenSlice.app
 ```
 
+For a `.dmg` (drag-to-Applications disk image) instead of a zip:
+
+```bash
+tools/make_dmg.sh        # -> dist/LumenSlice.dmg
+```
+
 Caveats: the bundle targets the **build host's architecture** (Apple Silicon →
 arm64; an Intel Mac can't run it). For a Gatekeeper-clean, double-click-able app
 with no warning, you need an Apple **Developer ID** certificate + notarization
 (`codesign` with your cert, then `xcrun notarytool submit`).
+
+### Releases & CI (GitHub Actions)
+
+Two workflows live in [`.github/workflows`](.github/workflows):
+
+- **`ci.yml`** — on every push / PR to `main`: builds the C++ core + SwiftUI app
+  on a macOS (Apple Silicon) runner, generates the synthetic CT phantom, and runs
+  the headless `IngestTest` so ingestion regressions fail the build.
+- **`release.yml`** — builds `dist/LumenSlice.dmg` and publishes it as a
+  **GitHub Release** with the `.dmg` attached.
+
+  **Versioning (pre-1.0):** we only auto-bump the **minor** number — major and
+  patch stay `0` → `v0.1.0`, `v0.2.0`, `v0.3.0`, … You never pick a number.
+  Trigger a release from the **Actions ▸ Release ▸ Run workflow** button: the job
+  reads the latest `v0.N.0` tag, computes `v0.(N+1).0`, creates+pushes that tag,
+  and cuts the Release. The first run (no tags yet) produces `v0.1.0`. The
+  resolved version is stamped into the app bundle.
+
+  **Escape hatch** for when proper semver matters later: push an explicit tag and
+  the workflow honours it verbatim instead of auto-bumping:
+
+  ```bash
+  git tag v1.2.3 && git push origin v1.2.3
+  ```
+
+#### A note on the "Apple Developer account"
+
+A **free** Apple ID only grants a *Personal Team*, which can do **development**
+signing (run on your own Mac) — it **cannot** issue a Developer ID certificate or
+**notarize**. So released `.dmg`s are **ad-hoc signed but not notarized**, and
+recipients must right-click → **Open** once (or strip quarantine) on first launch.
+There is no free path around this; notarization requires the **paid** ($99/yr)
+Apple Developer Program.
+
+When you do get a paid account, releasing notarized builds is a drop-in change:
+add the repo secrets and uncomment the signing/notarization block in
+`release.yml` (the steps are stubbed there). The typical flow is `codesign` with
+your *Developer ID Application* cert (`--options runtime`), then
+`xcrun notarytool submit dist/LumenSlice.dmg --wait`, then `xcrun stapler staple`.
 
 ### Architecture note (SwiftUI shell)
 

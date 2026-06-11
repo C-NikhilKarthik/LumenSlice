@@ -15,8 +15,12 @@ cd "$(dirname "$0")/.."
 
 APP_NAME="LumenSlice"
 BUNDLE_ID="com.flamapp.lumenslice"
-VERSION="0.1.0"
-DICT_DIR="$(brew --prefix dcmtk)/share/dcmtk-3.7.0"
+# VERSION can be overridden by CI (e.g. from a git tag): VERSION=1.2.3 tools/make_app.sh
+VERSION="${VERSION:-0.1.0}"
+# Locate DCMTK's data dictionary without hard-coding the version number.
+DICT_DIR="$(brew --prefix dcmtk)/share"
+DICT_DIR="$(/bin/ls -d "$DICT_DIR"/dcmtk-* 2>/dev/null | sort -V | tail -1 || true)"
+[ -n "$DICT_DIR" ] || { echo "error: could not find DCMTK data dictionary under $(brew --prefix dcmtk)/share" >&2; exit 1; }
 
 echo "==> Building release..."
 swift build -c release --product "$APP_NAME"

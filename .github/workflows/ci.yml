@@ -1,0 +1,34 @@
+name: CI
+
+# Build the C++ core + SwiftUI app and exercise DICOM ingestion end-to-end on
+# every push / PR to main, so regressions surface before a release.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    # macos-14 is Apple Silicon (arm64) -- matches our arm64-only build.
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install DCMTK
+        run: brew install dcmtk
+
+      - name: Show toolchain
+        run: swift --version
+
+      - name: Build (release)
+        run: swift build -c release
+
+      - name: Generate synthetic CT phantom
+        run: |
+          python3 -m pip install --user --quiet pydicom numpy
+          python3 tools/make_test_series.py testdata/phantom
+
+      - name: Headless ingestion test
+        run: swift run -c release IngestTest testdata/phantom
