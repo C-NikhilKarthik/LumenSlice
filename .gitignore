@@ -40,3 +40,9 @@ sessions.db
 
 # Generated exports
 *.stl
+
+# Local feature docs / working notes (visible, not tracked)
+yashdocs/
+
+# Python tooling venv (fixture generation)
+.venv/

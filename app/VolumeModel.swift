@@ -20,13 +20,19 @@ final class VolumeModel: ObservableObject {
     @Published var huLo: Float = -1000
     @Published var huHi: Float = 1000
 
-    // Window/level transfer function (HU).
-    @Published var level: Float = 40 { didSet { refreshAll() } }
-    @Published var window: Float = 400 { didSet { refreshAll() } }
+    // Window/level transfer function (HU). Each setter re-renders all three
+    // planes; use setWindowLevel(level:window:) to change both with one refresh
+    // (e.g. presets, or the drag-on-image gesture).
+    @Published var level: Float = 40 { didSet { if !suppressWLRefresh { refreshAll() } } }
+    @Published var window: Float = 400 { didSet { if !suppressWLRefresh { refreshAll() } } }
+    private var suppressWLRefresh = false
 
     // Per-axis scroll position and rendered slice.
     @Published var sliceIndex: [Int] = [0, 0, 0]
     @Published var images: [CGImage?] = [nil, nil, nil]
+
+    // Curated + full DICOM metadata for the loaded series (nil until a load).
+    @Published var metadata: DicomMetadata?
 
     static let axisNames = ["Axial", "Coronal", "Sagittal"]
 
@@ -102,13 +108,35 @@ final class VolumeModel: ObservableObject {
             window = max(1, hi - lo)
         }
 
+        metadata = Self.readMetadata(newHandle)
         sliceIndex = [sliceCount(0) / 2, sliceCount(1) / 2, sliceCount(2) / 2]
         refreshAll()
+    }
+
+    // Pull the serialized metadata blob from the bridge (two-call pattern: ask
+    // for the length, then fill a right-sized buffer) and parse it.
+    private static func readMetadata(_ handle: OpaquePointer) -> DicomMetadata? {
+        let needed = Int(lumen_meta_json(handle, nil, 0))
+        guard needed > 0 else { return nil }
+        var buffer = [CChar](repeating: 0, count: needed + 1)
+        _ = lumen_meta_json(handle, &buffer, Int32(needed + 1))
+        return DicomMetadata.parse(String(cString: buffer))
     }
 
     func setSlice(_ axis: Int, _ value: Int) {
         sliceIndex[axis] = value
         refresh(axis)
+    }
+
+    /// Set window and level together with a single re-render. Clamps window to
+    /// at least 1 HU (a zero-width window divides by zero in the extractor).
+    /// Used by presets and the drag-on-image gesture so they don't double-refresh.
+    func setWindowLevel(level newLevel: Float, window newWindow: Float) {
+        suppressWLRefresh = true
+        window = max(1, newWindow)
+        level = newLevel
+        suppressWLRefresh = false
+        refreshAll()
     }
 
     func refreshAll() {
