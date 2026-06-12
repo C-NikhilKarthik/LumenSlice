@@ -32,6 +32,7 @@ struct Slice {
     std::array<double, 6> iop{{1, 0, 0, 0, 1, 0}};        // Image Orientation (Patient)
     double sort_key = 0.0;                                // IPP projected on slice normal
     std::vector<float> hu;                                // length rows*cols
+    std::string source_path;                              // re-opened later for metadata
 };
 
 // docs/plan.md §1: a real DICOM file carries the 4-byte "DICM" magic at offset
@@ -49,6 +50,7 @@ bool HasDicmSignature(const fs::path& path) {
 // Pull a single slice out of one DICOM dataset. Returns false (with the file
 // counted as skipped) for anything we can't turn into HU pixels in Phase 1.
 bool ParseSlice(const fs::path& path, Slice& out) {
+    out.source_path = path.string();
     DcmFileFormat ff;
     if (ff.loadFile(path.string().c_str()).bad()) return false;
     DcmDataset* ds = ff.getDataset();
@@ -218,6 +220,20 @@ LoadResult LoadDicomFolder(const std::string& folder) {
     }
     vol.hu_min = hu_min;
     vol.hu_max = hu_max;
+
+    // Pull the human-readable context from a representative slice (patient,
+    // study, series, equipment + the full top-level tag list). These are
+    // identical across a series, so the first sorted slice suffices. A failure
+    // here is non-fatal: the volume still loads, just without metadata.
+    {
+        DcmFileFormat meta_ff;
+        if (meta_ff.loadFile(slices.front().source_path.c_str()).good()) {
+            if (DcmDataset* meta_ds = meta_ff.getDataset()) {
+                result.meta = extract_study_meta(*meta_ds);
+                result.tags = enumerate_tags(*meta_ds);
+            }
+        }
+    }
 
     char buf[256];
     std::snprintf(buf, sizeof(buf),

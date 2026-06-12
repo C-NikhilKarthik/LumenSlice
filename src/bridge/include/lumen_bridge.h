@@ -39,6 +39,14 @@ void lumen_slice_dims(const LumenVolume* v, int axis, int* w, int* h);
 // Single HU sample (mainly for testing/inspection). 0 if out of range.
 float lumen_sample_hu(const LumenVolume* v, int x, int y, int z);
 
+// Curated patient/study/series metadata plus the full top-level tag list,
+// serialized as one JSON object: {"meta":{...},"tags":[{"ge","vr","name","value"}]}.
+// Writes up to out_cap bytes (always NUL-terminated when out_cap > 0) into out,
+// and returns the full JSON length in bytes (excluding the NUL). If the return
+// value is >= out_cap, the JSON was truncated: call again with a buffer of at
+// least (returned length + 1). Returns 0 when there is no metadata.
+int lumen_meta_json(const LumenVolume* v, char* out, int out_cap);
+
 // Extract slice `index` along `axis`, mapped through window/level. Returns a
 // pointer to an internal RGBA8 buffer (out_w * out_h * 4 bytes), valid until the
 // next extract call on the same handle. Returns NULL on error.
