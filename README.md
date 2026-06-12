@@ -122,30 +122,31 @@ Then in Xcode:
 > drag-and-drop. Segmentation, marching cubes, and STL export follow the
 > [8-week plan](docs/timelines.md).
 
-### Share the app with someone (self-contained .app)
+### Share the app with someone (notarized .dmg)
 
 ```bash
 tools/make_app.sh
 ```
 
-This builds a release, wraps it in `dist/LumenSlice.app`, and zips it to
-`dist/LumenSlice.zip` (~640 KB). DCMTK is linked **statically** and its data
-dictionary is bundled in `Contents/Resources`, so the app has **no Homebrew or
-DCMTK dependency** — it runs on a clean Mac. The bundle is ad-hoc code-signed
-(required for arm64 to launch at all).
+This builds a release, wraps it in `dist/LumenSlice.app`, signs it with your
+**Developer ID** + hardened runtime, **notarizes** it with Apple, staples the
+ticket, and packages a drag-to-`/Applications` `dist/LumenSlice.dmg`. DCMTK is
+linked **statically** and its data dictionary is bundled in `Contents/Resources`,
+so the app has **no Homebrew or DCMTK dependency** — it runs on a clean Mac.
 
-Send `dist/LumenSlice.zip`. The recipient unzips it, drags `LumenSlice.app` to
-`/Applications`, and on first launch **right-clicks → Open** (to get past
-Gatekeeper, since it isn't notarized), or runs:
+Send `dist/LumenSlice.dmg`. Because it is notarized + stapled, the recipient just
+**double-clicks the DMG, drags `LumenSlice` to Applications, and opens it** — no
+Gatekeeper warning, no `xattr`, even offline.
 
-```bash
-xattr -dr com.apple.quarantine /Applications/LumenSlice.app
-```
+**One-time setup** (paid Apple Developer membership + a *Developer ID
+Application* certificate + `notarytool` credentials) is documented step-by-step in
+[`tools/NOTARIZE_SETUP.md`](tools/NOTARIZE_SETUP.md). Until that is in place, the
+script errors out with instructions; you can build a non-notarized DMG for local
+testing with `ADHOC=1 tools/make_app.sh` (that one *does* need the recipient to
+right-click → Open or run `xattr -dr com.apple.quarantine ...`).
 
-Caveats: the bundle targets the **build host's architecture** (Apple Silicon →
-arm64; an Intel Mac can't run it). For a Gatekeeper-clean, double-click-able app
-with no warning, you need an Apple **Developer ID** certificate + notarization
-(`codesign` with your cert, then `xcrun notarytool submit`).
+Caveat: the bundle targets the **build host's architecture** (Apple Silicon →
+arm64; an Intel Mac can't run it regardless of notarization).
 
 ### Architecture note (SwiftUI shell)
 
