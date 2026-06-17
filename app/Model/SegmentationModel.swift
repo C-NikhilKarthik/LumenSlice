@@ -59,8 +59,8 @@ final class SegmentationModel: ObservableObject {
             }
             .store(in: &cancellables)
 
-        // Slice scrubbing -> re-extract the affected plane's overlay.
-        volume.$sliceIndex
+        // Focus/slice changes -> re-extract the overlays for the new planes.
+        volume.$focus
             .sink { [weak self] _ in
                 guard let self, self.isActive else { return }
                 self.refreshAllOverlays()

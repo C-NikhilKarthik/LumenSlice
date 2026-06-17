@@ -1,9 +1,10 @@
 import SwiftUI
 
 // One orthographic plane: the window/levelled HU image, an optional colored mask
-// overlay, a slice scrubber, and the interaction layer. On the Visualize tab the
-// left-drag adjusts window/level; on the Segment tab (when `segment` is non-nil)
-// the active tool owns the canvas instead — region-grow seeds on a click.
+// overlay, the shared crosshair, a slice scrubber, and the interaction layer.
+// Navigation (3D-Slicer-style): click to locate (recenters all panes), mouse
+// wheel scrolls slices, left-drag adjusts window/level. On the Segment tab the
+// active tool owns the click instead (region-grow seeds).
 struct SlicePane: View {
     @EnvironmentObject var model: VolumeModel
     let axis: Int
@@ -44,6 +45,8 @@ struct SlicePane: View {
 
     private var imageArea: some View {
         GeometryReader { geo in
+            let aspect = model.physicalAspect(axis)
+            let container = geo.size
             ZStack {
                 RoundedRectangle(cornerRadius: 10)
                     .fill(.black)
@@ -51,26 +54,32 @@ struct SlicePane: View {
                     Image(decorative: img, scale: 1)
                         .resizable()
                         .interpolation(.none)
-                        .aspectRatio(model.physicalAspect(axis), contentMode: .fit)
+                        .aspectRatio(aspect, contentMode: .fit)
                         .padding(8)
                 }
-                // Mask overlay (Segment tab): premultiplied RGBA, registers
-                // pixel-exact because it uses the same aspect + padding as the HU
-                // image. Non-interactive so it never steals the seed gesture.
                 if let seg = segment, seg.showOverlay, let ov = seg.overlays[axis] {
                     Image(decorative: ov, scale: 1)
                         .resizable()
                         .interpolation(.none)
-                        .aspectRatio(model.physicalAspect(axis), contentMode: .fit)
+                        .aspectRatio(aspect, contentMode: .fit)
                         .padding(8)
                         .allowsHitTesting(false)
                 }
+                let colors = PlaneColors.forPane(axis)
+                CrosshairOverlay(
+                    point: crosshairPoint(container: container, aspect: aspect),
+                    rect: SliceCoordinates.fittedRect(container: container, aspect: aspect),
+                    verticalColor: colors.vertical,
+                    horizontalColor: colors.horizontal)
             }
             .clipShape(RoundedRectangle(cornerRadius: 10))
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .contentShape(Rectangle())
             .modifier(InteractionModifier(model: model, axis: axis,
-                                          segment: segment, container: geo.size))
+                                          segment: segment, container: container))
+            .overlay(ScrollCatcher { step in
+                model.setSlice(axis, model.sliceIndex[axis] + step)
+            })
             .overlay(alignment: .bottomLeading) {
                 Text("W \(Int(model.window))  L \(Int(model.level))")
                     .font(.caption2.monospacedDigit())
@@ -82,11 +91,19 @@ struct SlicePane: View {
             }
         }
     }
+
+    private func crosshairPoint(container: CGSize, aspect: CGFloat) -> CGPoint? {
+        guard let img = model.images[axis],
+              let c = model.crosshairPixel(onAxis: axis) else { return nil }
+        return SliceCoordinates.point(forPixel: c.px, c.py, container: container,
+                                      imageWidth: img.width, imageHeight: img.height,
+                                      aspect: aspect)
+    }
 }
 
-// Picks the canvas interaction: window/level drag on Visualize, or the active
-// segmentation tool on Segment. Kept as a modifier so the two gesture kinds don't
-// fight (only one is installed at a time).
+// Picks the canvas interaction. Visualize: click = locate (linked navigation),
+// left-drag = window/level. Segment: the active tool owns the click (region-grow
+// seeds). Mouse-wheel slice scroll is handled separately by ScrollCatcher.
 private struct InteractionModifier: ViewModifier {
     let model: VolumeModel
     let axis: Int
@@ -96,15 +113,27 @@ private struct InteractionModifier: ViewModifier {
     func body(content: Content) -> some View {
         if let seg = segment {
             content.gesture(
-                // minimumDistance 0 so a plain click registers as a seed.
                 DragGesture(minimumDistance: 0)
-                    .onEnded { value in
-                        handleSegment(seg, at: value.location)
-                    }
+                    .onEnded { value in handleSegment(seg, at: value.location) }
             )
         } else {
-            content.windowLevelDrag(model)
+            content
+                .windowLevelDrag(model)
+                .simultaneousGesture(
+                    SpatialTapGesture(coordinateSpace: .local)
+                        .onEnded { value in handleLocate(at: value.location) }
+                )
         }
+    }
+
+    private func handleLocate(at point: CGPoint) {
+        guard let img = model.images[axis],
+              let (px, py) = SliceCoordinates.pixel(
+                forTap: point, container: container,
+                imageWidth: img.width, imageHeight: img.height,
+                aspect: model.physicalAspect(axis)),
+              let voxel = model.voxel(onAxis: axis, px: px, py: py) else { return }
+        model.jump(to: voxel)
     }
 
     private func handleSegment(_ seg: SegmentationModel, at point: CGPoint) {

@@ -88,6 +88,11 @@ const unsigned char* lumen_extract_mask_slice(LumenVolume* v, int axis, int inde
 void lumen_slice_pixel_to_voxel(const LumenVolume* v, int axis, int index, int px,
                                 int py, int* x, int* y, int* z);
 
+// Inverse: where voxel (x,y,z) lands on the `axis` slice image (px,py). Used to
+// draw the crosshair / slice-intersection lines at the shared focus point.
+void lumen_voxel_to_slice_pixel(const LumenVolume* v, int axis, int x, int y, int z,
+                                int* px, int* py);
+
 // --- 3D surface (marching cubes) --------------------------------------------
 // Generation is split so it can run off the main thread without racing the live
 // mask (see the eng review's "snapshot mask, compute off-handle" decision):

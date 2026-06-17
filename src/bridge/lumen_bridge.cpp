@@ -186,6 +186,15 @@ void lumen_slice_pixel_to_voxel(const LumenVolume* v, int axis, int index, int p
     if (z) *z = c.z;
 }
 
+void lumen_voxel_to_slice_pixel(const LumenVolume* v, int axis, int x, int y, int z,
+                                int* px, int* py) {
+    if (v == nullptr) return;
+    const lumen::PixelCoord p = lumen::voxel_to_plane(
+        v->volume, static_cast<lumen::Axis>(axis), x, y, z);
+    if (px) *px = p.px;
+    if (py) *py = p.py;
+}
+
 // --- 3D surface (marching cubes) --------------------------------------------
 
 void lumen_mesh_snapshot(LumenVolume* v) {
