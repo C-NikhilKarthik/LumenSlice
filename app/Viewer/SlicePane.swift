@@ -66,11 +66,13 @@ struct SlicePane: View {
                         .allowsHitTesting(false)
                 }
                 let colors = PlaneColors.forPane(axis)
+                let fitted = SliceCoordinates.fittedRect(container: container, aspect: aspect)
                 CrosshairOverlay(
                     point: crosshairPoint(container: container, aspect: aspect),
-                    rect: SliceCoordinates.fittedRect(container: container, aspect: aspect),
+                    rect: fitted,
                     verticalColor: colors.vertical,
                     horizontalColor: colors.horizontal)
+                OrientationLabels(axis: axis, rect: fitted)
             }
             .clipShape(RoundedRectangle(cornerRadius: 10))
             .frame(maxWidth: .infinity, maxHeight: .infinity)
