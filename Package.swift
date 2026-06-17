@@ -83,6 +83,12 @@ let package = Package(
             dependencies: ["LumenCore"],
             path: "tools/sliceshot"
         ),
+        // Headless 3D pipeline check (threshold -> marching cubes -> binary STL).
+        .executableTarget(
+            name: "MeshShot",
+            dependencies: ["LumenCore"],
+            path: "tools/meshshot"
+        ),
     ],
     cxxLanguageStandard: .cxx20
 )

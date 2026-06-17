@@ -88,6 +88,34 @@ const unsigned char* lumen_extract_mask_slice(LumenVolume* v, int axis, int inde
 void lumen_slice_pixel_to_voxel(const LumenVolume* v, int axis, int index, int px,
                                 int py, int* x, int* y, int* z);
 
+// --- 3D surface (marching cubes) --------------------------------------------
+// Generation is split so it can run off the main thread without racing the live
+// mask (see the eng review's "snapshot mask, compute off-handle" decision):
+//   1. lumen_mesh_snapshot  - call on the main thread; copies the current mask.
+//   2. lumen_mesh_generate  - call on a background thread; marches the snapshot.
+//   3. read the mesh buffers - back on the main thread, after generate returns.
+
+// Snapshot the current mask for the next generate. Main-thread only.
+void lumen_mesh_snapshot(LumenVolume* v);
+
+// March the snapshotted mask into a surface. `smooth_iters` >= 0 softens voxel
+// steps; `downsample` >= 1 coarsens the grid to cap triangles. Returns the
+// triangle count. Safe to run on a background thread (touches only the snapshot
+// and the mesh, never the live mask).
+int lumen_mesh_generate(LumenVolume* v, int smooth_iters, int downsample);
+
+// Mesh buffer access (valid until the next generate). Vertices/normals are 3
+// floats each; indices are 3 per triangle. Pointers are NULL when empty.
+int lumen_mesh_vertex_count(const LumenVolume* v);
+int lumen_mesh_index_count(const LumenVolume* v);
+const float* lumen_mesh_vertices(const LumenVolume* v);
+const float* lumen_mesh_normals(const LumenVolume* v);
+const unsigned int* lumen_mesh_indices(const LumenVolume* v);
+
+// Write the current mesh to `path` as binary STL. Returns 0 on success, else a
+// non-zero errno-style code.
+int lumen_mesh_write_stl(const LumenVolume* v, const char* path);
+
 #ifdef __cplusplus
 }
 #endif
