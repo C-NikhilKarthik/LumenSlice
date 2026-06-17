@@ -19,6 +19,7 @@ import UniformTypeIdentifiers
 struct AppShell: View {
     @EnvironmentObject var model: VolumeModel
     @EnvironmentObject var segmentation: SegmentationModel
+    @EnvironmentObject var mesh: MeshModel
     @State private var selectedTab: WorkspaceTab = .visualize
     @State private var dropTargeted = false
 
@@ -60,8 +61,8 @@ struct AppShell: View {
             switch selectedTab {
             case .visualize: VisualizeControls()
             case .segment:   SegmentControls()
-            case .threeD:    ComingSoonPanel(tab: .threeD)
-            case .export:    ComingSoonPanel(tab: .export)
+            case .threeD:    ThreeDControls()
+            case .export:    ExportControls()
             }
         }
         .background(
@@ -77,12 +78,8 @@ struct AppShell: View {
             SliceBoard(dropTargeted: $dropTargeted)
         case .segment:
             SliceBoard(dropTargeted: $dropTargeted, segment: segmentation)
-        case .threeD:
-            ComingSoonCanvas(systemImage: "cube", title: "3D surface",
-                             message: "Segment a structure, then generate a mesh here.")
-        case .export:
-            ComingSoonCanvas(systemImage: "square.and.arrow.up", title: "Export",
-                             message: "Export slice PNGs, an STL mesh, or a metadata report.")
+        case .threeD, .export:
+            MeshCanvas()
         }
     }
 }
@@ -111,42 +108,3 @@ private struct AppHeader: View {
     }
 }
 
-// Placeholder control panel for tabs not yet wired (Segment / 3D / Export in P0).
-private struct ComingSoonPanel: View {
-    let tab: WorkspaceTab
-    var body: some View {
-        VStack(spacing: 10) {
-            Image(systemName: tab.icon)
-                .font(.system(size: 30, weight: .light))
-                .foregroundStyle(.secondary)
-            Text("\(tab.title) controls")
-                .font(.callout.weight(.medium))
-            Text("Coming in this build.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Spacer()
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.top, 30)
-        .padding(.horizontal, 18)
-    }
-}
-
-private struct ComingSoonCanvas: View {
-    let systemImage: String
-    let title: String
-    let message: String
-    var body: some View {
-        VStack(spacing: 14) {
-            Image(systemName: systemImage)
-                .font(.system(size: 52, weight: .thin))
-                .foregroundStyle(.secondary)
-            Text(title)
-                .font(.title3.weight(.medium))
-            Text(message)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(nsColor: .underPageBackgroundColor))
-    }
-}
