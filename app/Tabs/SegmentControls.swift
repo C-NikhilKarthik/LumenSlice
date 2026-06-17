@@ -20,6 +20,7 @@ struct SegmentControls: View {
                 segmentsSection
                 toolSection
                 toolDetailSection
+                refineSection
                 cleanupSection
                 editSection
             }
@@ -147,6 +148,33 @@ struct SegmentControls: View {
         }
     }
 
+    // MARK: - Refine (margin + smooth)
+
+    private var refineSection: some View {
+        Section("Refine") {
+            Text("Grow/shrink the active segment by one voxel, or smooth its edges.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                Button { seg.shrinkMargin() } label: {
+                    Label("Shrink", systemImage: "minus.magnifyingglass")
+                        .frame(maxWidth: .infinity)
+                }
+                Button { seg.growMargin() } label: {
+                    Label("Grow", systemImage: "plus.magnifyingglass")
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            Button { seg.smooth() } label: {
+                Label("Smooth edges", systemImage: "wand.and.rays")
+                    .frame(maxWidth: .infinity)
+            }
+        }
+        .disabled(seg.activeID == 0)
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+    }
+
     // MARK: - Cleanup (islands)
 
     private var cleanupSection: some View {
@@ -262,6 +290,7 @@ private struct SegmentListRow: View {
     let seg: SegmentationModel
 
     @State private var editingName: String = ""
+    @State private var showColors = false
     @FocusState private var nameFocused: Bool
 
     var body: some View {
@@ -274,11 +303,24 @@ private struct SegmentListRow: View {
             }
             .buttonStyle(.borderless)
 
-            ColorPicker("", selection: Binding(
-                get: { row.color },
-                set: { seg.setColor(row.id, $0) }), supportsOpacity: false)
-                .labelsHidden()
-                .frame(width: 20)
+            // A plain swatch + popover palette, NOT SwiftUI's ColorPicker — the
+            // latter drives the shared NSColorPanel, which lingers and re-opens on
+            // every launch.
+            Button {
+                showColors.toggle()
+            } label: {
+                Circle()
+                    .fill(row.color)
+                    .frame(width: 15, height: 15)
+                    .overlay(Circle().strokeBorder(.white.opacity(0.35), lineWidth: 1))
+            }
+            .buttonStyle(.borderless)
+            .popover(isPresented: $showColors, arrowEdge: .bottom) {
+                ColorPalettePopover(selected: row.color) { picked in
+                    seg.setColor(row.id, picked)
+                    showColors = false
+                }
+            }
 
             TextField("Name", text: $editingName)
                 .textFieldStyle(.plain)
@@ -312,5 +354,35 @@ private struct SegmentListRow: View {
 
     private func commitName() {
         if editingName != row.name { seg.rename(row.id, to: editingName) }
+    }
+}
+
+// A small grid of preset colour swatches shown in a popover. Replaces SwiftUI's
+// ColorPicker so we never touch the shared NSColorPanel (which otherwise lingers
+// and re-opens on every launch).
+private struct ColorPalettePopover: View {
+    let selected: Color
+    let onPick: (Color) -> Void
+
+    private let columns = Array(repeating: GridItem(.fixed(26), spacing: 8), count: 4)
+
+    var body: some View {
+        LazyVGrid(columns: columns, spacing: 8) {
+            ForEach(Array(SegmentationModel.paletteColors.enumerated()), id: \.offset) {
+                _, color in
+                Button {
+                    onPick(color)
+                } label: {
+                    Circle()
+                        .fill(color)
+                        .frame(width: 22, height: 22)
+                        .overlay(
+                            Circle().strokeBorder(.primary.opacity(0.6), lineWidth: 2)
+                                .opacity(color == selected ? 1 : 0))
+                }
+                .buttonStyle(.borderless)
+            }
+        }
+        .padding(12)
     }
 }

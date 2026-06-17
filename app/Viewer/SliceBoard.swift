@@ -8,6 +8,8 @@ struct SliceBoard: View {
     @Binding var dropTargeted: Bool
     // Non-nil on the Segment tab: enables the mask overlay + seed/paint gestures.
     var segment: SegmentationModel? = nil
+    // When set, a single pane is maximized to fill the viewport; nil = tri-pane grid.
+    @State private var focusedAxis: Int?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -20,14 +22,25 @@ struct SliceBoard: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if model.hasVolume {
-                VStack(spacing: 12) {
-                    SlicePane(axis: 0, segment: segment)
-                        .frame(maxHeight: .infinity)
-                    HStack(spacing: 12) {
-                        SlicePane(axis: 1, segment: segment)
-                        SlicePane(axis: 2, segment: segment)
+                Group {
+                    if let f = focusedAxis {
+                        SlicePane(axis: f, segment: segment, isFocused: true,
+                                  onToggleFocus: { focusedAxis = nil })
+                            .frame(maxHeight: .infinity)
+                    } else {
+                        VStack(spacing: 12) {
+                            SlicePane(axis: 0, segment: segment,
+                                      onToggleFocus: { focusedAxis = 0 })
+                                .frame(maxHeight: .infinity)
+                            HStack(spacing: 12) {
+                                SlicePane(axis: 1, segment: segment,
+                                          onToggleFocus: { focusedAxis = 1 })
+                                SlicePane(axis: 2, segment: segment,
+                                          onToggleFocus: { focusedAxis = 2 })
+                            }
+                            .frame(maxHeight: .infinity)
+                        }
                     }
-                    .frame(maxHeight: .infinity)
                 }
                 .padding(14)
             } else {

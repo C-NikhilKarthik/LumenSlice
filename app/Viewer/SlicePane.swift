@@ -5,11 +5,20 @@ import SwiftUI
 // Navigation (3D-Slicer-style): click to locate (recenters all panes), mouse
 // wheel scrolls slices, left-drag adjusts window/level. On the Segment tab the
 // active tool owns the canvas instead: paint/erase brush along a drag (with a
-// cursor ring), or region-grow seed on a click.
+// cursor ring), or region-grow seed on a click. A header button maximizes this
+// pane to fill the viewport.
 struct SlicePane: View {
     @EnvironmentObject var model: VolumeModel
     let axis: Int
     var segment: SegmentationModel? = nil
+    var isFocused: Bool = false
+    var onToggleFocus: (() -> Void)? = nil
+
+    // Live cursor position over this pane (for the brush ring), and paint-stroke
+    // bookkeeping so a drag is one continuous, gap-free, single-undo stroke.
+    @State private var pointer: CGPoint?
+    @State private var lastPaintPixel: (px: Int, py: Int)?
+    @State private var strokeActive = false
 
     var body: some View {
         let count = model.sliceCount(axis)
@@ -22,6 +31,15 @@ struct SlicePane: View {
                     .font(.caption)
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
+                if let onToggleFocus {
+                    Button(action: onToggleFocus) {
+                        Image(systemName: isFocused
+                              ? "arrow.down.right.and.arrow.up.left"
+                              : "arrow.up.left.and.arrow.down.right")
+                    }
+                    .buttonStyle(.borderless)
+                    .help(isFocused ? "Restore layout" : "Maximize this view")
+                }
             }
 
             imageArea
@@ -48,6 +66,7 @@ struct SlicePane: View {
         GeometryReader { geo in
             let aspect = model.physicalAspect(axis)
             let container = geo.size
+            let fitted = SliceCoordinates.fittedRect(container: container, aspect: aspect)
             ZStack {
                 RoundedRectangle(cornerRadius: 10)
                     .fill(.black)
@@ -58,31 +77,29 @@ struct SlicePane: View {
                         .aspectRatio(aspect, contentMode: .fit)
                         .padding(8)
                 }
-                if let seg = segment, seg.showOverlay, let ov = seg.overlays[axis] {
-                    Image(decorative: ov, scale: 1)
-                        .resizable()
-                        .interpolation(.none)
-                        .aspectRatio(aspect, contentMode: .fit)
-                        .padding(8)
-                        .allowsHitTesting(false)
+                if let seg = segment, seg.showOverlay {
+                    MaskOverlay(store: seg.overlayStore, axis: axis, aspect: aspect)
                 }
-                let colors = PlaneColors.forPane(axis)
-                let fitted = SliceCoordinates.fittedRect(container: container, aspect: aspect)
-                CrosshairOverlay(
-                    point: crosshairPoint(container: container, aspect: aspect),
-                    rect: fitted,
-                    verticalColor: colors.vertical,
-                    horizontalColor: colors.horizontal)
-                OrientationLabels(axis: axis, rect: fitted)
+                if model.showCrosshair {
+                    let colors = PlaneColors.forPane(axis)
+                    CrosshairOverlay(
+                        point: crosshairPoint(container: container, aspect: aspect),
+                        rect: fitted,
+                        verticalColor: colors.vertical,
+                        horizontalColor: colors.horizontal)
+                }
+                if model.showOrientationLabels {
+                    OrientationLabels(axis: axis, rect: fitted)
+                }
+                brushRing(fitted: fitted)
             }
             .clipShape(RoundedRectangle(cornerRadius: 10))
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .contentShape(Rectangle())
-            .modifier(InteractionModifier(model: model, axis: axis,
-                                          segment: segment, container: container))
-            .overlay(ScrollCatcher { step in
-                model.setSlice(axis, model.sliceIndex[axis] + step)
-            })
+            .modifier(SliceInteraction(pane: self, container: container))
+            .overlay(CanvasInputCatcher(
+                onStep: { model.setSlice(axis, model.sliceIndex[axis] + $0) },
+                onMove: { pointer = $0 }))
             .overlay(alignment: .bottomLeading) {
                 Text("W \(Int(model.window))  L \(Int(model.level))")
                     .font(.caption2.monospacedDigit())
@@ -95,6 +112,21 @@ struct SlicePane: View {
         }
     }
 
+    // The brush footprint: a ring sized to brushRadius (slice pixels) scaled into
+    // display points, tinted by the active segment (red while erasing).
+    @ViewBuilder private func brushRing(fitted: CGRect?) -> some View {
+        if let seg = segment, seg.tool.isBrush, let p = pointer,
+           let img = model.images[axis], let rect = fitted, rect.contains(p) {
+            let scale = rect.width / CGFloat(img.width)
+            let diameter = CGFloat(seg.brushRadius) * scale * 2
+            Circle()
+                .stroke(seg.tool == .erase ? Color.red : seg.activeColor, lineWidth: 1.5)
+                .frame(width: diameter, height: diameter)
+                .position(p)
+                .allowsHitTesting(false)
+        }
+    }
+
     private func crosshairPoint(container: CGSize, aspect: CGFloat) -> CGPoint? {
         guard let img = model.images[axis],
               let c = model.crosshairPixel(onAxis: axis) else { return nil }
@@ -102,82 +134,10 @@ struct SlicePane: View {
                                       imageWidth: img.width, imageHeight: img.height,
                                       aspect: aspect)
     }
-}
 
-// Picks the canvas interaction. Visualize: click = locate (linked navigation),
-// left-drag = window/level. Segment: the active tool owns the canvas — paint/erase
-// drags the brush (with a cursor ring), region-grow seeds on a click, threshold has
-// no canvas action. Mouse-wheel slice scroll is handled separately by ScrollCatcher.
-private struct InteractionModifier: ViewModifier {
-    let model: VolumeModel
-    let axis: Int
-    let segment: SegmentationModel?
-    let container: CGSize
+    // MARK: - Interaction helpers (called from SliceInteraction)
 
-    @State private var brushLocation: CGPoint?
-    @State private var strokeActive = false
-
-    func body(content: Content) -> some View {
-        if let seg = segment {
-            content
-                .gesture(segmentDrag(seg))
-                .onContinuousHover { phase in
-                    guard seg.tool.isBrush else { brushLocation = nil; return }
-                    switch phase {
-                    case .active(let p): brushLocation = p
-                    case .ended: brushLocation = nil
-                    }
-                }
-                .overlay { brushRing(seg) }
-        } else {
-            content
-                .windowLevelDrag(model)
-                .simultaneousGesture(
-                    SpatialTapGesture(coordinateSpace: .local)
-                        .onEnded { value in handleLocate(at: value.location) }
-                )
-        }
-    }
-
-    private func segmentDrag(_ seg: SegmentationModel) -> some Gesture {
-        DragGesture(minimumDistance: 0, coordinateSpace: .local)
-            .onChanged { value in
-                brushLocation = value.location
-                guard seg.tool.isBrush else { return }
-                if !strokeActive { seg.beginStroke(); strokeActive = true }
-                paint(seg, at: value.location)
-            }
-            .onEnded { value in
-                if seg.tool.isBrush {
-                    if !strokeActive { seg.beginStroke() }
-                    paint(seg, at: value.location)
-                    seg.endStroke()
-                    strokeActive = false
-                } else if seg.tool == .regionGrow {
-                    seed(seg, at: value.location)
-                }
-            }
-    }
-
-    // The brush footprint: a ring sized to brushRadius (slice pixels) scaled into
-    // display points, tinted by the active segment (red while erasing).
-    @ViewBuilder private func brushRing(_ seg: SegmentationModel) -> some View {
-        if seg.tool.isBrush, let loc = brushLocation, let img = model.images[axis],
-           let rect = SliceCoordinates.fittedRect(
-            container: container, aspect: model.physicalAspect(axis)),
-           rect.contains(loc) {
-            let scale = rect.width / CGFloat(img.width)
-            let diameter = CGFloat(seg.brushRadius) * scale * 2
-            Circle()
-                .stroke(seg.tool == .erase ? Color.red : seg.activeColor,
-                        lineWidth: 1.5)
-                .frame(width: diameter, height: diameter)
-                .position(loc)
-                .allowsHitTesting(false)
-        }
-    }
-
-    private func pixel(at point: CGPoint) -> (x: Int, y: Int)? {
+    fileprivate func pixel(at point: CGPoint, container: CGSize) -> (x: Int, y: Int)? {
         guard let img = model.images[axis] else { return nil }
         return SliceCoordinates.pixel(
             forTap: point, container: container,
@@ -185,19 +145,83 @@ private struct InteractionModifier: ViewModifier {
             aspect: model.physicalAspect(axis))
     }
 
-    private func handleLocate(at point: CGPoint) {
-        guard let (px, py) = pixel(at: point),
+    fileprivate func locate(at point: CGPoint, container: CGSize) {
+        guard let (px, py) = pixel(at: point, container: container),
               let voxel = model.voxel(onAxis: axis, px: px, py: py) else { return }
         model.jump(to: voxel)
     }
 
-    private func paint(_ seg: SegmentationModel, at point: CGPoint) {
-        guard let (px, py) = pixel(at: point) else { return }
-        seg.paintAt(axis: axis, px: px, py: py)
+    fileprivate func brushChanged(_ seg: SegmentationModel, at point: CGPoint,
+                                  container: CGSize) {
+        pointer = point
+        guard seg.tool.isBrush else { return }
+        if !strokeActive { seg.beginStroke(); strokeActive = true; lastPaintPixel = nil }
+        paintMove(seg, to: point, container: container)
     }
 
-    private func seed(_ seg: SegmentationModel, at point: CGPoint) {
-        guard let (px, py) = pixel(at: point) else { return }
-        seg.seedRegionGrow(axis: axis, px: px, py: py)
+    fileprivate func brushEnded(_ seg: SegmentationModel, at point: CGPoint,
+                                container: CGSize) {
+        if seg.tool.isBrush {
+            if !strokeActive { seg.beginStroke(); strokeActive = true; lastPaintPixel = nil }
+            paintMove(seg, to: point, container: container)
+            seg.endStroke()
+            strokeActive = false
+            lastPaintPixel = nil
+        } else if seg.tool == .regionGrow {
+            if let (px, py) = pixel(at: point, container: container) {
+                seg.seedRegionGrow(axis: axis, px: px, py: py)
+            }
+        }
+    }
+
+    private func paintMove(_ seg: SegmentationModel, to point: CGPoint,
+                           container: CGSize) {
+        guard let (px, py) = pixel(at: point, container: container) else { return }
+        seg.paintStroke(axis: axis, from: lastPaintPixel, to: (px, py))
+        lastPaintPixel = (px, py)
+    }
+}
+
+// The mask overlay, in its own observed view so a paint stroke (which republishes
+// only OverlayStore) re-renders just this layer and not the whole control panel.
+private struct MaskOverlay: View {
+    @ObservedObject var store: OverlayStore
+    let axis: Int
+    let aspect: CGFloat
+
+    var body: some View {
+        if let ov = store.images[axis] {
+            Image(decorative: ov, scale: 1)
+                .resizable()
+                .interpolation(.none)
+                .aspectRatio(aspect, contentMode: .fit)
+                .padding(8)
+                .allowsHitTesting(false)
+        }
+    }
+}
+
+// Picks the canvas interaction. Visualize: click = locate (linked navigation),
+// left-drag = window/level. Segment: the active tool owns the canvas — paint/erase
+// drags the brush, region-grow seeds on a click, threshold has no canvas action.
+private struct SliceInteraction: ViewModifier {
+    let pane: SlicePane
+    let container: CGSize
+
+    func body(content: Content) -> some View {
+        if let seg = pane.segment {
+            content.gesture(
+                DragGesture(minimumDistance: 0, coordinateSpace: .local)
+                    .onChanged { pane.brushChanged(seg, at: $0.location, container: container) }
+                    .onEnded { pane.brushEnded(seg, at: $0.location, container: container) }
+            )
+        } else {
+            content
+                .windowLevelDrag(pane.model)
+                .simultaneousGesture(
+                    SpatialTapGesture(coordinateSpace: .local)
+                        .onEnded { pane.locate(at: $0.location, container: container) }
+                )
+        }
     }
 }

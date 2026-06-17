@@ -357,6 +357,47 @@ static void test_undo() {
           "history is capped at kDepth states");
 }
 
+// 13. Margin (grow/shrink) and smooth on the active label.
+static void test_morphology() {
+    std::printf("margin + smooth\n");
+    Volume v = make_volume(9, 0.0f);
+
+    // Solid 3x3x3 cube of label 1 at [3..5].
+    LabelVolume cube;
+    cube.reset_to(v);
+    for (int z = 3; z <= 5; ++z)
+        for (int y = 3; y <= 5; ++y)
+            for (int x = 3; x <= 5; ++x) cube.set(x, y, z, 1);
+    CHECK(cube.count_nonzero() == 27, "cube starts at 27 voxels");
+
+    // Erode by 1: only the fully-interior centre voxel survives.
+    LabelVolume eroded = cube;
+    const long removed = erode_label(eroded, 1, 1);
+    CHECK(removed == 26, "erode-1 peels the 26-voxel shell");
+    CHECK(eroded.count_nonzero() == 1, "only the centre voxel remains");
+    CHECK(eroded.at(4, 4, 4) == 1, "centre voxel is the survivor");
+
+    // Dilate by 1: claims the face-adjacent background shell, leaves cube intact.
+    LabelVolume grown = cube;
+    const long added = dilate_label(grown, 1, 1);
+    CHECK(added > 0, "dilate-1 adds voxels");
+    CHECK(grown.at(2, 4, 4) == 1, "background just outside a face is claimed");
+    CHECK(grown.at(4, 4, 4) == 1, "interior stays labelled");
+
+    // Dilate never steals from another segment.
+    LabelVolume two = cube;
+    two.set(2, 4, 4, 2); // a segment-2 voxel touching the cube's face
+    dilate_label(two, 1, 1);
+    CHECK(two.at(2, 4, 4) == 2, "dilate does not overwrite another segment");
+
+    // Smooth: a lone voxel is a minority everywhere and gets removed.
+    LabelVolume lone;
+    lone.reset_to(v);
+    lone.set(4, 4, 4, 1);
+    const long changed = smooth_label(lone, 1, 1);
+    CHECK(changed == 1 && lone.count_nonzero() == 0, "smooth deletes a lone voxel");
+}
+
 int main() {
     std::printf("== SegTest ==\n");
     test_plane_map_roundtrip();
@@ -371,6 +412,7 @@ int main() {
     test_otsu();
     test_islands();
     test_undo();
+    test_morphology();
     if (g_failures == 0) {
         std::printf("All segmentation tests passed.\n");
         return 0;

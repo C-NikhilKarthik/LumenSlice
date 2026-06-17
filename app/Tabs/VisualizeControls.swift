@@ -83,6 +83,11 @@ struct VisualizeControls: View {
                     }
                     .padding(.top, 2)
                 }
+
+                Section("Overlays") {
+                    Toggle("Crosshair lines", isOn: $model.showCrosshair)
+                    Toggle("Orientation labels", isOn: $model.showOrientationLabels)
+                }
             }
         }
         .formStyle(.grouped)

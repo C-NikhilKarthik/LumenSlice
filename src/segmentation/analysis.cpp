@@ -139,4 +139,100 @@ long remove_small_islands(LabelVolume& mask, std::uint8_t label, long min_voxels
     return removed;
 }
 
+long dilate_label(LabelVolume& mask, std::uint8_t label, int iterations) {
+    if (!mask.valid() || label == 0 || iterations <= 0) return 0;
+    const int w = mask.width(), h = mask.height(), d = mask.depth();
+    std::uint8_t* data = mask.data();
+    long added = 0;
+    std::vector<std::size_t> frontier;
+    for (int it = 0; it < iterations; ++it) {
+        frontier.clear();
+        for (int z = 0; z < d; ++z)
+            for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x) {
+                    const std::size_t idx = mask.index(x, y, z);
+                    if (data[idx] != 0) continue; // only claim background
+                    bool touches = false;
+                    for (int n = 0; n < 6 && !touches; ++n) {
+                        const int nx = x + kNx[n], ny = y + kNy[n], nz = z + kNz[n];
+                        if (nx < 0 || ny < 0 || nz < 0 || nx >= w || ny >= h || nz >= d)
+                            continue;
+                        if (data[mask.index(nx, ny, nz)] == label) touches = true;
+                    }
+                    if (touches) frontier.push_back(idx);
+                }
+        for (std::size_t idx : frontier) { data[idx] = label; ++added; }
+        if (frontier.empty()) break;
+    }
+    return added;
+}
+
+long erode_label(LabelVolume& mask, std::uint8_t label, int iterations) {
+    if (!mask.valid() || label == 0 || iterations <= 0) return 0;
+    const int w = mask.width(), h = mask.height(), d = mask.depth();
+    std::uint8_t* data = mask.data();
+    long removed = 0;
+    std::vector<std::size_t> boundary;
+    for (int it = 0; it < iterations; ++it) {
+        boundary.clear();
+        for (int z = 0; z < d; ++z)
+            for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x) {
+                    const std::size_t idx = mask.index(x, y, z);
+                    if (data[idx] != label) continue;
+                    bool edge = false;
+                    for (int n = 0; n < 6 && !edge; ++n) {
+                        const int nx = x + kNx[n], ny = y + kNy[n], nz = z + kNz[n];
+                        if (nx < 0 || ny < 0 || nz < 0 || nx >= w || ny >= h ||
+                            nz >= d) {
+                            edge = true; // volume face counts as outside
+                        } else if (data[mask.index(nx, ny, nz)] != label) {
+                            edge = true;
+                        }
+                    }
+                    if (edge) boundary.push_back(idx);
+                }
+        for (std::size_t idx : boundary) { data[idx] = 0; ++removed; }
+        if (boundary.empty()) break;
+    }
+    return removed;
+}
+
+long smooth_label(LabelVolume& mask, std::uint8_t label, int iterations) {
+    if (!mask.valid() || label == 0 || iterations <= 0) return 0;
+    const int w = mask.width(), h = mask.height(), d = mask.depth();
+    std::uint8_t* data = mask.data();
+    const std::size_t n = mask.voxel_count();
+    std::vector<std::uint8_t> src(n);
+    long changed = 0;
+    for (int it = 0; it < iterations; ++it) {
+        for (std::size_t i = 0; i < n; ++i) src[i] = (data[i] == label) ? 1 : 0;
+        for (int z = 0; z < d; ++z)
+            for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x) {
+                    int count = 0, total = 0;
+                    for (int dz = -1; dz <= 1; ++dz)
+                        for (int dy = -1; dy <= 1; ++dy)
+                            for (int dx = -1; dx <= 1; ++dx) {
+                                const int nx = x + dx, ny = y + dy, nz = z + dz;
+                                if (nx < 0 || ny < 0 || nz < 0 || nx >= w ||
+                                    ny >= h || nz >= d)
+                                    continue;
+                                ++total;
+                                count += src[mask.index(nx, ny, nz)];
+                            }
+                    const bool want = count * 2 > total; // strict majority -> label
+                    const std::size_t idx = mask.index(x, y, z);
+                    if (want && data[idx] == 0) {
+                        data[idx] = label; // claim background only
+                        ++changed;
+                    } else if (!want && data[idx] == label) {
+                        data[idx] = 0;     // clear own label only
+                        ++changed;
+                    }
+                }
+    }
+    return changed;
+}
+
 } // namespace lumen

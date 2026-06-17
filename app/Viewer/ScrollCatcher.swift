@@ -1,48 +1,72 @@
 import SwiftUI
 import AppKit
 
-// Captures mouse-wheel / two-finger scroll over a slice pane and reports discrete
-// slice steps. SwiftUI has no scroll-wheel gesture, so this wraps an NSView that
-// installs a local scroll-event monitor. The view is transparent to mouse clicks
-// (hitTest returns nil), so tap-to-locate and window/level drag still reach the
-// SwiftUI layer underneath.
-struct ScrollCatcher: NSViewRepresentable {
-    let onStep: (Int) -> Void // signed number of slices to move
+// Captures mouse-wheel / two-finger scroll over a slice pane (reported as discrete
+// slice steps) AND the live pointer position over the pane (for the paint brush
+// cursor). SwiftUI has no scroll-wheel gesture and its hover tracking is unreliable
+// under an overlapping NSView, so this wraps an NSView with local event monitors.
+// The view is transparent to mouse clicks (hitTest returns nil), so tap-to-locate,
+// window/level drag, and paint drags still reach the SwiftUI layer underneath.
+struct CanvasInputCatcher: NSViewRepresentable {
+    let onStep: (Int) -> Void          // signed number of slices to move
+    var onMove: ((CGPoint?) -> Void)?  // pointer in view coords, nil when outside
 
-    func makeNSView(context: Context) -> ScrollCatchNSView {
-        let view = ScrollCatchNSView()
+    func makeNSView(context: Context) -> CanvasInputNSView {
+        let view = CanvasInputNSView()
         view.onStep = onStep
+        view.onMove = onMove
         return view
     }
 
-    func updateNSView(_ view: ScrollCatchNSView, context: Context) {
+    func updateNSView(_ view: CanvasInputNSView, context: Context) {
         view.onStep = onStep
+        view.onMove = onMove
     }
 
-    static func dismantleNSView(_ view: ScrollCatchNSView, coordinator: ()) {
+    static func dismantleNSView(_ view: CanvasInputNSView, coordinator: ()) {
         view.teardown()
     }
 }
 
-final class ScrollCatchNSView: NSView {
+final class CanvasInputNSView: NSView {
     var onStep: ((Int) -> Void)?
-    private var monitor: Any?
+    var onMove: ((CGPoint?) -> Void)?
+    private var scrollMonitor: Any?
+    private var moveMonitor: Any?
     private var accumulated: CGFloat = 0
     private let threshold: CGFloat = 8
 
+    // Flip so our coordinate origin is top-left, matching SwiftUI's overlay space:
+    // a point reported here lines up with where the brush ring is drawn.
+    override var isFlipped: Bool { true }
+
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        guard monitor == nil, window != nil else { return }
-        monitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
-            guard let self, let win = self.window, event.window == win else { return event }
-            let p = self.convert(event.locationInWindow, from: nil)
-            guard self.bounds.contains(p) else { return event }
-            self.handle(event)
-            return nil // consume so a parent scroll view doesn't also react
+        guard let win = window else { return }
+        win.acceptsMouseMovedEvents = true
+
+        if scrollMonitor == nil {
+            scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) {
+                [weak self] event in
+                guard let self, let w = self.window, event.window == w else { return event }
+                let p = self.convert(event.locationInWindow, from: nil)
+                guard self.bounds.contains(p) else { return event }
+                self.handleScroll(event)
+                return nil // consume so a parent scroll view doesn't also react
+            }
+        }
+        if moveMonitor == nil {
+            moveMonitor = NSEvent.addLocalMonitorForEvents(
+                matching: [.mouseMoved, .leftMouseDragged]) { [weak self] event in
+                guard let self, let w = self.window, event.window == w else { return event }
+                let p = self.convert(event.locationInWindow, from: nil)
+                self.onMove?(self.bounds.contains(p) ? p : nil)
+                return event // never consume pointer movement
+            }
         }
     }
 
-    private func handle(_ event: NSEvent) {
+    private func handleScroll(_ event: NSEvent) {
         // Precise (trackpad) deltas are small + continuous; line (mouse wheel)
         // deltas are coarse. Scale lines up so one notch ~= one slice.
         accumulated += event.scrollingDeltaY * (event.hasPreciseScrollingDeltas ? 1 : 10)
@@ -54,12 +78,14 @@ final class ScrollCatchNSView: NSView {
     }
 
     func teardown() {
-        if let monitor { NSEvent.removeMonitor(monitor) }
-        monitor = nil
+        if let scrollMonitor { NSEvent.removeMonitor(scrollMonitor) }
+        if let moveMonitor { NSEvent.removeMonitor(moveMonitor) }
+        scrollMonitor = nil
+        moveMonitor = nil
     }
 
     deinit { teardown() }
 
-    // Transparent to mouse clicks/drags — only the scroll monitor uses this view.
+    // Transparent to mouse clicks/drags — only the event monitors use this view.
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
