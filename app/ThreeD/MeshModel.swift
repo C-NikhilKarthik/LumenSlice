@@ -42,14 +42,17 @@ final class MeshModel: ObservableObject {
         Task.detached(priority: .userInitiated) {
             guard let handle = OpaquePointer(bitPattern: bits) else { return }
             let tris = Int(lumen_mesh_generate(handle, smooth, ds)) // background
-            await MainActor.run { self.finishGenerate(handle: handle, tris: tris) }
+            // Hop back with the Sendable bit pattern only (an OpaquePointer is not
+            // Sendable); the model re-reads its own handle on the main actor.
+            await MainActor.run { self.finishGenerate(tris: tris) }
         }
     }
 
-    private func finishGenerate(handle: OpaquePointer, tris: Int) {
+    private func finishGenerate(tris: Int) {
+        guard let h = volume.handle else { isGenerating = false; return }
         triangleCount = tris
-        vertexCount = Int(lumen_mesh_vertex_count(handle))
-        geometry = MeshBuilder.geometry(from: handle)
+        vertexCount = Int(lumen_mesh_vertex_count(h))
+        geometry = MeshBuilder.geometry(from: h)
         isGenerating = false
     }
 
