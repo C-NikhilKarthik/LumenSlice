@@ -17,23 +17,30 @@ constexpr std::array<std::array<int, 3>, 6> kNeighbours = {{
 
 } // namespace
 
-void threshold_fill(const Volume& vol, float lo, float hi, LabelVolume& mask) {
-    if (!vol.valid() || !mask.valid()) return;
+void threshold_fill(const Volume& vol, float lo, float hi, LabelVolume& mask,
+                    std::uint8_t label) {
+    if (!vol.valid() || !mask.valid() || label == 0) return;
     if (lo > hi) std::swap(lo, hi);
 
     const float* hu = vol.voxel_buffer.get();
     std::uint8_t* out = mask.data();
     const std::size_t n = mask.voxel_count();
     for (std::size_t i = 0; i < n; ++i) {
-        const float v = hu[i];
-        out[i] = (v >= lo && v <= hi) ? kActiveLabel : 0;
+        const bool in = hu[i] >= lo && hu[i] <= hi;
+        if (out[i] == label) {
+            out[i] = in ? label : 0; // keep own voxel only while still in range
+        } else if (out[i] == 0 && in) {
+            out[i] = label;          // claim background in range
+        }
+        // voxels owned by other segments are left untouched
     }
 }
 
 long region_grow(const Volume& vol, int sx, int sy, int sz, float tol,
-                 LabelVolume& mask) {
-    if (!vol.valid() || !mask.valid()) return 0;
+                 LabelVolume& mask, std::uint8_t label) {
+    if (!vol.valid() || !mask.valid() || label == 0) return 0;
     if (!mask.in_bounds(sx, sy, sz)) return 0;
+    if (mask.at(sx, sy, sz) != 0) return 0; // seed already labelled
 
     const float seed_hu = vol.voxel_buffer[vol.index(sx, sy, sz)];
     const float lo = seed_hu - tol;
@@ -44,7 +51,7 @@ long region_grow(const Volume& vol, int sx, int sy, int sz, float tol,
     // whole fill at voxel_count().
     std::vector<VoxelCoord> stack;
     stack.push_back({sx, sy, sz});
-    mask.set(sx, sy, sz, kActiveLabel);
+    mask.set(sx, sy, sz, label);
     long added = 1;
 
     while (!stack.empty()) {
@@ -58,7 +65,7 @@ long region_grow(const Volume& vol, int sx, int sy, int sz, float tol,
             if (mask.at(nx, ny, nz) != 0) continue; // already labelled/visited
             const float v = vol.voxel_buffer[vol.index(nx, ny, nz)];
             if (v < lo || v > hi) continue;
-            mask.set(nx, ny, nz, kActiveLabel);
+            mask.set(nx, ny, nz, label);
             stack.push_back({nx, ny, nz});
             ++added;
         }
@@ -67,11 +74,10 @@ long region_grow(const Volume& vol, int sx, int sy, int sz, float tol,
 }
 
 long paint_disk(const Volume& vol, Axis axis, int index, int cx, int cy,
-                int radius, bool add, LabelVolume& mask) {
-    if (!vol.valid() || !mask.valid() || radius < 0) return 0;
+                int radius, bool add, LabelVolume& mask, std::uint8_t label) {
+    if (!vol.valid() || !mask.valid() || radius < 0 || label == 0) return 0;
 
     const SliceDims dims = slice_dims(vol, axis);
-    const std::uint8_t value = add ? kActiveLabel : 0;
     const int r2 = radius * radius;
     long changed = 0;
 
@@ -87,8 +93,14 @@ long paint_disk(const Volume& vol, Axis axis, int index, int cx, int cy,
             if (dx * dx + dy * dy > r2) continue;
             const VoxelCoord c = plane_to_voxel(vol, axis, index, px, py);
             if (!mask.in_bounds(c.x, c.y, c.z)) continue;
-            if (mask.at(c.x, c.y, c.z) != value) {
-                mask.set(c.x, c.y, c.z, value);
+            const std::uint8_t cur = mask.at(c.x, c.y, c.z);
+            if (add) {
+                if (cur != label) { // brush wins: overwrite whatever is here
+                    mask.set(c.x, c.y, c.z, label);
+                    ++changed;
+                }
+            } else if (cur == label) { // erase only the active segment
+                mask.set(c.x, c.y, c.z, 0);
                 ++changed;
             }
         }

@@ -1,10 +1,12 @@
 import SwiftUI
 import SceneKit
 
-// SceneKit viewport for the marching-cubes surface. Built-in camera control gives
-// orbit/zoom/pan; the camera is framed to the mesh whenever it changes.
+// SceneKit viewport for the marching-cubes surfaces. Built-in camera control gives
+// orbit/zoom/pan; the camera is framed to the meshes whenever they change. Each
+// visible segment is its own colored node; a small R/A/S axis gnomon at the volume
+// origin gives anatomical orientation.
 struct MeshSceneView: NSViewRepresentable {
-    var geometry: SCNGeometry?
+    var geometries: [SCNGeometry]
 
     func makeNSView(context: Context) -> SCNView {
         let view = SCNView()
@@ -18,15 +20,78 @@ struct MeshSceneView: NSViewRepresentable {
 
     func updateNSView(_ view: SCNView, context: Context) {
         guard let root = view.scene?.rootNode else { return }
-        root.childNodes.filter { $0.name == "mesh" }.forEach { $0.removeFromParentNode() }
-        guard let geometry else { return }
-        let node = SCNNode(geometry: geometry)
-        node.name = "mesh"
-        root.addChildNode(node)
-        // Frame the camera to the new geometry (deferred so bounds are ready).
-        DispatchQueue.main.async {
-            view.defaultCameraController.frameNodes([node])
+        root.childNodes
+            .filter { $0.name == "mesh" || $0.name == "gnomon" }
+            .forEach { $0.removeFromParentNode() }
+        guard !geometries.isEmpty else { return }
+
+        let meshNodes = geometries.map { geo -> SCNNode in
+            let node = SCNNode(geometry: geo)
+            node.name = "mesh"
+            return node
         }
+        meshNodes.forEach { root.addChildNode($0) }
+
+        // Size the gnomon to the scene so it reads at any zoom, and seat it at the
+        // volume origin (a corner of the data).
+        let (minB, maxB) = bounds(of: meshNodes)
+        let extent = max(maxB.x - minB.x, max(maxB.y - minB.y, maxB.z - minB.z))
+        let gnomon = Self.makeGnomon(length: CGFloat(max(extent, 1)) * 0.18)
+        gnomon.position = minB
+        root.addChildNode(gnomon)
+
+        // Frame the camera to the meshes (deferred so bounds are ready).
+        DispatchQueue.main.async {
+            view.defaultCameraController.frameNodes(meshNodes)
+        }
+    }
+
+    private func bounds(of nodes: [SCNNode]) -> (SCNVector3, SCNVector3) {
+        var lo = SCNVector3(Float.greatestFiniteMagnitude,
+                            Float.greatestFiniteMagnitude,
+                            Float.greatestFiniteMagnitude)
+        var hi = SCNVector3(-Float.greatestFiniteMagnitude,
+                            -Float.greatestFiniteMagnitude,
+                            -Float.greatestFiniteMagnitude)
+        for node in nodes {
+            let (nMin, nMax) = node.boundingBox // identity transform: local == world
+            lo = SCNVector3(min(lo.x, nMin.x), min(lo.y, nMin.y), min(lo.z, nMin.z))
+            hi = SCNVector3(max(hi.x, nMax.x), max(hi.y, nMax.y), max(hi.z, nMax.z))
+        }
+        if lo.x > hi.x { return (SCNVector3Zero, SCNVector3Zero) }
+        return (lo, hi)
+    }
+
+    // R (X, red) / A (Y, green) / S (Z, blue) axis indicator built from cylinders.
+    static func makeGnomon(length: CGFloat) -> SCNNode {
+        let group = SCNNode()
+        group.name = "gnomon"
+        let radius = max(length * 0.04, 0.3)
+
+        func axis(_ color: NSColor, euler: SCNVector3, offset: SCNVector3) -> SCNNode {
+            let cyl = SCNCylinder(radius: radius, height: length)
+            let mat = SCNMaterial()
+            mat.diffuse.contents = color
+            mat.emission.contents = color // visible regardless of lighting
+            cyl.materials = [mat]
+            let node = SCNNode(geometry: cyl)
+            node.eulerAngles = euler
+            node.position = offset
+            return node
+        }
+
+        let half = Float(length / 2)
+        // Cylinder's long axis is Y; rotate to X and Z, then push out by half-length.
+        group.addChildNode(axis(.systemRed,
+                                 euler: SCNVector3(0, 0, -Float.pi / 2),
+                                 offset: SCNVector3(half, 0, 0)))   // R / +X
+        group.addChildNode(axis(.systemGreen,
+                                 euler: SCNVector3(0, 0, 0),
+                                 offset: SCNVector3(0, half, 0)))   // A / +Y
+        group.addChildNode(axis(.systemBlue,
+                                 euler: SCNVector3(Float.pi / 2, 0, 0),
+                                 offset: SCNVector3(0, 0, half)))   // S / +Z
+        return group
     }
 }
 
@@ -38,8 +103,8 @@ struct MeshCanvas: View {
     var body: some View {
         ZStack {
             Color.black
-            if mesh.geometry != nil {
-                MeshSceneView(geometry: mesh.geometry)
+            if !mesh.geometries.isEmpty {
+                MeshSceneView(geometries: mesh.geometries)
             } else {
                 VStack(spacing: 12) {
                     Image(systemName: "cube.transparent")

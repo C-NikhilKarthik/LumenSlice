@@ -6,7 +6,9 @@ import LumenCore
 // vertex/normal/index data once into SCNGeometrySources/Element (SceneKit needs
 // to own it); the bridge buffers stay valid until the next generate.
 enum MeshBuilder {
-    static func geometry(from handle: OpaquePointer) -> SCNGeometry? {
+    static func geometry(from handle: OpaquePointer,
+                         color: NSColor = NSColor(calibratedRed: 0.87, green: 0.85,
+                                                  blue: 0.78, alpha: 1)) -> SCNGeometry? {
         let vcount = Int(lumen_mesh_vertex_count(handle))
         let icount = Int(lumen_mesh_index_count(handle))
         guard vcount > 0, icount > 0,
@@ -35,8 +37,7 @@ enum MeshBuilder {
 
         let geo = SCNGeometry(sources: [vSource, nSource], elements: [element])
         let material = SCNMaterial()
-        material.diffuse.contents = NSColor(calibratedRed: 0.87, green: 0.85,
-                                            blue: 0.78, alpha: 1) // bone-ish
+        material.diffuse.contents = color
         material.lightingModel = .physicallyBased
         material.roughness.contents = 0.55
         material.isDoubleSided = true

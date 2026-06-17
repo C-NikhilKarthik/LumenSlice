@@ -12,23 +12,29 @@
 
 namespace lumen {
 
-// Replace the entire mask: label kActiveLabel where lo <= HU <= hi, else 0.
-// O(voxels). `lo`/`hi` are swapped if given reversed.
-void threshold_fill(const Volume& vol, float lo, float hi, LabelVolume& mask);
+// Re-fill the ACTIVE segment from a HU window: every background-or-`label` voxel
+// with lo <= HU <= hi becomes `label`, and any `label` voxel now out of range is
+// cleared. Voxels owned by OTHER segments are left untouched, so thresholding one
+// segment never steals from another. O(voxels). `lo`/`hi` are swapped if reversed.
+void threshold_fill(const Volume& vol, float lo, float hi, LabelVolume& mask,
+                    std::uint8_t label = kActiveLabel);
 
 // 6-connected flood fill from voxel (sx,sy,sz) into BACKGROUND voxels whose HU is
-// within `tol` of the seed voxel's HU. Adds to the existing mask (does not clear
-// it). Returns the number of voxels newly labelled. No-op (returns 0) if the seed
-// is out of range. Bounded by the volume — visited voxels become labelled, so the
-// fill cannot revisit and cannot exceed voxel_count().
+// within `tol` of the seed voxel's HU; the filled voxels become `label`. Adds to
+// the existing mask (does not clear it) and stops at any already-labelled voxel.
+// Returns the number of voxels newly labelled. No-op (returns 0) if the seed is
+// out of range, or if it already carries a label.
 long region_grow(const Volume& vol, int sx, int sy, int sz, float tol,
-                 LabelVolume& mask);
+                 LabelVolume& mask, std::uint8_t label = kActiveLabel);
 
-// Paint or erase a filled disk on one slice plane (P1b). The disk is defined in
-// the 2D output-pixel space of `axis`/`index` (radius in pixels) and mapped back
-// to voxels via plane_map, so it honours the coronal/sagittal flip. Returns the
-// number of voxels changed.
+// Paint or erase a filled disk on one slice plane. The disk is defined in the 2D
+// output-pixel space of `axis`/`index` (radius in pixels) and mapped back to
+// voxels via plane_map, so it honours the coronal/sagittal flip. Paint (add) sets
+// `label`, overwriting whatever was there (the brush wins). Erase (!add) clears
+// only voxels that currently carry `label`, so erasing one segment cannot rub out
+// another. Returns the number of voxels changed.
 long paint_disk(const Volume& vol, Axis axis, int index, int cx, int cy,
-                int radius, bool add, LabelVolume& mask);
+                int radius, bool add, LabelVolume& mask,
+                std::uint8_t label = kActiveLabel);
 
 } // namespace lumen

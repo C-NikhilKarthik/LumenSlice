@@ -1,8 +1,9 @@
 import SwiftUI
 
-// Segment-tab controls: pick a tool, tune it, and see the mask grow. Threshold is
-// live (debounced); region-grow seeds on a click in the canvas. Paint/erase +
-// undo arrive in P1b.
+// Segment-tab controls: a multi-segment list (colour / visibility / name / active),
+// the active tool (threshold / grow / paint / erase) with its tuning, island
+// cleanup, and undo/redo. Threshold is live (debounced); grow seeds on a click;
+// paint/erase drag a brush in the canvas.
 struct SegmentControls: View {
     @EnvironmentObject var model: VolumeModel
     @EnvironmentObject var seg: SegmentationModel
@@ -16,51 +17,73 @@ struct SegmentControls: View {
                         .foregroundStyle(.secondary)
                 }
             } else {
-                Section("Tool") {
-                    Picker("Tool", selection: $seg.tool) {
-                        ForEach(SegTool.allCases) { tool in
-                            Label(tool.title, systemImage: tool.icon).tag(tool)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                }
-
-                switch seg.tool {
-                case .threshold:
-                    thresholdSection
-                case .regionGrow:
-                    regionGrowSection
-                }
-
-                Section("Mask") {
-                    Toggle("Show overlay", isOn: $seg.showOverlay)
-                    LabeledContent("Voxels", value: seg.voxelCount.formatted())
-                    Button(role: .destructive) {
-                        seg.clear()
-                    } label: {
-                        Label("Clear mask", systemImage: "trash")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .disabled(seg.voxelCount == 0)
-                }
-
-                Section {
-                    Text("Build a 3D surface from this mask in the 3D tab.")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
+                segmentsSection
+                toolSection
+                toolDetailSection
+                cleanupSection
+                editSection
             }
         }
         .formStyle(.grouped)
         .scrollContentBackground(.hidden)
     }
 
+    // MARK: - Segments
+
+    private var segmentsSection: some View {
+        Section {
+            ForEach(seg.segments) { row in
+                SegmentListRow(row: row,
+                               isActive: row.id == seg.activeID,
+                               seg: seg)
+            }
+            if seg.segments.isEmpty {
+                Text("No segments. Add one to start.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        } header: {
+            HStack {
+                Text("Segments")
+                Spacer()
+                Button {
+                    seg.addSegment()
+                } label: {
+                    Label("Add", systemImage: "plus.circle.fill")
+                        .labelStyle(.iconOnly)
+                }
+                .buttonStyle(.borderless)
+            }
+        }
+    }
+
+    // MARK: - Tool
+
+    private var toolSection: some View {
+        Section("Tool") {
+            Picker("Tool", selection: $seg.tool) {
+                ForEach(SegTool.allCases) { tool in
+                    Label(tool.title, systemImage: tool.icon).tag(tool)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .disabled(seg.activeID == 0)
+        }
+    }
+
+    @ViewBuilder private var toolDetailSection: some View {
+        switch seg.tool {
+        case .threshold: thresholdSection
+        case .regionGrow: regionGrowSection
+        case .paint, .erase: brushSection
+        }
+    }
+
     private var thresholdSection: some View {
         Section("Threshold (HU)") {
-            Text("Label every voxel in this HU range. Drag to update live.")
+            Text("Label every voxel in this HU range into the active segment. "
+                 + "Drag to update live.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
             huRow("Low", value: $seg.thresholdLo)
@@ -71,6 +94,15 @@ struct SegmentControls: View {
                 presetButton("Lung", lo: -900, hi: -400)
             }
             .padding(.top, 2)
+            Button {
+                seg.applyOtsu()
+            } label: {
+                Label("Otsu auto-threshold", systemImage: "wand.and.stars")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(seg.activeID == 0)
         }
     }
 
@@ -92,6 +124,105 @@ struct SegmentControls: View {
             }
         }
     }
+
+    private var brushSection: some View {
+        Section(seg.tool == .erase ? "Erase brush" : "Paint brush") {
+            Text(seg.tool == .erase
+                 ? "Drag over the slice to erase the active segment."
+                 : "Drag over the slice to paint the active segment.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("Brush radius")
+                    Spacer()
+                    Text("\(seg.brushRadius) px")
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                Slider(value: Binding(get: { Double(seg.brushRadius) },
+                                      set: { seg.brushRadius = Int($0) }),
+                       in: 1...80, step: 1)
+            }
+        }
+    }
+
+    // MARK: - Cleanup (islands)
+
+    private var cleanupSection: some View {
+        Section("Islands") {
+            Button {
+                seg.keepLargest()
+            } label: {
+                Label("Keep largest island", systemImage: "circle.circle")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(seg.activeID == 0)
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("Remove smaller than")
+                    Spacer()
+                    Text("\(seg.removeSmallMin) vox")
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                Slider(value: Binding(get: { Double(seg.removeSmallMin) },
+                                      set: { seg.removeSmallMin = Int($0) }),
+                       in: 2...1000, step: 1)
+                Button {
+                    seg.removeSmall()
+                } label: {
+                    Label("Remove small islands", systemImage: "scribble")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(seg.activeID == 0)
+            }
+        }
+    }
+
+    // MARK: - Edit
+
+    private var editSection: some View {
+        Section("Edit") {
+            HStack(spacing: 8) {
+                Button {
+                    seg.undo()
+                } label: {
+                    Label("Undo", systemImage: "arrow.uturn.backward")
+                        .frame(maxWidth: .infinity)
+                }
+                .disabled(!seg.canUndo)
+                Button {
+                    seg.redo()
+                } label: {
+                    Label("Redo", systemImage: "arrow.uturn.forward")
+                        .frame(maxWidth: .infinity)
+                }
+                .disabled(!seg.canRedo)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+
+            Toggle("Show overlay", isOn: $seg.showOverlay)
+            LabeledContent("Total voxels", value: seg.voxelCount.formatted())
+            Button(role: .destructive) {
+                seg.clearActive()
+            } label: {
+                Label("Clear active segment", systemImage: "trash")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(seg.activeID == 0)
+        }
+    }
+
+    // MARK: - Helpers
 
     private func huRow(_ title: String, value: Binding<Float>) -> some View {
         let lo = model.huLo
@@ -119,5 +250,67 @@ struct SegmentControls: View {
         .buttonStyle(.bordered)
         .controlSize(.small)
         .frame(maxWidth: .infinity)
+    }
+}
+
+// One segment list row: visibility eye, colour well, editable name, voxel count,
+// active selection, and delete. Tapping the row (outside the controls) makes it
+// active. Name edits commit on Return / focus loss to avoid per-keystroke churn.
+private struct SegmentListRow: View {
+    let row: SegmentRow
+    let isActive: Bool
+    let seg: SegmentationModel
+
+    @State private var editingName: String = ""
+    @FocusState private var nameFocused: Bool
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Button {
+                seg.setVisible(row.id, !row.visible)
+            } label: {
+                Image(systemName: row.visible ? "eye.fill" : "eye.slash")
+                    .foregroundStyle(row.visible ? .primary : .secondary)
+            }
+            .buttonStyle(.borderless)
+
+            ColorPicker("", selection: Binding(
+                get: { row.color },
+                set: { seg.setColor(row.id, $0) }), supportsOpacity: false)
+                .labelsHidden()
+                .frame(width: 20)
+
+            TextField("Name", text: $editingName)
+                .textFieldStyle(.plain)
+                .focused($nameFocused)
+                .onSubmit { commitName() }
+                .onChange(of: nameFocused) { focused in if !focused { commitName() } }
+
+            Spacer(minLength: 4)
+
+            Text(row.voxels.formatted())
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(.secondary)
+
+            Button {
+                seg.removeSegment(row.id)
+            } label: {
+                Image(systemName: "trash")
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.borderless)
+        }
+        .padding(.vertical, 2)
+        .padding(.horizontal, 6)
+        .background(isActive ? Color.accentColor.opacity(0.18) : Color.clear,
+                    in: RoundedRectangle(cornerRadius: 6))
+        .contentShape(Rectangle())
+        .onTapGesture { seg.setActive(row.id) }
+        .onAppear { editingName = row.name }
+        .onChange(of: row.name) { newName in if !nameFocused { editingName = newName } }
+    }
+
+    private func commitName() {
+        if editingName != row.name { seg.rename(row.id, to: editingName) }
     }
 }

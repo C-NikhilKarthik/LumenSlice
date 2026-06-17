@@ -10,11 +10,16 @@
 
 #include "core/volume.h"
 #include "segmentation/label_volume.hpp"
+#include "segmentation/segment_table.hpp"
 #include "visualization/slice_view.h" // SliceImage
 
 namespace lumen {
 
-void ExtractMaskSlice(const Volume& vol, const LabelVolume& mask, Axis axis,
-                      int index, SliceImage& out);
+// Render the mask slice as a premultiplied-RGBA overlay: each voxel painted in its
+// segment's colour (from `table`), skipping hidden segments and background. Pixel-
+// exact with ExtractSlice for the same axis/index.
+void ExtractMaskSlice(const Volume& vol, const LabelVolume& mask,
+                      const SegmentTable& table, Axis axis, int index,
+                      SliceImage& out);
 
 } // namespace lumen

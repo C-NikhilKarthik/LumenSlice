@@ -35,11 +35,14 @@ struct LumenSliceApp: App {
 
     init() {
         // The segmentation + mesh models drive the same C++ volume handle the
-        // VolumeModel owns, so build them together and inject all three.
+        // VolumeModel owns, so build them together and inject all three. The mesh
+        // model reads the segment list to build one colored surface per segment.
         let volume = VolumeModel()
+        let segmentation = SegmentationModel(volume: volume)
         _model = StateObject(wrappedValue: volume)
-        _segmentation = StateObject(wrappedValue: SegmentationModel(volume: volume))
-        _mesh = StateObject(wrappedValue: MeshModel(volume: volume))
+        _segmentation = StateObject(wrappedValue: segmentation)
+        _mesh = StateObject(wrappedValue: MeshModel(volume: volume,
+                                                    segmentation: segmentation))
 
         // When running from a distributed .app bundle, DCMTK can't find its data
         // dictionary at the Homebrew path. Point it at the copy we bundle in

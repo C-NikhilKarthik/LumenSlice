@@ -2,43 +2,82 @@ import SwiftUI
 import Combine
 import LumenCore
 
-// The active segmentation tool (paint/erase land in P1b).
+// The active segmentation tool.
 enum SegTool: String, CaseIterable, Identifiable {
     case threshold
     case regionGrow
+    case paint
+    case erase
 
     var id: String { rawValue }
     var title: String {
         switch self {
         case .threshold: return "Threshold"
-        case .regionGrow: return "Region grow"
+        case .regionGrow: return "Grow"
+        case .paint: return "Paint"
+        case .erase: return "Erase"
         }
     }
     var icon: String {
         switch self {
         case .threshold: return "slider.horizontal.below.square.filled.and.square"
         case .regionGrow: return "drop.fill"
+        case .paint: return "paintbrush.pointed.fill"
+        case .erase: return "eraser.fill"
         }
     }
+    // Tools that paint along a drag (vs. a single click / slider).
+    var isBrush: Bool { self == .paint || self == .erase }
 }
 
-// Drives the C++ segmentation mask through the bridge and republishes a colored
-// overlay CGImage per plane. It shares VolumeModel's volume handle (read-only) and
-// re-extracts overlays whenever the slice indices change, a new volume loads, or
-// the mask is mutated — but only while the Segment tab is active, to avoid doing
-// overlay work the user can't see.
+// One row in the segment list. `id` is the C++ label byte (1..255); `name` lives
+// only here (UI-side), colour + visibility mirror the C++ SegmentTable.
+struct SegmentRow: Identifiable, Equatable {
+    let id: Int
+    var name: String
+    var color: Color
+    var visible: Bool
+    var voxels: Int
+}
+
+// Drives the C++ multi-segment mask through the bridge and republishes a colored
+// overlay CGImage per plane. Shares VolumeModel's volume handle (read-only for the
+// volume; it owns the mask + segment table living in the same C++ handle). All
+// edits target the active segment and are bracketed by undo snapshots.
 @MainActor
 final class SegmentationModel: ObservableObject {
     private let volume: VolumeModel
     private var cancellables = Set<AnyCancellable>()
 
-    @Published var tool: SegTool = .threshold
+    @Published var tool: SegTool = .threshold {
+        didSet { thresholdNeedsUndoCapture = true }
+    }
     @Published var thresholdLo: Float = 150
     @Published var thresholdHi: Float = 3000
     @Published var tolerance: Float = 120
-    @Published var showOverlay = true
-    @Published private(set) var voxelCount: Int = 0
+    @Published var brushRadius: Int = 12          // slice pixels
+    @Published var removeSmallMin: Int = 50       // islands cutoff (voxels)
+    @Published var showOverlay = true { didSet { refreshAllOverlays() } }
+
+    @Published private(set) var segments: [SegmentRow] = []
+    @Published var activeID: Int = 0
+    @Published private(set) var voxelCount: Int = 0          // total, all segments
+    @Published private(set) var canUndo = false
+    @Published private(set) var canRedo = false
     @Published private(set) var overlays: [CGImage?] = [nil, nil, nil]
+
+    // Names survive list rebuilds (the bridge only knows ids/colours/visibility).
+    private var names: [Int: String] = [:]
+    private var nextSegmentNumber = 1
+    // Coalesces a run of live-threshold edits into a single undo entry.
+    private var thresholdNeedsUndoCapture = true
+
+    // Distinct, readable segment colours, cycled as segments are added.
+    static let palette: [(Double, Double, Double)] = [
+        (0.00, 0.71, 0.82), (0.91, 0.35, 0.31), (0.47, 0.78, 0.35),
+        (0.96, 0.75, 0.27), (0.63, 0.47, 0.86), (0.94, 0.55, 0.78),
+        (0.35, 0.78, 0.78), (0.82, 0.59, 0.35),
+    ]
 
     // Set by the shell when the Segment tab is shown/hidden.
     var isActive = false {
@@ -48,9 +87,8 @@ final class SegmentationModel: ObservableObject {
     init(volume: VolumeModel) {
         self.volume = volume
 
-        // Live threshold: debounce the HU range so dragging doesn't recompute the
-        // whole-volume mask on every tick. Threshold replaces the mask, so it only
-        // makes sense while that tool is selected.
+        // Live threshold: debounce so dragging doesn't recompute the whole-volume
+        // mask on every tick. Only meaningful while the threshold tool is selected.
         Publishers.CombineLatest($thresholdLo, $thresholdHi)
             .debounce(for: .milliseconds(180), scheduler: RunLoop.main)
             .sink { [weak self] _, _ in
@@ -67,46 +105,221 @@ final class SegmentationModel: ObservableObject {
             }
             .store(in: &cancellables)
 
-        // A fresh volume resets the mask (the bridge clears it on load).
+        // A fresh volume resets the mask + segment table (the bridge re-creates one
+        // default segment on load); rebuild our mirror to match.
         volume.$hasVolume
             .sink { [weak self] has in
                 guard let self else { return }
-                self.voxelCount = 0
+                self.names.removeAll()
+                self.nextSegmentNumber = 1
                 self.overlays = [nil, nil, nil]
-                if has, self.isActive { self.refreshAllOverlays() }
+                if has {
+                    self.reloadSegments()
+                    if self.isActive { self.refreshAllOverlays() }
+                } else {
+                    self.segments = []
+                    self.activeID = 0
+                    self.voxelCount = 0
+                }
             }
             .store(in: &cancellables)
     }
 
-    // MARK: - Operations
+    var activeColor: Color {
+        segments.first { $0.id == activeID }?.color ?? .accentColor
+    }
+
+    // MARK: - Segment list
+
+    func reloadSegments() {
+        guard let h = volume.handle else { segments = []; return }
+        let count = Int(lumen_seg_segment_count(h))
+        var rows: [SegmentRow] = []
+        rows.reserveCapacity(count)
+        for i in 0..<count {
+            let id = Int(lumen_seg_segment_id_at(h, Int32(i)))
+            guard id > 0 else { continue }
+            var r: Int32 = 0, g: Int32 = 0, b: Int32 = 0
+            lumen_seg_get_color(h, Int32(id), &r, &g, &b)
+            let visible = lumen_seg_get_visible(h, Int32(id)) != 0
+            let voxels = Int(lumen_seg_label_count(h, Int32(id)))
+            let name = names[id] ?? defaultName(for: id)
+            names[id] = name
+            rows.append(SegmentRow(
+                id: id,
+                name: name,
+                color: Color(.sRGB, red: Double(r) / 255, green: Double(g) / 255,
+                             blue: Double(b) / 255),
+                visible: visible,
+                voxels: voxels))
+        }
+        segments = rows
+        activeID = Int(lumen_seg_active(h))
+        voxelCount = Int(lumen_seg_count(h))
+        refreshUndoState()
+    }
+
+    private func defaultName(for id: Int) -> String {
+        let name = "Segment \(nextSegmentNumber)"
+        nextSegmentNumber += 1
+        return name
+    }
+
+    func addSegment() {
+        guard let h = volume.handle else { return }
+        let (r, g, b) = Self.palette[segments.count % Self.palette.count]
+        let id = Int(lumen_seg_add(h, Int32(r * 255), Int32(g * 255), Int32(b * 255)))
+        guard id > 0 else { return }
+        reloadSegments()
+        if tool == .threshold { tool = .paint } // new empty segment -> paint into it
+        thresholdNeedsUndoCapture = true
+    }
+
+    func removeSegment(_ id: Int) {
+        guard let h = volume.handle else { return }
+        lumen_seg_push_undo(h)
+        lumen_seg_remove(h, Int32(id))
+        names[id] = nil
+        reloadSegments()
+        refreshAllOverlays()
+    }
+
+    func setActive(_ id: Int) {
+        guard let h = volume.handle else { return }
+        lumen_seg_set_active(h, Int32(id))
+        activeID = id
+        thresholdNeedsUndoCapture = true
+    }
+
+    func setVisible(_ id: Int, _ visible: Bool) {
+        guard let h = volume.handle else { return }
+        lumen_seg_set_visible(h, Int32(id), visible ? 1 : 0)
+        reloadSegments()
+        refreshAllOverlays()
+    }
+
+    func setColor(_ id: Int, _ color: Color) {
+        guard let h = volume.handle else { return }
+        let (r, g, b) = rgb(color)
+        lumen_seg_set_color(h, Int32(id), Int32(r), Int32(g), Int32(b))
+        reloadSegments()
+        refreshAllOverlays()
+    }
+
+    func rename(_ id: Int, to name: String) {
+        names[id] = name.isEmpty ? defaultName(for: id) : name
+        reloadSegments()
+    }
+
+    private func rgb(_ color: Color) -> (Int, Int, Int) {
+        let ns = NSColor(color).usingColorSpace(.sRGB) ?? .gray
+        return (Int(ns.redComponent * 255), Int(ns.greenComponent * 255),
+                Int(ns.blueComponent * 255))
+    }
+
+    // MARK: - Editing operations
 
     func applyThreshold() {
-        guard let h = volume.handle else { return }
+        guard let h = volume.handle, activeID > 0 else { return }
+        if thresholdNeedsUndoCapture {
+            lumen_seg_push_undo(h)
+            thresholdNeedsUndoCapture = false
+        }
+        lumen_seg_threshold(h, thresholdLo, thresholdHi)
+        didMutateMask()
+    }
+
+    func applyOtsu() {
+        guard let h = volume.handle, activeID > 0 else { return }
+        let t = lumen_seg_otsu(h)
+        thresholdLo = t
+        thresholdHi = volume.huHi
+        lumen_seg_push_undo(h)
+        thresholdNeedsUndoCapture = false
         lumen_seg_threshold(h, thresholdLo, thresholdHi)
         didMutateMask()
     }
 
     func seedRegionGrow(axis: Int, px: Int, py: Int) {
-        guard let h = volume.handle else { return }
+        guard let h = volume.handle, activeID > 0 else { return }
         var x: Int32 = 0, y: Int32 = 0, z: Int32 = 0
         lumen_slice_pixel_to_voxel(h, Int32(axis), Int32(volume.sliceIndex[axis]),
                                    Int32(px), Int32(py), &x, &y, &z)
+        lumen_seg_push_undo(h)
+        thresholdNeedsUndoCapture = true
         let added = lumen_seg_region_grow(h, x, y, z, tolerance)
-        if added > 0 { didMutateMask() }
+        if added > 0 { didMutateMask() } else { refreshUndoState() }
     }
 
-    func clear() {
+    // Paint strokes: capture one undo entry at the start, paint per drag tick (only
+    // re-extracting the painted plane for responsiveness), settle on stroke end.
+    func beginStroke() {
         guard let h = volume.handle else { return }
+        lumen_seg_push_undo(h)
+        thresholdNeedsUndoCapture = true
+        refreshUndoState()
+    }
+
+    func paintAt(axis: Int, px: Int, py: Int) {
+        guard let h = volume.handle, activeID > 0, tool.isBrush else { return }
+        let add: Int32 = tool == .paint ? 1 : 0
+        let changed = lumen_seg_paint(h, Int32(axis), Int32(volume.sliceIndex[axis]),
+                                      Int32(px), Int32(py), Int32(brushRadius), add)
+        if changed > 0 { refreshOverlay(axis) }
+    }
+
+    func endStroke() { didMutateMask() }
+
+    func keepLargest() {
+        guard let h = volume.handle, activeID > 0 else { return }
+        lumen_seg_push_undo(h)
+        thresholdNeedsUndoCapture = true
+        if lumen_seg_keep_largest(h) > 0 { didMutateMask() } else { refreshUndoState() }
+    }
+
+    func removeSmall() {
+        guard let h = volume.handle, activeID > 0 else { return }
+        lumen_seg_push_undo(h)
+        thresholdNeedsUndoCapture = true
+        if lumen_seg_remove_small(h, Int(removeSmallMin)) > 0 { didMutateMask() }
+        else { refreshUndoState() }
+    }
+
+    func clearActive() {
+        guard let h = volume.handle, activeID > 0 else { return }
+        lumen_seg_push_undo(h)
+        thresholdNeedsUndoCapture = true
         lumen_seg_clear(h)
         didMutateMask()
+    }
+
+    func undo() {
+        guard let h = volume.handle else { return }
+        if lumen_seg_undo(h) != 0 {
+            thresholdNeedsUndoCapture = true
+            didMutateMask()
+        }
+    }
+
+    func redo() {
+        guard let h = volume.handle else { return }
+        if lumen_seg_redo(h) != 0 {
+            thresholdNeedsUndoCapture = true
+            didMutateMask()
+        }
     }
 
     // MARK: - Overlay extraction
 
     private func didMutateMask() {
-        guard let h = volume.handle else { return }
-        voxelCount = Int(lumen_seg_count(h))
+        reloadSegments()       // refresh per-segment + total voxel counts + undo state
         refreshAllOverlays()
+    }
+
+    private func refreshUndoState() {
+        guard let h = volume.handle else { canUndo = false; canRedo = false; return }
+        canUndo = lumen_seg_can_undo(h) != 0
+        canRedo = lumen_seg_can_redo(h) != 0
     }
 
     private func refreshAllOverlays() {
@@ -115,7 +328,7 @@ final class SegmentationModel: ObservableObject {
     }
 
     private func refreshOverlay(_ axis: Int) {
-        guard let h = volume.handle else { overlays[axis] = nil; return }
+        guard let h = volume.handle, showOverlay else { overlays[axis] = nil; return }
         var w: Int32 = 0, ht: Int32 = 0
         guard let ptr = lumen_extract_mask_slice(h, Int32(axis),
                                                  Int32(volume.sliceIndex[axis]),
