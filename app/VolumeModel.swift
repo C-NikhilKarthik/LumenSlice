@@ -29,9 +29,16 @@ final class VolumeModel: ObservableObject {
     @Published var window: Float = 400 { didSet { if !suppressWLRefresh { refreshAll() } } }
     private var suppressWLRefresh = false
 
-    // Per-axis scroll position and rendered slice.
-    @Published var sliceIndex: [Int] = [0, 0, 0]
+    // Shared crosshair focus point in voxel coordinates (x,y,z). All three slice
+    // planes pass through it, so clicking a point in one pane recenters the
+    // others (3D-Slicer-style linked navigation).
+    @Published var focus = SIMD3<Int>(0, 0, 0)
     @Published var images: [CGImage?] = [nil, nil, nil]
+
+    // Per-axis slice index derived from the focus voxel: axial steps Z, coronal
+    // steps Y, sagittal steps X. Kept as an accessor so existing call sites and
+    // the SlicePane sliders/labels keep working against the new source of truth.
+    var sliceIndex: [Int] { [focus.z, focus.y, focus.x] }
 
     // Curated + full DICOM metadata for the loaded series (nil until a load).
     @Published var metadata: DicomMetadata?
@@ -111,7 +118,7 @@ final class VolumeModel: ObservableObject {
         }
 
         metadata = Self.readMetadata(newHandle)
-        sliceIndex = [sliceCount(0) / 2, sliceCount(1) / 2, sliceCount(2) / 2]
+        focus = SIMD3(width / 2, height / 2, depth / 2) // start centered
         refreshAll()
     }
 
@@ -126,8 +133,48 @@ final class VolumeModel: ObservableObject {
     }
 
     func setSlice(_ axis: Int, _ value: Int) {
-        sliceIndex[axis] = value
+        switch axis {
+        case 0: focus.z = clampZ(value)
+        case 1: focus.y = clampY(value)
+        default: focus.x = clampX(value)
+        }
         refresh(axis)
+    }
+
+    /// Jump the shared focus to a voxel (click-to-locate). Recenters all three
+    /// panes so they pass through the clicked anatomical point.
+    func jump(to voxel: SIMD3<Int>) {
+        focus = SIMD3(clampX(voxel.x), clampY(voxel.y), clampZ(voxel.z))
+        refreshAll()
+    }
+
+    private func clampX(_ v: Int) -> Int { min(max(v, 0), max(width - 1, 0)) }
+    private func clampY(_ v: Int) -> Int { min(max(v, 0), max(height - 1, 0)) }
+    private func clampZ(_ v: Int) -> Int { min(max(v, 0), max(depth - 1, 0)) }
+
+    // MARK: - Slice geometry seam
+    //
+    // These two methods are the ONLY place pane-pixel <-> voxel geometry is
+    // resolved (they delegate to the C++ orthogonal plane_map, the single source
+    // of truth). An oblique/RAS model would replace just these — see
+    // yashdocs/slicer-parity/PLAN.md.
+
+    /// Voxel under image pixel (px,py) of the current slice on `axis`.
+    func voxel(onAxis axis: Int, px: Int, py: Int) -> SIMD3<Int>? {
+        guard let h = handle else { return nil }
+        var x: Int32 = 0, y: Int32 = 0, z: Int32 = 0
+        lumen_slice_pixel_to_voxel(h, Int32(axis), Int32(sliceIndex[axis]),
+                                   Int32(px), Int32(py), &x, &y, &z)
+        return SIMD3(Int(x), Int(y), Int(z))
+    }
+
+    /// Where the shared focus voxel projects onto pane `axis` (for the crosshair).
+    func crosshairPixel(onAxis axis: Int) -> (px: Int, py: Int)? {
+        guard let h = handle else { return nil }
+        var px: Int32 = 0, py: Int32 = 0
+        lumen_voxel_to_slice_pixel(h, Int32(axis), Int32(focus.x), Int32(focus.y),
+                                   Int32(focus.z), &px, &py)
+        return (Int(px), Int(py))
     }
 
     /// Set window and level together with a single re-render. Clamps window to
