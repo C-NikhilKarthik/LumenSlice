@@ -27,4 +27,18 @@ long keep_largest_island(LabelVolume& mask, std::uint8_t label);
 // Returns the number of voxels removed.
 long remove_small_islands(LabelVolume& mask, std::uint8_t label, long min_voxels);
 
+// Margin: grow (dilate) the `label` region outward by `iterations` 6-connected
+// layers, claiming only BACKGROUND voxels (never another segment). Returns voxels
+// added.
+long dilate_label(LabelVolume& mask, std::uint8_t label, int iterations);
+
+// Margin: shrink (erode) the `label` region inward by `iterations` layers (any
+// label voxel touching a non-label voxel is peeled off). Returns voxels removed.
+long erode_label(LabelVolume& mask, std::uint8_t label, int iterations);
+
+// Smooth: a 26-neighbourhood majority (median) filter applied `iterations` times.
+// Rounds off jagged paint and fills pinholes; claims only background and clears
+// only `label` (other segments are untouched). Returns voxels changed.
+long smooth_label(LabelVolume& mask, std::uint8_t label, int iterations);
+
 } // namespace lumen

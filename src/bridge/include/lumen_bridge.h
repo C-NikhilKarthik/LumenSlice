@@ -116,6 +116,13 @@ float lumen_seg_otsu(const LumenVolume* v);
 long lumen_seg_keep_largest(LumenVolume* v);
 long lumen_seg_remove_small(LumenVolume* v, long min_voxels);
 
+// Margin + smoothing on the active segment. Grow/shrink by `iterations` voxel
+// layers; smooth runs a 26-neighbour majority filter `iterations` times. Each
+// returns the number of voxels changed.
+long lumen_seg_grow(LumenVolume* v, int iterations);
+long lumen_seg_shrink(LumenVolume* v, int iterations);
+long lumen_seg_smooth(LumenVolume* v, int iterations);
+
 // --- Undo / redo ------------------------------------------------------------
 // Snapshot the mask BEFORE a user operation, then undo/redo walks the history
 // (bounded to a fixed depth; oldest states are dropped).

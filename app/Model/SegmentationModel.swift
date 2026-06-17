@@ -40,6 +40,15 @@ struct SegmentRow: Identifiable, Equatable {
     var voxels: Int
 }
 
+// The per-plane mask overlay images, in their own tiny observable so that a paint
+// stroke (which republishes only these) re-renders the slice panes WITHOUT churning
+// the segment-control panel that observes the heavier SegmentationModel. This is the
+// difference between sluggish and fluid brushing.
+@MainActor
+final class OverlayStore: ObservableObject {
+    @Published var images: [CGImage?] = [nil, nil, nil]
+}
+
 // Drives the C++ multi-segment mask through the bridge and republishes a colored
 // overlay CGImage per plane. Shares VolumeModel's volume handle (read-only for the
 // volume; it owns the mask + segment table living in the same C++ handle). All
@@ -64,7 +73,8 @@ final class SegmentationModel: ObservableObject {
     @Published private(set) var voxelCount: Int = 0          // total, all segments
     @Published private(set) var canUndo = false
     @Published private(set) var canRedo = false
-    @Published private(set) var overlays: [CGImage?] = [nil, nil, nil]
+    // Overlay images live in their own store (see OverlayStore) so brushing stays fluid.
+    let overlayStore = OverlayStore()
 
     // Names survive list rebuilds (the bridge only knows ids/colours/visibility).
     private var names: [Int: String] = [:]
@@ -78,6 +88,11 @@ final class SegmentationModel: ObservableObject {
         (0.96, 0.75, 0.27), (0.63, 0.47, 0.86), (0.94, 0.55, 0.78),
         (0.35, 0.78, 0.78), (0.82, 0.59, 0.35),
     ]
+
+    // The palette as SwiftUI Colors, for the segment colour-swatch picker.
+    static var paletteColors: [Color] {
+        palette.map { Color(.sRGB, red: $0.0, green: $0.1, blue: $0.2) }
+    }
 
     // Set by the shell when the Segment tab is shown/hidden.
     var isActive = false {
@@ -112,7 +127,7 @@ final class SegmentationModel: ObservableObject {
                 guard let self else { return }
                 self.names.removeAll()
                 self.nextSegmentNumber = 1
-                self.overlays = [nil, nil, nil]
+                self.overlayStore.images = [nil, nil, nil]
                 if has {
                     self.reloadSegments()
                     if self.isActive { self.refreshAllOverlays() }
@@ -260,11 +275,33 @@ final class SegmentationModel: ObservableObject {
         refreshUndoState()
     }
 
-    func paintAt(axis: Int, px: Int, py: Int) {
+    // Paint from the previous brush point to the current one, stamping overlapping
+    // disks along the segment so fast drags leave no gaps (3D-Slicer-style). Only
+    // the painted plane's overlay is re-extracted, and only if something changed.
+    func paintStroke(axis: Int, from: (px: Int, py: Int)?, to: (px: Int, py: Int)) {
         guard let h = volume.handle, activeID > 0, tool.isBrush else { return }
         let add: Int32 = tool == .paint ? 1 : 0
-        let changed = lumen_seg_paint(h, Int32(axis), Int32(volume.sliceIndex[axis]),
-                                      Int32(px), Int32(py), Int32(brushRadius), add)
+        let idx = Int32(volume.sliceIndex[axis])
+        let r = Int32(brushRadius)
+        var changed: Int64 = 0
+
+        func stamp(_ x: Int, _ y: Int) {
+            changed += Int64(lumen_seg_paint(h, Int32(axis), idx, Int32(x), Int32(y), r, add))
+        }
+
+        if let from {
+            let dx = to.px - from.px, dy = to.py - from.py
+            let span = max(abs(dx), abs(dy))
+            // Step <= half the radius so consecutive stamps overlap into a line.
+            let stepCount = max(1, span / max(1, brushRadius / 2))
+            for s in 0...stepCount {
+                let t = Double(s) / Double(stepCount)
+                stamp(Int((Double(from.px) + t * Double(dx)).rounded()),
+                      Int((Double(from.py) + t * Double(dy)).rounded()))
+            }
+        } else {
+            stamp(to.px, to.py)
+        }
         if changed > 0 { refreshOverlay(axis) }
     }
 
@@ -283,6 +320,17 @@ final class SegmentationModel: ObservableObject {
         thresholdNeedsUndoCapture = true
         if lumen_seg_remove_small(h, Int(removeSmallMin)) > 0 { didMutateMask() }
         else { refreshUndoState() }
+    }
+
+    func growMargin() { applyMorphology { lumen_seg_grow($0, 1) } }
+    func shrinkMargin() { applyMorphology { lumen_seg_shrink($0, 1) } }
+    func smooth() { applyMorphology { lumen_seg_smooth($0, 1) } }
+
+    private func applyMorphology(_ op: (OpaquePointer) -> Int) {
+        guard let h = volume.handle, activeID > 0 else { return }
+        lumen_seg_push_undo(h)
+        thresholdNeedsUndoCapture = true
+        if op(h) > 0 { didMutateMask() } else { refreshUndoState() }
     }
 
     func clearActive() {
@@ -328,16 +376,20 @@ final class SegmentationModel: ObservableObject {
     }
 
     private func refreshOverlay(_ axis: Int) {
-        guard let h = volume.handle, showOverlay else { overlays[axis] = nil; return }
+        guard let h = volume.handle, showOverlay else {
+            overlayStore.images[axis] = nil
+            return
+        }
         var w: Int32 = 0, ht: Int32 = 0
         guard let ptr = lumen_extract_mask_slice(h, Int32(axis),
                                                  Int32(volume.sliceIndex[axis]),
                                                  &w, &ht),
               w > 0, ht > 0 else {
-            overlays[axis] = nil
+            overlayStore.images[axis] = nil
             return
         }
         let data = Data(bytes: ptr, count: Int(w) * Int(ht) * 4) // copy out of scratch
-        overlays[axis] = VolumeModel.makeImage(data: data, width: Int(w), height: Int(ht))
+        overlayStore.images[axis] = VolumeModel.makeImage(
+            data: data, width: Int(w), height: Int(ht))
     }
 }

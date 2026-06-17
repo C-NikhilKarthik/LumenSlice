@@ -35,6 +35,18 @@ final class VolumeModel: ObservableObject {
     @Published var focus = SIMD3<Int>(0, 0, 0)
     @Published var images: [CGImage?] = [nil, nil, nil]
 
+    // Display toggles for the slice overlays (crosshair/intersection lines and the
+    // R/L/A/P/S/I orientation letters), persisted across launches in UserDefaults.
+    @Published var showCrosshair: Bool = UserDefaults.standard.object(
+        forKey: "showCrosshair") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(showCrosshair, forKey: "showCrosshair") }
+    }
+    @Published var showOrientationLabels: Bool = UserDefaults.standard.object(
+        forKey: "showOrientationLabels") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(showOrientationLabels,
+                                           forKey: "showOrientationLabels") }
+    }
+
     // Per-axis slice index derived from the focus voxel: axial steps Z, coronal
     // steps Y, sagittal steps X. Kept as an accessor so existing call sites and
     // the SlicePane sliders/labels keep working against the new source of truth.

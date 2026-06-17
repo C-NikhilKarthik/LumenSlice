@@ -279,6 +279,21 @@ long lumen_seg_remove_small(LumenVolume* v, long min_voxels) {
     return lumen::remove_small_islands(v->mask, v->segments.active(), min_voxels);
 }
 
+long lumen_seg_grow(LumenVolume* v, int iterations) {
+    if (v == nullptr) return 0;
+    return lumen::dilate_label(v->mask, v->segments.active(), iterations);
+}
+
+long lumen_seg_shrink(LumenVolume* v, int iterations) {
+    if (v == nullptr) return 0;
+    return lumen::erode_label(v->mask, v->segments.active(), iterations);
+}
+
+long lumen_seg_smooth(LumenVolume* v, int iterations) {
+    if (v == nullptr) return 0;
+    return lumen::smooth_label(v->mask, v->segments.active(), iterations);
+}
+
 void lumen_seg_push_undo(LumenVolume* v) {
     if (v == nullptr) return;
     v->undo.capture(v->mask);

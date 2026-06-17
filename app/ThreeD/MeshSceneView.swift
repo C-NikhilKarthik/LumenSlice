@@ -8,18 +8,44 @@ import SceneKit
 struct MeshSceneView: NSViewRepresentable {
     var geometries: [SCNGeometry]
 
+    final class Coordinator {
+        // Identity of the geometry set we last built nodes for, so orbit/zoom (which
+        // re-invoke updateNSView) don't rebuild the scene or yank the camera.
+        var rendered: [ObjectIdentifier] = []
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
     func makeNSView(context: Context) -> SCNView {
         let view = SCNView()
-        view.scene = SCNScene()
+        let scene = SCNScene()
+        view.scene = scene
         view.allowsCameraControl = true
         view.autoenablesDefaultLighting = true
         view.backgroundColor = .black
         view.antialiasingMode = .multisampling4X
+        view.rendersContinuously = false
+
+        // An explicit camera with generous clip planes: the default zNear/zFar clip
+        // millimetre-scale meshes during zoom, which reads as flicker. A wide range
+        // keeps the surface solid at any zoom.
+        let camera = SCNCamera()
+        camera.zNear = 0.1
+        camera.zFar = 1_000_000
+        let camNode = SCNNode()
+        camNode.camera = camera
+        camNode.position = SCNVector3(0, 0, 300)
+        scene.rootNode.addChildNode(camNode)
+        view.pointOfView = camNode
         return view
     }
 
     func updateNSView(_ view: SCNView, context: Context) {
         guard let root = view.scene?.rootNode else { return }
+        let ids = geometries.map { ObjectIdentifier($0) }
+        if ids == context.coordinator.rendered { return } // unchanged: leave camera alone
+        context.coordinator.rendered = ids
+
         root.childNodes
             .filter { $0.name == "mesh" || $0.name == "gnomon" }
             .forEach { $0.removeFromParentNode() }
@@ -40,7 +66,7 @@ struct MeshSceneView: NSViewRepresentable {
         gnomon.position = minB
         root.addChildNode(gnomon)
 
-        // Frame the camera to the meshes (deferred so bounds are ready).
+        // Frame the camera once, only when the geometry actually changed.
         DispatchQueue.main.async {
             view.defaultCameraController.frameNodes(meshNodes)
         }
