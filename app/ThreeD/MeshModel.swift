@@ -94,7 +94,8 @@ final class MeshModel: ObservableObject {
                 }
                 if let result { built.append(result) }
             }
-            await MainActor.run { self.finishGenerate(built) }
+            let collected = built // immutable copy for the cross-actor hop
+            await MainActor.run { self.finishGenerate(collected) }
         }
     }
 
