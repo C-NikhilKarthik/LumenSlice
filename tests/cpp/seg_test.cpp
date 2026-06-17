@@ -3,14 +3,19 @@
 // the paint/erase disk, and the mask overlay. No DICOM file, no GPU — build and
 // run with `swift run SegTest`.
 
+#include <cmath>
 #include <cstdio>
+#include <map>
 #include <memory>
+#include <utility>
 
 #include "core/volume.h"
 #include "geometry/plane_map.hpp"
 #include "segmentation/label_volume.hpp"
+#include "segmentation/marching_cubes.hpp"
 #include "segmentation/mask_view.hpp"
 #include "segmentation/segment.hpp"
+#include "segmentation/stl_export.hpp"
 
 using namespace lumen;
 
@@ -143,6 +148,93 @@ static void test_mask_overlay() {
     CHECK(out.rgba[off + 3] == 0, "unlabelled pixel is transparent");
 }
 
+// 6. marching cubes on a solid box -> a closed manifold with outward normals.
+static void test_marching_cubes() {
+    std::printf("marching_cubes manifold\n");
+    Volume v = make_volume(12, 0.0f);
+    LabelVolume mask;
+    mask.reset_to(v);
+    // A solid box well inside the volume (not touching any face).
+    for (int z = 3; z <= 8; ++z)
+        for (int y = 3; y <= 8; ++y)
+            for (int x = 3; x <= 8; ++x) mask.set(x, y, z, kActiveLabel);
+
+    Mesh mesh;
+    const int tris = marching_cubes(mask.data(), 12, 12, 12, 1, 1, 1, 0, 1, mesh);
+    CHECK(tris > 0, "box produces triangles");
+    CHECK(mesh.vertex_count() > 0, "box produces vertices");
+    CHECK(mesh.triangle_count() == tris, "returned count matches buffer");
+
+    // Closed manifold: every undirected edge is shared by exactly two triangles.
+    std::map<std::pair<std::uint32_t, std::uint32_t>, int> edges;
+    for (std::size_t i = 0; i + 2 < mesh.indices.size(); i += 3) {
+        const std::uint32_t t[3] = {mesh.indices[i], mesh.indices[i + 1],
+                                    mesh.indices[i + 2]};
+        for (int e = 0; e < 3; ++e) {
+            std::uint32_t a = t[e], b = t[(e + 1) % 3];
+            if (a > b) std::swap(a, b);
+            edges[{a, b}]++;
+        }
+    }
+    bool closed = true;
+    for (const auto& kv : edges)
+        if (kv.second != 2) closed = false;
+    CHECK(closed, "surface is a closed 2-manifold");
+
+    // Normals point outward: dot(normal, vertex - centroid) > 0 for the vast
+    // majority (a convex box).
+    float cx = 0, cy = 0, cz = 0;
+    const int vc = mesh.vertex_count();
+    for (int i = 0; i < vc; ++i) {
+        cx += mesh.vertices[i * 3];
+        cy += mesh.vertices[i * 3 + 1];
+        cz += mesh.vertices[i * 3 + 2];
+    }
+    cx /= vc; cy /= vc; cz /= vc;
+    int outward = 0;
+    for (int i = 0; i < vc; ++i) {
+        const float dx = mesh.vertices[i * 3] - cx;
+        const float dy = mesh.vertices[i * 3 + 1] - cy;
+        const float dz = mesh.vertices[i * 3 + 2] - cz;
+        const float dot = dx * mesh.normals[i * 3] + dy * mesh.normals[i * 3 + 1] +
+                          dz * mesh.normals[i * 3 + 2];
+        if (dot > 0) ++outward;
+    }
+    CHECK(outward >= vc * 9 / 10, "normals point outward for a convex box");
+
+    // Empty mask -> no triangles.
+    LabelVolume empty;
+    empty.reset_to(v);
+    Mesh none;
+    CHECK(marching_cubes(empty.data(), 12, 12, 12, 1, 1, 1, 0, 1, none) == 0,
+          "empty mask yields no surface");
+}
+
+// 7. binary STL size law: 84 + 50 * triangles; bad path errors.
+static void test_stl() {
+    std::printf("write_binary_stl\n");
+    Volume v = make_volume(12, 0.0f);
+    LabelVolume mask;
+    mask.reset_to(v);
+    for (int z = 3; z <= 8; ++z)
+        for (int y = 3; y <= 8; ++y)
+            for (int x = 3; x <= 8; ++x) mask.set(x, y, z, kActiveLabel);
+    Mesh mesh;
+    const int tris = marching_cubes(mask.data(), 12, 12, 12, 1, 1, 1, 0, 1, mesh);
+
+    const char* path = "/tmp/lumenslice_segtest.stl";
+    CHECK(write_binary_stl(mesh, path) == 0, "STL writes OK");
+    std::FILE* fp = std::fopen(path, "rb");
+    CHECK(fp != nullptr, "STL file exists");
+    if (fp != nullptr) {
+        std::fseek(fp, 0, SEEK_END);
+        const long size = std::ftell(fp);
+        std::fclose(fp);
+        CHECK(size == 84 + 50L * tris, "STL size == 84 + 50 * triangles");
+    }
+    CHECK(write_binary_stl(mesh, "/no/such/dir/x.stl") != 0, "bad path errors");
+}
+
 int main() {
     std::printf("== SegTest ==\n");
     test_plane_map_roundtrip();
@@ -150,6 +242,8 @@ int main() {
     test_region_grow();
     test_paint();
     test_mask_overlay();
+    test_marching_cubes();
+    test_stl();
     if (g_failures == 0) {
         std::printf("All segmentation tests passed.\n");
         return 0;

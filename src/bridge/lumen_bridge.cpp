@@ -6,23 +6,37 @@
 #include <string>
 #include <utility>
 
+#include <cerrno>
+#include <cstdint>
+#include <vector>
+
 #include "core/volume.h"
 #include "geometry/plane_map.hpp"
 #include "io/dicom_loader.h"
 #include "segmentation/label_volume.hpp"
+#include "segmentation/marching_cubes.hpp"
 #include "segmentation/mask_view.hpp"
 #include "segmentation/segment.hpp"
+#include "segmentation/stl_export.hpp"
 #include "visualization/slice_view.h"
 
 // Opaque handle: the calibrated volume, reusable extraction buffers so the Swift
 // side never allocates per frame, the serialized metadata blob (computed once at
-// load), and the segmentation mask + its own overlay scratch buffer.
+// load), the segmentation mask + overlay scratch, and the 3D surface mesh plus a
+// mask snapshot the mesh is generated from (so generation can run off-thread
+// without racing the live mask).
 struct LumenVolume {
     lumen::Volume volume;
     lumen::SliceImage scratch;
     lumen::SliceImage mask_scratch;
     lumen::LabelVolume mask;
     std::string meta_json;
+
+    lumen::Mesh mesh;
+    std::vector<std::uint8_t> mesh_snapshot;
+    int snap_w = 0;
+    int snap_h = 0;
+    int snap_d = 0;
 };
 
 extern "C" {
@@ -170,6 +184,53 @@ void lumen_slice_pixel_to_voxel(const LumenVolume* v, int axis, int index, int p
     if (x) *x = c.x;
     if (y) *y = c.y;
     if (z) *z = c.z;
+}
+
+// --- 3D surface (marching cubes) --------------------------------------------
+
+void lumen_mesh_snapshot(LumenVolume* v) {
+    if (v == nullptr || !v->mask.valid()) return;
+    v->snap_w = v->mask.width();
+    v->snap_h = v->mask.height();
+    v->snap_d = v->mask.depth();
+    v->mesh_snapshot.assign(v->mask.data(),
+                            v->mask.data() + v->mask.voxel_count());
+}
+
+int lumen_mesh_generate(LumenVolume* v, int smooth_iters, int downsample) {
+    if (v == nullptr || v->mesh_snapshot.empty()) return 0;
+    return lumen::marching_cubes(v->mesh_snapshot.data(), v->snap_w, v->snap_h,
+                                 v->snap_d, v->volume.spacing_x,
+                                 v->volume.spacing_y, v->volume.spacing_z,
+                                 smooth_iters, downsample, v->mesh);
+}
+
+int lumen_mesh_vertex_count(const LumenVolume* v) {
+    return v == nullptr ? 0 : v->mesh.vertex_count();
+}
+
+int lumen_mesh_index_count(const LumenVolume* v) {
+    return v == nullptr ? 0 : static_cast<int>(v->mesh.indices.size());
+}
+
+const float* lumen_mesh_vertices(const LumenVolume* v) {
+    if (v == nullptr || v->mesh.vertices.empty()) return nullptr;
+    return v->mesh.vertices.data();
+}
+
+const float* lumen_mesh_normals(const LumenVolume* v) {
+    if (v == nullptr || v->mesh.normals.empty()) return nullptr;
+    return v->mesh.normals.data();
+}
+
+const unsigned int* lumen_mesh_indices(const LumenVolume* v) {
+    if (v == nullptr || v->mesh.indices.empty()) return nullptr;
+    return v->mesh.indices.data();
+}
+
+int lumen_mesh_write_stl(const LumenVolume* v, const char* path) {
+    if (v == nullptr) return EINVAL;
+    return lumen::write_binary_stl(v->mesh, path);
 }
 
 } // extern "C"
