@@ -11,11 +11,14 @@
 
 #include "core/volume.h"
 #include "geometry/plane_map.hpp"
+#include "segmentation/analysis.hpp"
 #include "segmentation/label_volume.hpp"
 #include "segmentation/marching_cubes.hpp"
 #include "segmentation/mask_view.hpp"
 #include "segmentation/segment.hpp"
+#include "segmentation/segment_table.hpp"
 #include "segmentation/stl_export.hpp"
+#include "segmentation/undo_stack.hpp"
 
 using namespace lumen;
 
@@ -139,8 +142,12 @@ static void test_mask_overlay() {
     mask.reset_to(v);
     mask.set(3, 3, 2, kActiveLabel);
 
+    SegmentTable table;
+    const std::uint8_t id = table.add(Rgb{0, 200, 255});
+    CHECK(id == kActiveLabel, "first segment gets id 1 (kActiveLabel)");
+
     SliceImage out;
-    ExtractMaskSlice(v, mask, Axis::Axial, 2, out);
+    ExtractMaskSlice(v, mask, table, Axis::Axial, 2, out);
     CHECK(out.width == 8 && out.height == 8, "overlay matches slice dims");
     const std::size_t at = (static_cast<std::size_t>(3) * out.width + 3) * 4;
     CHECK(out.rgba[at + 3] > 0, "labelled pixel is opaque");
@@ -235,6 +242,121 @@ static void test_stl() {
     CHECK(write_binary_stl(mesh, "/no/such/dir/x.stl") != 0, "bad path errors");
 }
 
+// 8. Multi-segment: edits target the active label and never disturb others.
+static void test_multi_segment() {
+    std::printf("multi-segment isolation\n");
+    Volume v = make_volume(8, 0.0f);
+    LabelVolume mask;
+    mask.reset_to(v);
+
+    // Segment 1 paints a disk; segment 2 paints an overlapping disk.
+    paint_disk(v, Axis::Axial, 2, 2, 2, 1, true, mask, 1);
+    const long c1 = mask.count_nonzero();
+    CHECK(c1 == 5, "segment 1 paints 5 voxels");
+
+    paint_disk(v, Axis::Axial, 2, 5, 5, 1, true, mask, 2);
+    CHECK(mask.at(2, 2, 2) == 1, "segment 1 voxel keeps its id");
+    CHECK(mask.at(5, 5, 2) == 2, "segment 2 voxel has its own id");
+
+    // Erasing segment 2 must not remove segment 1's voxels.
+    paint_disk(v, Axis::Axial, 2, 2, 2, 1, false, mask, 2); // erase seg2 over seg1 area
+    CHECK(mask.at(2, 2, 2) == 1, "erasing seg 2 leaves seg 1 intact");
+
+    // Threshold on segment 3 over a uniform 0-HU volume claims only background.
+    threshold_fill(v, -1.0f, 1.0f, mask, 3);
+    CHECK(mask.at(2, 2, 2) == 1, "threshold seg 3 does not steal seg 1");
+    CHECK(mask.at(5, 5, 2) == 2, "threshold seg 3 does not steal seg 2");
+    CHECK(mask.at(0, 0, 0) == 3, "threshold seg 3 claims background");
+}
+
+// 9. SegmentTable id allocation, removal, and active fallback.
+static void test_segment_table() {
+    std::printf("segment table\n");
+    SegmentTable t;
+    const std::uint8_t a = t.add(Rgb{255, 0, 0});
+    const std::uint8_t b = t.add(Rgb{0, 255, 0});
+    CHECK(a == 1 && b == 2, "ids allocate densely from 1");
+    CHECK(t.active() == 2, "newest segment is active");
+    CHECK(t.count() == 2, "two segments registered");
+
+    t.remove(1); // reuse id 1 next
+    const std::uint8_t c = t.add(Rgb{0, 0, 255});
+    CHECK(c == 1, "freed id is reused");
+    CHECK(t.color(1).b == 255, "colour LUT updated");
+
+    t.set_visible(1, false);
+    CHECK(!t.visible(1), "visibility toggles");
+    t.remove(2);
+    t.remove(1);
+    CHECK(t.count() == 0 && t.active() == 0, "emptied table has no active id");
+}
+
+// 10. Otsu separates a clear bimodal histogram between the two modes.
+static void test_otsu() {
+    std::printf("otsu threshold\n");
+    Volume v = make_volume(8, -1000.0f); // background mode at -1000
+    for (int z = 0; z < 4; ++z)
+        for (int y = 0; y < 8; ++y)
+            for (int x = 0; x < 8; ++x) set_hu(v, x, y, z, 1000.0f); // bright mode
+    v.hu_min = -1000.0f;
+    v.hu_max = 1000.0f;
+    const float t = otsu_threshold(v);
+    CHECK(t > -1000.0f && t < 1000.0f, "otsu lands between the two modes");
+}
+
+// 11. Islands: keep-largest drops the small blob; remove-small respects the cutoff.
+static void test_islands() {
+    std::printf("islands cleanup\n");
+    Volume v = make_volume(10, 0.0f);
+    LabelVolume mask;
+    mask.reset_to(v);
+    // Big blob (3x3x3 = 27) and a tiny blob (single voxel), same label, separated.
+    for (int z = 1; z <= 3; ++z)
+        for (int y = 1; y <= 3; ++y)
+            for (int x = 1; x <= 3; ++x) mask.set(x, y, z, 1);
+    mask.set(8, 8, 8, 1);
+    CHECK(mask.count_nonzero() == 28, "two components, 28 voxels");
+
+    LabelVolume copy = mask;
+    const long removed = keep_largest_island(copy, 1);
+    CHECK(removed == 1, "keep-largest removes the single-voxel blob");
+    CHECK(copy.count_nonzero() == 27, "largest component survives");
+    CHECK(copy.at(8, 8, 8) == 0, "tiny blob cleared");
+
+    const long removed2 = remove_small_islands(mask, 1, 10);
+    CHECK(removed2 == 1, "remove-small drops the sub-threshold blob");
+    CHECK(mask.count_nonzero() == 27, "big blob above the cutoff survives");
+}
+
+// 12. Undo/redo round-trips a mutation and respects the depth cap.
+static void test_undo() {
+    std::printf("undo / redo\n");
+    Volume v = make_volume(8, 0.0f);
+    LabelVolume mask;
+    mask.reset_to(v);
+    UndoStack undo;
+
+    undo.capture(mask);                 // state A: empty
+    paint_disk(v, Axis::Axial, 2, 3, 3, 1, true, mask, 1); // -> state B
+    CHECK(mask.count_nonzero() == 5, "painted 5");
+    CHECK(undo.can_undo(), "undo available after capture");
+
+    CHECK(undo.undo(mask), "undo applies");
+    CHECK(mask.count_nonzero() == 0, "undo restores empty mask");
+    CHECK(undo.can_redo(), "redo now available");
+
+    CHECK(undo.redo(mask), "redo applies");
+    CHECK(mask.count_nonzero() == 5, "redo restores painted mask");
+
+    // Depth cap: more than kDepth captures keeps only the most recent kDepth.
+    UndoStack capped;
+    for (std::size_t i = 0; i < UndoStack::kDepth + 5; ++i) capped.capture(mask);
+    int depth = 0;
+    while (capped.undo(mask)) ++depth;
+    CHECK(depth == static_cast<int>(UndoStack::kDepth),
+          "history is capped at kDepth states");
+}
+
 int main() {
     std::printf("== SegTest ==\n");
     test_plane_map_roundtrip();
@@ -244,6 +366,11 @@ int main() {
     test_mask_overlay();
     test_marching_cubes();
     test_stl();
+    test_multi_segment();
+    test_segment_table();
+    test_otsu();
+    test_islands();
+    test_undo();
     if (g_failures == 0) {
         std::printf("All segmentation tests passed.\n");
         return 0;

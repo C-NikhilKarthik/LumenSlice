@@ -9,7 +9,8 @@ struct ThreeDControls: View {
     var body: some View {
         Form {
             Section {
-                Text("Build a 3D surface from the segmentation mask using marching cubes.")
+                Text("Build a colored 3D surface for each visible segment using "
+                     + "marching cubes. Hidden or empty segments are skipped.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -33,6 +34,7 @@ struct ThreeDControls: View {
                     Label(mesh.isGenerating ? "Generating…" : "Generate / Update 3D",
                           systemImage: "cube.fill")
                         .frame(maxWidth: .infinity)
+                        // (per-segment colored surfaces)
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)

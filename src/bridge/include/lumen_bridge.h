@@ -55,31 +55,81 @@ const unsigned char* lumen_extract_slice(LumenVolume* v, int axis, int index,
                                          int* out_h);
 
 // --- Segmentation -----------------------------------------------------------
-// All operations act on the single active label. The mask is allocated to match
-// the volume on load and reset on each new load.
+// The mask is one byte per voxel (0 = background, 1..255 = segment id), allocated
+// to match the volume on load. A fresh load resets the mask and the segment table
+// to a single default segment. All editing operations target the ACTIVE segment.
 
-// Replace the whole mask: label every voxel whose HU is in [lo, hi].
+// --- Segments (multi-segment model) -----------------------------------------
+
+// Create a segment with colour (r,g,b in 0..255); it becomes active. Returns the
+// new segment id (1..255), or 0 if all ids are in use.
+int lumen_seg_add(LumenVolume* v, int r, int g, int b);
+
+// Forget segment `id` and clear its voxels from the mask. If it was active, the
+// active id falls back to the first remaining segment.
+void lumen_seg_remove(LumenVolume* v, int id);
+
+// The active segment (target of edits), and how to change it.
+int lumen_seg_active(const LumenVolume* v);
+void lumen_seg_set_active(LumenVolume* v, int id);
+
+// Ordered enumeration for the UI segment list.
+int lumen_seg_segment_count(const LumenVolume* v);
+int lumen_seg_segment_id_at(const LumenVolume* v, int index);
+
+// Per-segment colour + visibility.
+void lumen_seg_set_color(LumenVolume* v, int id, int r, int g, int b);
+void lumen_seg_get_color(const LumenVolume* v, int id, int* r, int* g, int* b);
+void lumen_seg_set_visible(LumenVolume* v, int id, int visible);
+int lumen_seg_get_visible(const LumenVolume* v, int id);
+
+// Voxels currently labelled with segment `id`.
+long lumen_seg_label_count(const LumenVolume* v, int id);
+
+// --- Editing operations (act on the active segment) -------------------------
+
+// Re-fill the active segment from a HU window (does not disturb other segments).
 void lumen_seg_threshold(LumenVolume* v, float lo, float hi);
 
 // 6-connected flood fill from voxel (x,y,z) into background voxels within `tol`
-// HU of the seed; adds to the mask. Returns the number of voxels newly labelled.
+// HU of the seed; adds to the active segment. Returns voxels newly labelled.
 long lumen_seg_region_grow(LumenVolume* v, int x, int y, int z, float tol);
 
 // Paint (add != 0) or erase (add == 0) a filled disk of `radius` slice-pixels on
-// the given plane. Returns the number of voxels changed. (Wired for P1b.)
+// the given plane, on the active segment. Returns the number of voxels changed.
 long lumen_seg_paint(LumenVolume* v, int axis, int index, int cx, int cy,
                      int radius, int add);
 
-// Clear the whole mask to background.
+// Clear only the active segment's voxels to background.
 void lumen_seg_clear(LumenVolume* v);
 
-// Number of labelled voxels (for the UI / enabling the 3D step).
+// Total labelled voxels across all segments (for enabling the 3D step).
 long lumen_seg_count(const LumenVolume* v);
 
+// --- Auto-threshold + island cleanup ----------------------------------------
+
+// Otsu's method over the HU histogram: the HU value separating dark from bright.
+float lumen_seg_otsu(const LumenVolume* v);
+
+// On the active segment: keep only the largest connected component / remove every
+// component smaller than `min_voxels`. Return the number of voxels removed.
+long lumen_seg_keep_largest(LumenVolume* v);
+long lumen_seg_remove_small(LumenVolume* v, long min_voxels);
+
+// --- Undo / redo ------------------------------------------------------------
+// Snapshot the mask BEFORE a user operation, then undo/redo walks the history
+// (bounded to a fixed depth; oldest states are dropped).
+
+void lumen_seg_push_undo(LumenVolume* v);
+int lumen_seg_undo(LumenVolume* v);
+int lumen_seg_redo(LumenVolume* v);
+int lumen_seg_can_undo(const LumenVolume* v);
+int lumen_seg_can_redo(const LumenVolume* v);
+
 // Colored mask overlay for slice `index` on `axis`: premultiplied RGBA8, the same
-// dimensions and orientation as lumen_extract_slice, transparent where unlabelled.
-// Returns a pointer to an internal buffer valid until the next mask-slice extract
-// on the same handle. Returns NULL on error.
+// dimensions and orientation as lumen_extract_slice, transparent where unlabelled
+// or where the owning segment is hidden. Returns a pointer to an internal buffer
+// valid until the next mask-slice extract on the same handle. NULL on error.
 const unsigned char* lumen_extract_mask_slice(LumenVolume* v, int axis, int index,
                                               int* out_w, int* out_h);
 
@@ -100,8 +150,13 @@ void lumen_voxel_to_slice_pixel(const LumenVolume* v, int axis, int x, int y, in
 //   2. lumen_mesh_generate  - call on a background thread; marches the snapshot.
 //   3. read the mesh buffers - back on the main thread, after generate returns.
 
-// Snapshot the current mask for the next generate. Main-thread only.
+// Snapshot the current mask for the next generate (every labelled voxel becomes
+// inside). Main-thread only.
 void lumen_mesh_snapshot(LumenVolume* v);
+
+// Snapshot only segment `id` (its voxels become inside, all else outside) for a
+// per-segment surface. Main-thread only.
+void lumen_mesh_snapshot_label(LumenVolume* v, int id);
 
 // March the snapshotted mask into a surface. `smooth_iters` >= 0 softens voxel
 // steps; `downsample` >= 1 coarsens the grid to cap triangles. Returns the
