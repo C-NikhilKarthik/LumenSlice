@@ -2,6 +2,8 @@
 
 #include <algorithm>
 
+#include "geometry/plane_map.hpp"
+
 namespace lumen {
 namespace {
 
@@ -36,50 +38,21 @@ void ExtractSlice(const Volume& vol, Axis axis, int index, float level,
     const float lower = level - window * 0.5f;
     const float inv_span = 1.0f / window;
 
-    // Output dimensions depend on which plane we're slicing.
-    switch (axis) {
-    case Axis::Axial: // XY plane at fixed Z.
-        out.width = vol.width;
-        out.height = vol.height;
-        break;
-    case Axis::Coronal: // XZ plane at fixed Y.
-        out.width = vol.width;
-        out.height = vol.depth;
-        break;
-    case Axis::Sagittal: // YZ plane at fixed X.
-        out.width = vol.height;
-        out.height = vol.depth;
-        break;
-    }
+    // Output dimensions + the pixel->voxel mapping (incl. the coronal/sagittal
+    // vertical flip) come from plane_map — the single source of truth shared with
+    // the mask overlay and segmentation picking. See src/geometry/plane_map.hpp.
+    const SliceDims d = slice_dims(vol, axis);
+    out.width = d.width;
+    out.height = d.height;
     out.rgba.assign(static_cast<size_t>(out.width) * out.height * 4, 0);
 
     const float* v = vol.voxel_buffer.get();
-
-    switch (axis) {
-    case Axis::Axial: {
-        const int z = index;
-        for (int y = 0; y < vol.height; ++y)
-            for (int x = 0; x < vol.width; ++x)
-                PutGray(out, x, y, Apply(v[vol.index(x, y, z)], lower, inv_span));
-        break;
-    }
-    case Axis::Coronal: {
-        const int y = index;
-        // Flip vertically so increasing Z (superior) renders toward the top.
-        for (int z = 0; z < vol.depth; ++z)
-            for (int x = 0; x < vol.width; ++x)
-                PutGray(out, x, vol.depth - 1 - z,
-                        Apply(v[vol.index(x, y, z)], lower, inv_span));
-        break;
-    }
-    case Axis::Sagittal: {
-        const int x = index;
-        for (int z = 0; z < vol.depth; ++z)
-            for (int y = 0; y < vol.height; ++y)
-                PutGray(out, y, vol.depth - 1 - z,
-                        Apply(v[vol.index(x, y, z)], lower, inv_span));
-        break;
-    }
+    for (int py = 0; py < out.height; ++py) {
+        for (int px = 0; px < out.width; ++px) {
+            const VoxelCoord c = plane_to_voxel(vol, axis, index, px, py);
+            PutGray(out, px, py,
+                    Apply(v[vol.index(c.x, c.y, c.z)], lower, inv_span));
+        }
     }
 }
 

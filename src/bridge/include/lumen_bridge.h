@@ -54,6 +54,40 @@ const unsigned char* lumen_extract_slice(LumenVolume* v, int axis, int index,
                                          float level, float window, int* out_w,
                                          int* out_h);
 
+// --- Segmentation -----------------------------------------------------------
+// All operations act on the single active label. The mask is allocated to match
+// the volume on load and reset on each new load.
+
+// Replace the whole mask: label every voxel whose HU is in [lo, hi].
+void lumen_seg_threshold(LumenVolume* v, float lo, float hi);
+
+// 6-connected flood fill from voxel (x,y,z) into background voxels within `tol`
+// HU of the seed; adds to the mask. Returns the number of voxels newly labelled.
+long lumen_seg_region_grow(LumenVolume* v, int x, int y, int z, float tol);
+
+// Paint (add != 0) or erase (add == 0) a filled disk of `radius` slice-pixels on
+// the given plane. Returns the number of voxels changed. (Wired for P1b.)
+long lumen_seg_paint(LumenVolume* v, int axis, int index, int cx, int cy,
+                     int radius, int add);
+
+// Clear the whole mask to background.
+void lumen_seg_clear(LumenVolume* v);
+
+// Number of labelled voxels (for the UI / enabling the 3D step).
+long lumen_seg_count(const LumenVolume* v);
+
+// Colored mask overlay for slice `index` on `axis`: premultiplied RGBA8, the same
+// dimensions and orientation as lumen_extract_slice, transparent where unlabelled.
+// Returns a pointer to an internal buffer valid until the next mask-slice extract
+// on the same handle. Returns NULL on error.
+const unsigned char* lumen_extract_mask_slice(LumenVolume* v, int axis, int index,
+                                              int* out_w, int* out_h);
+
+// Map a displayed slice pixel (px,py) on `axis`/`index` to a voxel coordinate.
+// One source of truth for the coronal/sagittal flip (mirrors lumen_extract_slice).
+void lumen_slice_pixel_to_voxel(const LumenVolume* v, int axis, int index, int px,
+                                int py, int* x, int* y, int* z);
+
 #ifdef __cplusplus
 }
 #endif
