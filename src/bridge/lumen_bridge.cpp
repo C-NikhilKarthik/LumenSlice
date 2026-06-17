@@ -7,15 +7,21 @@
 #include <utility>
 
 #include "core/volume.h"
+#include "geometry/plane_map.hpp"
 #include "io/dicom_loader.h"
+#include "segmentation/label_volume.hpp"
+#include "segmentation/mask_view.hpp"
+#include "segmentation/segment.hpp"
 #include "visualization/slice_view.h"
 
-// Opaque handle: the calibrated volume, a reusable extraction buffer so the
-// Swift side never allocates per frame, and the serialized metadata blob
-// (computed once at load, handed to Swift on demand).
+// Opaque handle: the calibrated volume, reusable extraction buffers so the Swift
+// side never allocates per frame, the serialized metadata blob (computed once at
+// load), and the segmentation mask + its own overlay scratch buffer.
 struct LumenVolume {
     lumen::Volume volume;
     lumen::SliceImage scratch;
+    lumen::SliceImage mask_scratch;
+    lumen::LabelVolume mask;
     std::string meta_json;
 };
 
@@ -30,6 +36,7 @@ LumenVolume* lumen_load_folder(const char* path, char* msg, int msg_cap) {
 
     auto* handle = new LumenVolume();
     handle->volume = std::move(r.volume);
+    handle->mask.reset_to(handle->volume); // empty mask aligned to the volume
     handle->meta_json = lumen::serialize_meta_json(r.meta, r.tags);
     return handle;
 }
@@ -114,6 +121,55 @@ int lumen_meta_json(const LumenVolume* v, char* out, int out_cap) {
         out[copy_len] = '\0';
     }
     return full_len;
+}
+
+// --- Segmentation -----------------------------------------------------------
+
+void lumen_seg_threshold(LumenVolume* v, float lo, float hi) {
+    if (v == nullptr) return;
+    lumen::threshold_fill(v->volume, lo, hi, v->mask);
+}
+
+long lumen_seg_region_grow(LumenVolume* v, int x, int y, int z, float tol) {
+    if (v == nullptr) return 0;
+    return lumen::region_grow(v->volume, x, y, z, tol, v->mask);
+}
+
+long lumen_seg_paint(LumenVolume* v, int axis, int index, int cx, int cy,
+                     int radius, int add) {
+    if (v == nullptr) return 0;
+    return lumen::paint_disk(v->volume, static_cast<lumen::Axis>(axis), index, cx,
+                             cy, radius, add != 0, v->mask);
+}
+
+void lumen_seg_clear(LumenVolume* v) {
+    if (v == nullptr) return;
+    v->mask.clear();
+}
+
+long lumen_seg_count(const LumenVolume* v) {
+    if (v == nullptr) return 0;
+    return v->mask.count_nonzero();
+}
+
+const unsigned char* lumen_extract_mask_slice(LumenVolume* v, int axis, int index,
+                                              int* out_w, int* out_h) {
+    if (v == nullptr) return nullptr;
+    lumen::ExtractMaskSlice(v->volume, v->mask, static_cast<lumen::Axis>(axis),
+                            index, v->mask_scratch);
+    if (out_w) *out_w = v->mask_scratch.width;
+    if (out_h) *out_h = v->mask_scratch.height;
+    return v->mask_scratch.rgba.empty() ? nullptr : v->mask_scratch.rgba.data();
+}
+
+void lumen_slice_pixel_to_voxel(const LumenVolume* v, int axis, int index, int px,
+                                int py, int* x, int* y, int* z) {
+    if (v == nullptr) return;
+    const lumen::VoxelCoord c = lumen::plane_to_voxel(
+        v->volume, static_cast<lumen::Axis>(axis), index, px, py);
+    if (x) *x = c.x;
+    if (y) *y = c.y;
+    if (z) *z = c.z;
 }
 
 } // extern "C"

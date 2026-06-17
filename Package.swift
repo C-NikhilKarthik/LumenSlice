@@ -68,6 +68,15 @@ let package = Package(
             sources: ["meta_test.cpp"],
             cxxSettings: [.headerSearchPath("../../src")]
         ),
+        // C++ unit tests for the segmentation core (plane_map round-trip,
+        // threshold, region grow, paint, overlay). Run with `swift run SegTest`.
+        .executableTarget(
+            name: "SegTest",
+            dependencies: ["LumenCore"],
+            path: "tests/cpp",
+            sources: ["seg_test.cpp"],
+            cxxSettings: [.headerSearchPath("../../src")]
+        ),
         // Headless slice-preview renderer (writes a PNG of the 3 center slices).
         .executableTarget(
             name: "SliceShot",
