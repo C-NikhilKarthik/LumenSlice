@@ -18,6 +18,42 @@ enum PlaneColors {
     }
 }
 
+// Radiological orientation letters at the pane edges. NOTE: these follow the
+// standard HFS (head-first-supine) display convention; they are an approximation
+// until we read ImageOrientationPatient per series (TODO). R/L are swapped vs the
+// image because radiological convention shows the patient's right on image-left.
+struct OrientationLabels: View {
+    let axis: Int
+    let rect: CGRect?
+
+    private var letters: (top: String, bottom: String, left: String, right: String) {
+        switch axis {
+        case 0: return ("A", "P", "R", "L") // axial
+        case 1: return ("S", "I", "R", "L") // coronal
+        default: return ("S", "I", "A", "P") // sagittal
+        }
+    }
+
+    var body: some View {
+        GeometryReader { _ in
+            if let r = rect {
+                let l = letters
+                label(l.top).position(x: r.midX, y: r.minY + 11)
+                label(l.bottom).position(x: r.midX, y: r.maxY - 11)
+                label(l.left).position(x: r.minX + 11, y: r.midY)
+                label(l.right).position(x: r.maxX - 11, y: r.midY)
+            }
+        }
+        .allowsHitTesting(false)
+    }
+
+    private func label(_ s: String) -> some View {
+        Text(s)
+            .font(.caption2.weight(.bold))
+            .foregroundStyle(.white.opacity(0.55))
+    }
+}
+
 // Draws the crosshair / slice-intersection lines at the shared focus point,
 // clipped to the fitted image rect, with a small gap at the center so the point
 // stays visible. Non-interactive.
