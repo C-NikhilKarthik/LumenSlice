@@ -29,9 +29,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 @main
 struct LumenSliceApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @StateObject private var model = VolumeModel()
+    @StateObject private var model: VolumeModel
+    @StateObject private var segmentation: SegmentationModel
 
     init() {
+        // The segmentation model drives the same C++ volume handle the
+        // VolumeModel owns, so build them together and inject both.
+        let volume = VolumeModel()
+        _model = StateObject(wrappedValue: volume)
+        _segmentation = StateObject(wrappedValue: SegmentationModel(volume: volume))
+
         // When running from a distributed .app bundle, DCMTK can't find its data
         // dictionary at the Homebrew path. Point it at the copy we bundle in
         // Resources (required to parse Implicit-VR DICOM). Must run before the
@@ -47,8 +54,9 @@ struct LumenSliceApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            AppShell()
                 .environmentObject(model)
+                .environmentObject(segmentation)
                 .frame(minWidth: 1000, minHeight: 660)
                 .onAppear {
                     // Auto-load a folder passed on the command line.

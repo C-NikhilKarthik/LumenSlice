@@ -6,7 +6,9 @@ import LumenCore
 // scrolls or adjusts window/level.
 @MainActor
 final class VolumeModel: ObservableObject {
-    private var handle: OpaquePointer?
+    // Readable by the SegmentationModel / MeshModel (same module), which drive the
+    // same C++ volume handle; only VolumeModel mutates it (load/free).
+    private(set) var handle: OpaquePointer?
 
     @Published var status = "Open a DICOM folder to begin."
     @Published var hasVolume = false
@@ -158,7 +160,9 @@ final class VolumeModel: ObservableObject {
         images[axis] = Self.makeImage(data: data, width: Int(w), height: Int(ht))
     }
 
-    private static func makeImage(data: Data, width: Int, height: Int) -> CGImage? {
+    // Wrap raw premultiplied-RGBA8 bytes in a CGImage. Shared with the
+    // SegmentationModel for mask overlays (same pixel format).
+    static func makeImage(data: Data, width: Int, height: Int) -> CGImage? {
         guard let provider = CGDataProvider(data: data as CFData) else { return nil }
         let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)
         return CGImage(
