@@ -25,6 +25,15 @@ Built with a minimalist game-engine philosophy, LumenSlice eliminates the heavy 
 
 ## Documentation
 
+**New to the codebase? Start here:** [`docs/engineering/`](docs/engineering/) is a
+newcomer-friendly guide to how LumenSlice is built.
+
+- [`docs/engineering/ARCHITECTURE.md`](docs/engineering/ARCHITECTURE.md) — the three layers, data flow, module map, and a "where do I fix X?" table
+- [`docs/engineering/CPP_ONBOARDING.md`](docs/engineering/CPP_ONBOARDING.md) — the C++ idioms used, explained for non-C++ developers
+- [`docs/engineering/DESIGN_PATTERNS.md`](docs/engineering/DESIGN_PATTERNS.md) — the design patterns in the code (Facade, Strategy, Command/Memento, ...) and how to add a new segmentation tool
+
+Reference / planning docs:
+
 - [`docs/context.md`](docs/context.md) — deep technical architecture specification
 - [`docs/dependencies.md`](docs/dependencies.md) — open-source libraries, where each is used, and licenses
 - [`docs/plan.md`](docs/plan.md) — implementation blueprint and requirements
