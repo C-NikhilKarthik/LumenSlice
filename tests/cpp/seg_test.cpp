@@ -12,10 +12,12 @@
 #include "core/volume.h"
 #include "geometry/plane_map.hpp"
 #include "segmentation/analysis.hpp"
+#include "segmentation/effects.hpp"
 #include "segmentation/label_volume.hpp"
 #include "segmentation/marching_cubes.hpp"
 #include "segmentation/mask_view.hpp"
 #include "segmentation/segment.hpp"
+#include "segmentation/segment_editor.hpp"
 #include "segmentation/segment_table.hpp"
 #include "segmentation/stl_export.hpp"
 #include "segmentation/undo_stack.hpp"
@@ -398,6 +400,53 @@ static void test_morphology() {
     CHECK(changed == 1 && lone.count_nonzero() == 0, "smooth deletes a lone voxel");
 }
 
+// 14. Strategy effects apply the same as the raw kernels, through one interface.
+static void test_effects() {
+    std::printf("segmentation effects (Strategy)\n");
+    Volume v = make_volume(8, 0.0f);
+    LabelVolume mask;
+    mask.reset_to(v);
+
+    // Drive a concrete effect through a base-class reference: that is the whole
+    // point of the pattern - the caller does not know which effect it holds.
+    const PaintEffect paint{Axis::Axial, 2, 3, 3, 1, true};
+    const SegmentationEffect& effect = paint;
+    const long painted = effect.apply(v, mask, 1);
+    CHECK(painted == 5, "PaintEffect paints a radius-1 disk (5 voxels)");
+    CHECK(mask.at(3, 3, 2) == 1, "effect targeted the active label");
+
+    // A second effect over the same mask, again through the base interface.
+    const SmoothEffect smooth{1};
+    const SegmentationEffect& smoother = smooth;
+    smoother.apply(v, mask, 1); // rounds the lone-ish disk; just must not crash
+    CHECK(mask.valid(), "SmoothEffect leaves a valid mask");
+}
+
+// 15. SegmentEditor facade: bound volume, undo round-trip, remove clears voxels.
+static void test_segment_editor() {
+    std::printf("segment editor (facade)\n");
+    Volume v = make_volume(8, 0.0f);
+    SegmentEditor editor;
+    editor.reset_to(v, Rgb{0, 180, 210});
+    CHECK(editor.segment_count() == 1 && editor.active() == 1,
+          "fresh editor has one active segment");
+
+    editor.push_undo();
+    editor.paint(Axis::Axial, 2, 3, 3, 1, true); // 5 voxels into segment 1
+    CHECK(editor.total_labelled() == 5, "paint via the editor labels 5 voxels");
+    CHECK(editor.undo(), "undo applies");
+    CHECK(editor.total_labelled() == 0, "undo restores the empty mask");
+
+    // A second segment, painted, then removed - its voxels must vanish too.
+    const std::uint8_t two = editor.add_segment(Rgb{200, 60, 60});
+    CHECK(two == 2 && editor.active() == 2, "second segment is id 2 and active");
+    editor.paint(Axis::Axial, 2, 5, 5, 1, true);
+    CHECK(editor.label_count(2) == 5, "segment 2 has 5 voxels");
+    editor.remove_segment(2);
+    CHECK(editor.label_count(2) == 0 && editor.segment_count() == 1,
+          "removing a segment clears its voxels and forgets it");
+}
+
 int main() {
     std::printf("== SegTest ==\n");
     test_plane_map_roundtrip();
@@ -413,6 +462,8 @@ int main() {
     test_islands();
     test_undo();
     test_morphology();
+    test_effects();
+    test_segment_editor();
     if (g_failures == 0) {
         std::printf("All segmentation tests passed.\n");
         return 0;
