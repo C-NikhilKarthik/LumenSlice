@@ -109,7 +109,7 @@ Then in Xcode:
    window either — pick `LumenSlice`.
 3. Set the destination to **My Mac**.
 4. Press **⌘R** to build and run.
-5. *(Optional)* To auto-load a folder on launch: **Product ▸ Scheme ▸ Edit Scheme… ▸ Run ▸ Arguments**, and add the folder path. Otherwise use **Open Folder** or drag a DICOM folder onto the window.
+5. _(Optional)_ To auto-load a folder on launch: **Product ▸ Scheme ▸ Edit Scheme… ▸ Run ▸ Arguments**, and add the folder path. Otherwise use **Open Folder** or drag a DICOM folder onto the window.
 
 > DCMTK is linked from Homebrew with absolute library paths, so the app finds it
 > at runtime under Xcode without any extra `DYLD`/rpath configuration.
@@ -122,81 +122,42 @@ Then in Xcode:
 > drag-and-drop. Segmentation, marching cubes, and STL export follow the
 > [8-week plan](docs/timelines.md).
 
-### Share the app with someone (self-contained .app)
+### Share the app with someone (.dmg)
 
 ```bash
-tools/make_app.sh
+ADHOC=1 tools/make_app.sh
 ```
 
-This builds a release, wraps it in `dist/LumenSlice.app`, and zips it to
-`dist/LumenSlice.zip` (~640 KB). DCMTK is linked **statically** and its data
-dictionary is bundled in `Contents/Resources`, so the app has **no Homebrew or
-DCMTK dependency** — it runs on a clean Mac. The bundle is ad-hoc code-signed
-(required for arm64 to launch at all).
+This builds a release, wraps it in `dist/LumenSlice.app`, ad-hoc signs it, and
+packages a drag-to-`/Applications` `dist/LumenSlice.dmg`. DCMTK is linked
+**statically** and its data dictionary is bundled in `Contents/Resources`, so the
+app has **no Homebrew or DCMTK dependency** — it runs on a clean Mac. No Apple
+Developer account is required.
 
-Send `dist/LumenSlice.zip`. The recipient unzips it, drags `LumenSlice.app` to
-`/Applications`, and on first launch **right-clicks → Open** (to get past
-Gatekeeper, since it isn't notarized), or runs:
+Send `dist/LumenSlice.dmg`. Because it is not notarized, the recipient clears
+Gatekeeper **once** on first launch — right-click `LumenSlice.app` → **Open** →
+**Open**, or run `xattr -dr com.apple.quarantine /Applications/LumenSlice.app`.
+After that it opens normally.
 
-```bash
-xattr -dr com.apple.quarantine /Applications/LumenSlice.app
-```
+**Don't want to build it yourself?** Every push to `main` runs CI
+([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) which builds, tests, and
+publishes the ad-hoc `.dmg` to the repository's rolling **`latest`** GitHub
+Release — download it from the Releases page.
 
-For a `.dmg` (drag-to-Applications disk image) instead of a zip:
+> **Optional — notarized, zero-warning .dmg.** With a *paid* Apple Developer
+> membership you can produce a notarized build that opens with a plain
+> double-click (no right-click dance). Run `tools/make_app.sh` (no `ADHOC=1`); the
+> one-time setup is documented in
+> [`tools/NOTARIZE_SETUP.md`](tools/NOTARIZE_SETUP.md).
 
-```bash
-tools/make_dmg.sh        # -> dist/LumenSlice.dmg
-```
-
-Caveats: the bundle targets the **build host's architecture** (Apple Silicon →
-arm64; an Intel Mac can't run it). For a Gatekeeper-clean, double-click-able app
-with no warning, you need an Apple **Developer ID** certificate + notarization
-(`codesign` with your cert, then `xcrun notarytool submit`).
-
-### Releases & CI (GitHub Actions)
-
-Two workflows live in [`.github/workflows`](.github/workflows):
-
-- **`ci.yml`** — on every push / PR to `main`: builds the C++ core + SwiftUI app
-  on a macOS (Apple Silicon) runner, generates the synthetic CT phantom, and runs
-  the headless `IngestTest` so ingestion regressions fail the build.
-- **`release.yml`** — builds `dist/LumenSlice.dmg` and publishes it as a
-  **GitHub Release** with the `.dmg` attached.
-
-  **Versioning (pre-1.0):** we only auto-bump the **minor** number — major and
-  patch stay `0` → `v0.1.0`, `v0.2.0`, `v0.3.0`, … You never pick a number.
-  Trigger a release from the **Actions ▸ Release ▸ Run workflow** button: the job
-  reads the latest `v0.N.0` tag, computes `v0.(N+1).0`, creates+pushes that tag,
-  and cuts the Release. The first run (no tags yet) produces `v0.1.0`. The
-  resolved version is stamped into the app bundle.
-
-  **Escape hatch** for when proper semver matters later: push an explicit tag and
-  the workflow honours it verbatim instead of auto-bumping:
-
-  ```bash
-  git tag v1.2.3 && git push origin v1.2.3
-  ```
-
-#### A note on the "Apple Developer account"
-
-A **free** Apple ID only grants a *Personal Team*, which can do **development**
-signing (run on your own Mac) — it **cannot** issue a Developer ID certificate or
-**notarize**. So released `.dmg`s are **ad-hoc signed but not notarized**, and
-recipients must right-click → **Open** once (or strip quarantine) on first launch.
-There is no free path around this; notarization requires the **paid** ($99/yr)
-Apple Developer Program.
-
-When you do get a paid account, releasing notarized builds is a drop-in change:
-add the repo secrets and uncomment the signing/notarization block in
-`release.yml` (the steps are stubbed there). The typical flow is `codesign` with
-your *Developer ID Application* cert (`--options runtime`), then
-`xcrun notarytool submit dist/LumenSlice.dmg --wait`, then `xcrun stapler staple`.
+Caveat: the bundle targets the **build host's architecture** (Apple Silicon →
+arm64; an Intel Mac can't run it).
 
 ### Architecture note (SwiftUI shell)
 
 The original blueprint specified a Sokol + Dear ImGui shell for a single
 cross-platform binary. Phase 1 instead uses a **SwiftUI** front-end for a cleaner,
-fully-native macOS look. Crucially, this only swaps the *presentation layer*: the
+fully-native macOS look. Crucially, this only swaps the _presentation layer_: the
 data-oriented C++ core (`src/core`, `src/io`, `src/visualization`) is untouched
 and stays UI-agnostic per [`docs/agent.md`](docs/agent.md) §1, exposed to Swift
 through a thin C API (`src/bridge`). The Sokol/ImGui path can be revived for the

@@ -1,17 +1,23 @@
 #include "lumen_bridge.h"
 
+#include <algorithm>
 #include <cstdio>
+#include <cstring>
+#include <string>
 #include <utility>
 
+#include "bridge/meta_copy.hpp"
 #include "core/volume.h"
 #include "io/dicom_loader.h"
 #include "visualization/slice_view.h"
 
-// Opaque handle: the calibrated volume plus a reusable extraction buffer so the
-// Swift side never allocates per frame.
+// Opaque handle: the calibrated volume, a reusable extraction buffer so the
+// Swift side never allocates per frame, and the serialized metadata blob
+// (computed once at load, handed to Swift on demand).
 struct LumenVolume {
     lumen::Volume volume;
     lumen::SliceImage scratch;
+    std::string meta_json;
 };
 
 extern "C" {
@@ -25,6 +31,12 @@ LumenVolume* lumen_load_folder(const char* path, char* msg, int msg_cap) {
 
     auto* handle = new LumenVolume();
     handle->volume = std::move(r.volume);
+    // Leave the blob empty when extraction produced nothing — lumen_meta_json's
+    // contract is "0 / empty when there is no metadata", so we must not emit an
+    // all-empty JSON object that the Swift side would treat as real metadata.
+    handle->meta_json = lumen::metadata_present(r.meta, r.tags)
+                            ? lumen::serialize_meta_json(r.meta, r.tags)
+                            : std::string();
     return handle;
 }
 
@@ -93,6 +105,14 @@ const unsigned char* lumen_extract_slice(LumenVolume* v, int axis, int index,
     if (out_w) *out_w = v->scratch.width;
     if (out_h) *out_h = v->scratch.height;
     return v->scratch.rgba.empty() ? nullptr : v->scratch.rgba.data();
+}
+
+int lumen_meta_json(const LumenVolume* v, char* out, int out_cap) {
+    if (v == nullptr) {
+        if (out != nullptr && out_cap > 0) out[0] = '\0';
+        return 0;
+    }
+    return lumen::copy_string_out(v->meta_json, out, out_cap);
 }
 
 } // extern "C"
