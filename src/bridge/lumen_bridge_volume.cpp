@@ -1,3 +1,11 @@
+// LumenSlice C bridge - volume loading, geometry, and slice extraction.
+//
+// One of three bridge translation units (see also lumen_bridge_segment.cpp and
+// lumen_bridge_mesh.cpp). This file is the "load a scan and look at its grayscale
+// slices" surface: ingestion, dimensions/spacing/HU range, slice extraction, the
+// metadata blob, and the pane-pixel <-> voxel geometry mapping. Each function is a
+// thin marshal over the C++ core - no domain logic lives here.
+
 #include "lumen_bridge.h"
 
 #include <algorithm>
@@ -8,17 +16,16 @@
 
 #include "bridge/meta_copy.hpp"
 #include "core/volume.h"
+#include "geometry/plane_map.hpp"
 #include "io/dicom_loader.h"
+#include "lumen_handle.hpp"
 #include "visualization/slice_view.h"
 
-// Opaque handle: the calibrated volume, a reusable extraction buffer so the
-// Swift side never allocates per frame, and the serialized metadata blob
-// (computed once at load, handed to Swift on demand).
-struct LumenVolume {
-    lumen::Volume volume;
-    lumen::SliceImage scratch;
-    std::string meta_json;
-};
+namespace {
+// Colour of the segment auto-created on load (a cyan-teal, echoing the original
+// single-label overlay). The UI overrides colours via lumen_seg_set_color.
+constexpr lumen::Rgb kDefaultSegmentColor{0, 180, 210};
+} // namespace
 
 extern "C" {
 
@@ -31,6 +38,7 @@ LumenVolume* lumen_load_folder(const char* path, char* msg, int msg_cap) {
 
     auto* handle = new LumenVolume();
     handle->volume = std::move(r.volume);
+    handle->editor.reset_to(handle->volume, kDefaultSegmentColor);
     // Leave the blob empty when extraction produced nothing — lumen_meta_json's
     // contract is "0 / empty when there is no metadata", so we must not emit an
     // all-empty JSON object that the Swift side would treat as real metadata.
@@ -113,6 +121,27 @@ int lumen_meta_json(const LumenVolume* v, char* out, int out_cap) {
         return 0;
     }
     return lumen::copy_string_out(v->meta_json, out, out_cap);
+}
+
+// Pane-pixel <-> voxel geometry. The single source of truth is plane_map; these
+// just expose it across the language line for crosshair + seed/paint mapping.
+void lumen_slice_pixel_to_voxel(const LumenVolume* v, int axis, int index, int px,
+                                int py, int* x, int* y, int* z) {
+    if (v == nullptr) return;
+    const lumen::VoxelCoord c = lumen::plane_to_voxel(
+        v->volume, static_cast<lumen::Axis>(axis), index, px, py);
+    if (x) *x = c.x;
+    if (y) *y = c.y;
+    if (z) *z = c.z;
+}
+
+void lumen_voxel_to_slice_pixel(const LumenVolume* v, int axis, int x, int y, int z,
+                                int* px, int* py) {
+    if (v == nullptr) return;
+    const lumen::PixelCoord p = lumen::voxel_to_plane(
+        v->volume, static_cast<lumen::Axis>(axis), x, y, z);
+    if (px) *px = p.px;
+    if (py) *py = p.py;
 }
 
 } // extern "C"

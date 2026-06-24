@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <unordered_map>
 #include <vector>
 
 // DCMTK — strictly the dcmdata layer (see docs/dependencies.md). We pull pixel
@@ -16,6 +17,9 @@
 #include "dcmtk/config/osconfig.h"
 #include "dcmtk/dcmdata/dctk.h"
 #include "dcmtk/dcmdata/dcxfer.h"
+#include "dcmtk/dcmdata/dcrledrg.h" // RLE decoder registration
+#include "dcmtk/dcmjpeg/djdecode.h" // JPEG (baseline/extended/lossless) decoders
+#include "dcmtk/dcmjpls/djdecode.h" // JPEG-LS decoders
 
 namespace fs = std::filesystem;
 
@@ -31,8 +35,22 @@ struct Slice {
     std::array<double, 3> ipp{{0, 0, 0}};                 // Image Position (Patient)
     std::array<double, 6> iop{{1, 0, 0, 0, 1, 0}};        // Image Orientation (Patient)
     double sort_key = 0.0;                                // IPP projected on slice normal
+    std::string series_uid;                               // groups slices into one series
     std::vector<float> hu;                                // length rows*cols
 };
+
+// Register DCMTK's pixel-data decoders exactly once. Without this, encapsulated
+// (compressed) transfer syntaxes — JPEG, JPEG-LS, RLE, the formats most clinical
+// PACS exports actually use — can't be decoded and every slice is skipped.
+void EnsureCodecsRegistered() {
+    static const bool registered = [] {
+        DJDecoderRegistration::registerCodecs();     // JPEG
+        DJLSDecoderRegistration::registerCodecs();   // JPEG-LS
+        DcmRLEDecoderRegistration::registerCodecs(); // RLE
+        return true;
+    }();
+    (void)registered;
+}
 
 // docs/plan.md §1: a real DICOM file carries the 4-byte "DICM" magic at offset
 // 128 (right after the 128-byte preamble). Cheap pre-filter before we hand the
@@ -54,10 +72,17 @@ bool ParseSlice(const fs::path& path, Slice& out) {
     DcmDataset* ds = ff.getDataset();
     if (ds == nullptr) return false;
 
-    // Phase 1 handles native (uncompressed) transfer syntaxes only. Compressed
-    // pixel data would need the dcmjpeg codecs, which we intentionally don't pull.
+    // Encapsulated (compressed) pixel data — JPEG / JPEG-LS / RLE — is decoded to
+    // native little-endian in place so the uncompressed path below sees plain
+    // pixels. Anything we still can't decode (e.g. a codec not registered) is
+    // skipped rather than read as garbage.
     DcmXfer xfer(ds->getOriginalXfer());
-    if (xfer.usesEncapsulatedFormat()) return false;
+    if (xfer.usesEncapsulatedFormat()) {
+        if (ds->chooseRepresentation(EXS_LittleEndianExplicit, nullptr).bad() ||
+            !ds->canWriteXfer(EXS_LittleEndianExplicit)) {
+            return false;
+        }
+    }
 
     Uint16 rows = 0, cols = 0;
     if (ds->findAndGetUint16(DCM_Rows, rows).bad() ||
@@ -79,6 +104,10 @@ bool ParseSlice(const fs::path& path, Slice& out) {
     // slice still loads (it just won't sort meaningfully).
     out.rows = rows;
     out.cols = cols;
+    OFString series_uid;
+    if (ds->findAndGetOFString(DCM_SeriesInstanceUID, series_uid).good()) {
+        out.series_uid = series_uid.c_str();
+    }
     ds->findAndGetFloat64(DCM_PixelSpacing, out.spacing_row, 0); // row spacing (Y)
     ds->findAndGetFloat64(DCM_PixelSpacing, out.spacing_col, 1); // column spacing (X)
     for (unsigned long i = 0; i < 3; ++i)
@@ -109,6 +138,7 @@ bool ParseSlice(const fs::path& path, Slice& out) {
 
 LoadResult LoadDicomFolder(const std::string& folder) {
     LoadResult result;
+    EnsureCodecsRegistered();
 
     std::error_code ec;
     if (!fs::exists(folder, ec) || !fs::is_directory(folder, ec)) {
@@ -149,9 +179,32 @@ LoadResult LoadDicomFolder(const std::string& folder) {
     }
 
     if (slices.empty()) {
-        result.message = "Found DICOM files but none were usable (compressed or "
-                         "unsupported pixel format).";
+        result.message = "Found DICOM files but none were usable (unsupported pixel "
+                         "format, or compression this build can't decode).";
         return result;
+    }
+
+    // A folder often holds more than one series (the CT plus a scout/topogram, a
+    // dose report, or a secondary capture). Merging them yields nonsensical spacing
+    // and Z-ordering, so keep only the largest series (by Series Instance UID).
+    {
+        std::unordered_map<std::string, int> counts;
+        for (const auto& s : slices) ++counts[s.series_uid];
+        if (counts.size() > 1) {
+            const std::string& best =
+                std::max_element(counts.begin(), counts.end(),
+                                 [](const auto& a, const auto& b) {
+                                     return a.second < b.second;
+                                 })
+                    ->first;
+            slices.erase(std::remove_if(slices.begin(), slices.end(),
+                                        [&](const Slice& s) {
+                                            return s.series_uid != best;
+                                        }),
+                         slices.end());
+            // slices_loaded / files_skipped are reconciled by the dimension-lock
+            // block below, which recomputes them from the final slice count.
+        }
     }
 
     // Phase 1 expects one consistent series: lock dimensions to the first slice
@@ -199,6 +252,10 @@ LoadResult LoadDicomFolder(const std::string& folder) {
     vol.depth = static_cast<int>(slices.size());
     vol.spacing_x = static_cast<float>(slices.front().spacing_col);
     vol.spacing_y = static_cast<float>(slices.front().spacing_row);
+    // A series with absent/zero Pixel Spacing would otherwise render degenerate;
+    // fall back to 1 mm isotropic so aspect math stays well-defined.
+    if (!(vol.spacing_x > 0.0f)) vol.spacing_x = 1.0f;
+    if (!(vol.spacing_y > 0.0f)) vol.spacing_y = 1.0f;
 
     // Z spacing from the gap between the first two sorted slice positions; if we
     // only have one slice, fall back to the in-plane spacing.

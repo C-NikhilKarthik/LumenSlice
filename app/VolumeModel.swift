@@ -6,7 +6,36 @@ import LumenCore
 // scrolls or adjusts window/level.
 @MainActor
 final class VolumeModel: ObservableObject {
-    private var handle: OpaquePointer?
+    // Readable by the SegmentationModel / MeshModel (same module), which drive the
+    // same C++ volume handle; only VolumeModel mutates it (load/free).
+    private(set) var handle: OpaquePointer?
+
+    // Background mesh generation reads the handle off the main actor. A load that
+    // lands while that work is in flight must NOT free the handle underneath it, so
+    // a pinned handle is retired into `deferredFree` and released only once the last
+    // background reader balances its pin. All of this is touched on the main actor
+    // (finishLoad, pinHandle, releaseHandle), so the counter needs no locking.
+    private var pinnedReaders = 0
+    private var deferredFree: [OpaquePointer] = []
+
+    /// Pin the current handle so an in-flight load won't free it while background
+    /// work (e.g. marching cubes) is reading it. Returns nil if no volume is loaded.
+    /// Every successful pin MUST be balanced by exactly one `releaseHandle()`.
+    func pinHandle() -> OpaquePointer? {
+        guard let h = handle else { return nil }
+        pinnedReaders += 1
+        return h
+    }
+
+    /// Balance a `pinHandle()`. When the last pin is released, any handles a load
+    /// retired while pinned are freed.
+    func releaseHandle() {
+        pinnedReaders = max(0, pinnedReaders - 1)
+        if pinnedReaders == 0 {
+            for h in deferredFree { lumen_free(h) }
+            deferredFree.removeAll()
+        }
+    }
 
     @Published var status = "Open a DICOM folder to begin."
     @Published var hasVolume = false
@@ -36,9 +65,28 @@ final class VolumeModel: ObservableObject {
     }
     private var suppressWLRefresh = false
 
-    // Per-axis scroll position and rendered slice.
-    @Published var sliceIndex: [Int] = [0, 0, 0]
+    // Shared crosshair focus point in voxel coordinates (x,y,z). All three slice
+    // planes pass through it, so clicking a point in one pane recenters the
+    // others (3D-Slicer-style linked navigation).
+    @Published var focus = SIMD3<Int>(0, 0, 0)
     @Published var images: [CGImage?] = [nil, nil, nil]
+
+    // Display toggles for the slice overlays (crosshair/intersection lines and the
+    // R/L/A/P/S/I orientation letters), persisted across launches in UserDefaults.
+    @Published var showCrosshair: Bool = UserDefaults.standard.object(
+        forKey: "showCrosshair") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(showCrosshair, forKey: "showCrosshair") }
+    }
+    @Published var showOrientationLabels: Bool = UserDefaults.standard.object(
+        forKey: "showOrientationLabels") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(showOrientationLabels,
+                                           forKey: "showOrientationLabels") }
+    }
+
+    // Per-axis slice index derived from the focus voxel: axial steps Z, coronal
+    // steps Y, sagittal steps X. Kept as an accessor so existing call sites and
+    // the SlicePane sliders/labels keep working against the new source of truth.
+    var sliceIndex: [Int] { [focus.z, focus.y, focus.x] }
 
     // Curated + full DICOM metadata for the loaded series (nil until a load).
     @Published var metadata: DicomMetadata?
@@ -66,6 +114,7 @@ final class VolumeModel: ObservableObject {
 
     deinit {
         if let h = handle { lumen_free(h) }
+        for h in deferredFree { lumen_free(h) }
     }
 
     func load(path: String) {
@@ -93,7 +142,11 @@ final class VolumeModel: ObservableObject {
         status = message
         guard let newHandle = OpaquePointer(bitPattern: handleBits) else { return }
 
-        if let old = handle { lumen_free(old) }
+        // Defer freeing while a background reader (mesh generation) still holds a
+        // pin on the old handle — releaseHandle() frees it once that work finishes.
+        if let old = handle {
+            if pinnedReaders > 0 { deferredFree.append(old) } else { lumen_free(old) }
+        }
         handle = newHandle
         hasVolume = true
 
@@ -118,7 +171,7 @@ final class VolumeModel: ObservableObject {
         }
 
         metadata = Self.readMetadata(newHandle)
-        sliceIndex = [sliceCount(0) / 2, sliceCount(1) / 2, sliceCount(2) / 2]
+        focus = SIMD3(width / 2, height / 2, depth / 2) // start centered
         refreshAll()
     }
 
@@ -138,8 +191,48 @@ final class VolumeModel: ObservableObject {
     }
 
     func setSlice(_ axis: Int, _ value: Int) {
-        sliceIndex[axis] = value
+        switch axis {
+        case 0: focus.z = clampZ(value)
+        case 1: focus.y = clampY(value)
+        default: focus.x = clampX(value)
+        }
         refresh(axis)
+    }
+
+    /// Jump the shared focus to a voxel (click-to-locate). Recenters all three
+    /// panes so they pass through the clicked anatomical point.
+    func jump(to voxel: SIMD3<Int>) {
+        focus = SIMD3(clampX(voxel.x), clampY(voxel.y), clampZ(voxel.z))
+        refreshAll()
+    }
+
+    private func clampX(_ v: Int) -> Int { min(max(v, 0), max(width - 1, 0)) }
+    private func clampY(_ v: Int) -> Int { min(max(v, 0), max(height - 1, 0)) }
+    private func clampZ(_ v: Int) -> Int { min(max(v, 0), max(depth - 1, 0)) }
+
+    // MARK: - Slice geometry seam
+    //
+    // These two methods are the ONLY place pane-pixel <-> voxel geometry is
+    // resolved (they delegate to the C++ orthogonal plane_map, the single source
+    // of truth). An oblique/RAS model would replace just these — see
+    // yashdocs/slicer-parity/PLAN.md.
+
+    /// Voxel under image pixel (px,py) of the current slice on `axis`.
+    func voxel(onAxis axis: Int, px: Int, py: Int) -> SIMD3<Int>? {
+        guard let h = handle else { return nil }
+        var x: Int32 = 0, y: Int32 = 0, z: Int32 = 0
+        lumen_slice_pixel_to_voxel(h, Int32(axis), Int32(sliceIndex[axis]),
+                                   Int32(px), Int32(py), &x, &y, &z)
+        return SIMD3(Int(x), Int(y), Int(z))
+    }
+
+    /// Where the shared focus voxel projects onto pane `axis` (for the crosshair).
+    func crosshairPixel(onAxis axis: Int) -> (px: Int, py: Int)? {
+        guard let h = handle else { return nil }
+        var px: Int32 = 0, py: Int32 = 0
+        lumen_voxel_to_slice_pixel(h, Int32(axis), Int32(focus.x), Int32(focus.y),
+                                   Int32(focus.z), &px, &py)
+        return (Int(px), Int(py))
     }
 
     /// Set window and level together with a single re-render. Clamps window to
@@ -172,7 +265,9 @@ final class VolumeModel: ObservableObject {
         images[axis] = Self.makeImage(data: data, width: Int(w), height: Int(ht))
     }
 
-    private static func makeImage(data: Data, width: Int, height: Int) -> CGImage? {
+    // Wrap raw premultiplied-RGBA8 bytes in a CGImage. Shared with the
+    // SegmentationModel for mask overlays (same pixel format).
+    static func makeImage(data: Data, width: Int, height: Int) -> CGImage? {
         guard let provider = CGDataProvider(data: data as CFData) else { return nil }
         let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)
         return CGImage(
