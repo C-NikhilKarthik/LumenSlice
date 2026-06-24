@@ -352,6 +352,10 @@ private struct SegmentListRow: View {
         .onChange(of: row.name) { newName in if !nameFocused { editingName = newName } }
     }
 
+    // Explicitly main-actor: older Swift toolchains (the CI runner) don't infer
+    // MainActor isolation for a View's non-body method, so the call to the
+    // @MainActor `seg.rename` would otherwise fail to build there.
+    @MainActor
     private func commitName() {
         if editingName != row.name { seg.rename(row.id, to: editingName) }
     }
