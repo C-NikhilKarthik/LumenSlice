@@ -30,7 +30,20 @@ let package = Package(
                 // dependency and can be shipped in a self-contained .app bundle.
                 // Only system libraries (libz, libc++, libSystem) remain.
                 .unsafeFlags([
+                    // Decoders for encapsulated (compressed) pixel data so real-world
+                    // JPEG / JPEG-LS / RLE DICOM series load, not just native LE.
+                    // Listed dependents-first (static link order): the dcm* codec
+                    // libs reference symbols resolved by dcmdata + the IJG/CharLS
+                    // backends that follow.
+                    "\(dcmtkLib)/libdcmjpls.a",
+                    "\(dcmtkLib)/libdcmjpeg.a",
+                    "\(dcmtkLib)/libdcmimage.a",
+                    "\(dcmtkLib)/libdcmimgle.a",
                     "\(dcmtkLib)/libdcmdata.a",
+                    "\(dcmtkLib)/libijg16.a",
+                    "\(dcmtkLib)/libijg12.a",
+                    "\(dcmtkLib)/libijg8.a",
+                    "\(dcmtkLib)/libdcmtkcharls.a",
                     "\(dcmtkLib)/liboflog.a",
                     "\(dcmtkLib)/libofstd.a",
                     "\(dcmtkLib)/liboficonv.a",
@@ -68,11 +81,26 @@ let package = Package(
             sources: ["meta_test.cpp"],
             cxxSettings: [.headerSearchPath("../../src")]
         ),
+        // C++ unit tests for the segmentation core (plane_map round-trip,
+        // threshold, region grow, paint, overlay). Run with `swift run SegTest`.
+        .executableTarget(
+            name: "SegTest",
+            dependencies: ["LumenCore"],
+            path: "tests/cpp",
+            sources: ["seg_test.cpp"],
+            cxxSettings: [.headerSearchPath("../../src")]
+        ),
         // Headless slice-preview renderer (writes a PNG of the 3 center slices).
         .executableTarget(
             name: "SliceShot",
             dependencies: ["LumenCore"],
             path: "tools/sliceshot"
+        ),
+        // Headless 3D pipeline check (threshold -> marching cubes -> binary STL).
+        .executableTarget(
+            name: "MeshShot",
+            dependencies: ["LumenCore"],
+            path: "tools/meshshot"
         ),
     ],
     cxxLanguageStandard: .cxx20

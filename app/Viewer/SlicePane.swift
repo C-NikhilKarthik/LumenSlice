@@ -1,0 +1,227 @@
+import SwiftUI
+
+// One orthographic plane: the window/levelled HU image, an optional colored mask
+// overlay, the shared crosshair, a slice scrubber, and the interaction layer.
+// Navigation (3D-Slicer-style): click to locate (recenters all panes), mouse
+// wheel scrolls slices, left-drag adjusts window/level. On the Segment tab the
+// active tool owns the canvas instead: paint/erase brush along a drag (with a
+// cursor ring), or region-grow seed on a click. A header button maximizes this
+// pane to fill the viewport.
+struct SlicePane: View {
+    @EnvironmentObject var model: VolumeModel
+    let axis: Int
+    var segment: SegmentationModel? = nil
+    var isFocused: Bool = false
+    var onToggleFocus: (() -> Void)? = nil
+
+    // Live cursor position over this pane (for the brush ring), and paint-stroke
+    // bookkeeping so a drag is one continuous, gap-free, single-undo stroke.
+    @State private var pointer: CGPoint?
+    @State private var lastPaintPixel: (px: Int, py: Int)?
+    @State private var strokeActive = false
+
+    var body: some View {
+        let count = model.sliceCount(axis)
+        VStack(spacing: 8) {
+            HStack {
+                Text(VolumeModel.axisNames[axis])
+                    .font(.headline)
+                Spacer()
+                Text("\(model.sliceIndex[axis] + 1) / \(max(count, 1))")
+                    .font(.caption)
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                if let onToggleFocus {
+                    Button(action: onToggleFocus) {
+                        Image(systemName: isFocused
+                              ? "arrow.down.right.and.arrow.up.left"
+                              : "arrow.up.left.and.arrow.down.right")
+                    }
+                    .buttonStyle(.borderless)
+                    .help(isFocused ? "Restore layout" : "Maximize this view")
+                }
+            }
+
+            imageArea
+
+            Slider(
+                value: Binding(
+                    get: { Double(model.sliceIndex[axis]) },
+                    set: { model.setSlice(axis, Int($0.rounded())) }),
+                in: 0...Double(max(count - 1, 1))
+            )
+            .controlSize(.small)
+            .disabled(count <= 1)
+        }
+        .padding(12)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .strokeBorder(Color.white.opacity(0.08))
+        )
+        .shadow(color: .black.opacity(0.25), radius: 8, y: 3)
+    }
+
+    private var imageArea: some View {
+        GeometryReader { geo in
+            let aspect = model.physicalAspect(axis)
+            let container = geo.size
+            let fitted = SliceCoordinates.fittedRect(container: container, aspect: aspect)
+            ZStack {
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(.black)
+                if let img = model.images[axis] {
+                    Image(decorative: img, scale: 1)
+                        .resizable()
+                        .interpolation(.none)
+                        .aspectRatio(aspect, contentMode: .fit)
+                        .padding(8)
+                }
+                if let seg = segment, seg.showOverlay {
+                    MaskOverlay(store: seg.overlayStore, axis: axis, aspect: aspect)
+                }
+                if model.showCrosshair {
+                    let colors = PlaneColors.forPane(axis)
+                    CrosshairOverlay(
+                        point: crosshairPoint(container: container, aspect: aspect),
+                        rect: fitted,
+                        verticalColor: colors.vertical,
+                        horizontalColor: colors.horizontal)
+                }
+                if model.showOrientationLabels {
+                    OrientationLabels(axis: axis, rect: fitted)
+                }
+                brushRing(fitted: fitted)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Rectangle())
+            .modifier(SliceInteraction(pane: self, container: container))
+            .overlay(CanvasInputCatcher(
+                onStep: { model.setSlice(axis, model.sliceIndex[axis] + $0) },
+                onMove: { pointer = $0 }))
+            .overlay(alignment: .bottomLeading) {
+                Text("W \(Int(model.window))  L \(Int(model.level))")
+                    .font(.caption2.monospacedDigit())
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(.black.opacity(0.5), in: Capsule())
+                    .foregroundStyle(.white.opacity(0.9))
+                    .padding(10)
+            }
+        }
+    }
+
+    // The brush footprint: a ring sized to brushRadius (slice pixels) scaled into
+    // display points, tinted by the active segment (red while erasing).
+    @ViewBuilder private func brushRing(fitted: CGRect?) -> some View {
+        if let seg = segment, seg.tool.isBrush, let p = pointer,
+           let img = model.images[axis], let rect = fitted, rect.contains(p) {
+            let scale = rect.width / CGFloat(img.width)
+            let diameter = CGFloat(seg.brushRadius) * scale * 2
+            Circle()
+                .stroke(seg.tool == .erase ? Color.red : seg.activeColor, lineWidth: 1.5)
+                .frame(width: diameter, height: diameter)
+                .position(p)
+                .allowsHitTesting(false)
+        }
+    }
+
+    private func crosshairPoint(container: CGSize, aspect: CGFloat) -> CGPoint? {
+        guard let img = model.images[axis],
+              let c = model.crosshairPixel(onAxis: axis) else { return nil }
+        return SliceCoordinates.point(forPixel: c.px, c.py, container: container,
+                                      imageWidth: img.width, imageHeight: img.height,
+                                      aspect: aspect)
+    }
+
+    // MARK: - Interaction helpers (called from SliceInteraction)
+
+    fileprivate func pixel(at point: CGPoint, container: CGSize) -> (x: Int, y: Int)? {
+        guard let img = model.images[axis] else { return nil }
+        return SliceCoordinates.pixel(
+            forTap: point, container: container,
+            imageWidth: img.width, imageHeight: img.height,
+            aspect: model.physicalAspect(axis))
+    }
+
+    fileprivate func locate(at point: CGPoint, container: CGSize) {
+        guard let (px, py) = pixel(at: point, container: container),
+              let voxel = model.voxel(onAxis: axis, px: px, py: py) else { return }
+        model.jump(to: voxel)
+    }
+
+    fileprivate func brushChanged(_ seg: SegmentationModel, at point: CGPoint,
+                                  container: CGSize) {
+        pointer = point
+        guard seg.tool.isBrush else { return }
+        if !strokeActive { seg.beginStroke(); strokeActive = true; lastPaintPixel = nil }
+        paintMove(seg, to: point, container: container)
+    }
+
+    fileprivate func brushEnded(_ seg: SegmentationModel, at point: CGPoint,
+                                container: CGSize) {
+        if seg.tool.isBrush {
+            if !strokeActive { seg.beginStroke(); strokeActive = true; lastPaintPixel = nil }
+            paintMove(seg, to: point, container: container)
+            seg.endStroke()
+            strokeActive = false
+            lastPaintPixel = nil
+        } else if seg.tool == .regionGrow {
+            if let (px, py) = pixel(at: point, container: container) {
+                seg.seedRegionGrow(axis: axis, px: px, py: py)
+            }
+        }
+    }
+
+    private func paintMove(_ seg: SegmentationModel, to point: CGPoint,
+                           container: CGSize) {
+        guard let (px, py) = pixel(at: point, container: container) else { return }
+        seg.paintStroke(axis: axis, from: lastPaintPixel, to: (px, py))
+        lastPaintPixel = (px, py)
+    }
+}
+
+// The mask overlay, in its own observed view so a paint stroke (which republishes
+// only OverlayStore) re-renders just this layer and not the whole control panel.
+private struct MaskOverlay: View {
+    @ObservedObject var store: OverlayStore
+    let axis: Int
+    let aspect: CGFloat
+
+    var body: some View {
+        if let ov = store.images[axis] {
+            Image(decorative: ov, scale: 1)
+                .resizable()
+                .interpolation(.none)
+                .aspectRatio(aspect, contentMode: .fit)
+                .padding(8)
+                .allowsHitTesting(false)
+        }
+    }
+}
+
+// Picks the canvas interaction. Visualize: click = locate (linked navigation),
+// left-drag = window/level. Segment: the active tool owns the canvas — paint/erase
+// drags the brush, region-grow seeds on a click, threshold has no canvas action.
+private struct SliceInteraction: ViewModifier {
+    let pane: SlicePane
+    let container: CGSize
+
+    func body(content: Content) -> some View {
+        if let seg = pane.segment {
+            content.gesture(
+                DragGesture(minimumDistance: 0, coordinateSpace: .local)
+                    .onChanged { pane.brushChanged(seg, at: $0.location, container: container) }
+                    .onEnded { pane.brushEnded(seg, at: $0.location, container: container) }
+            )
+        } else {
+            content
+                .windowLevelDrag(pane.model)
+                .simultaneousGesture(
+                    SpatialTapGesture(coordinateSpace: .local)
+                        .onEnded { pane.locate(at: $0.location, container: container) }
+                )
+        }
+    }
+}
