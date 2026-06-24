@@ -14,6 +14,7 @@
 #include <string>
 #include <utility>
 
+#include "bridge/meta_copy.hpp"
 #include "core/volume.h"
 #include "geometry/plane_map.hpp"
 #include "io/dicom_loader.h"
@@ -38,7 +39,12 @@ LumenVolume* lumen_load_folder(const char* path, char* msg, int msg_cap) {
     auto* handle = new LumenVolume();
     handle->volume = std::move(r.volume);
     handle->editor.reset_to(handle->volume, kDefaultSegmentColor);
-    handle->meta_json = lumen::serialize_meta_json(r.meta, r.tags);
+    // Leave the blob empty when extraction produced nothing — lumen_meta_json's
+    // contract is "0 / empty when there is no metadata", so we must not emit an
+    // all-empty JSON object that the Swift side would treat as real metadata.
+    handle->meta_json = lumen::metadata_present(r.meta, r.tags)
+                            ? lumen::serialize_meta_json(r.meta, r.tags)
+                            : std::string();
     return handle;
 }
 
@@ -114,14 +120,7 @@ int lumen_meta_json(const LumenVolume* v, char* out, int out_cap) {
         if (out != nullptr && out_cap > 0) out[0] = '\0';
         return 0;
     }
-    const std::string& json = v->meta_json;
-    const int full_len = static_cast<int>(json.size());
-    if (out != nullptr && out_cap > 0) {
-        const int copy_len = std::min(full_len, out_cap - 1);
-        std::memcpy(out, json.data(), static_cast<size_t>(copy_len));
-        out[copy_len] = '\0';
-    }
-    return full_len;
+    return lumen::copy_string_out(v->meta_json, out, out_cap);
 }
 
 // Pane-pixel <-> voxel geometry. The single source of truth is plane_map; these
