@@ -1,0 +1,109 @@
+name: Release
+
+# Build a self-contained .dmg and publish it as a GitHub Release.
+#
+# Versioning (current, pre-1.0 phase): we only auto-bump the MINOR number and
+# keep major=0, patch=0 -> v0.1.0, v0.2.0, v0.3.0, ...  You don't pick a number:
+#
+#   * Click "Run workflow" on the Actions tab (workflow_dispatch). The job reads
+#     the latest v0.N.0 tag, computes v0.(N+1).0, creates+pushes that tag, builds
+#     the .dmg, and publishes the Release. First run with no tags -> v0.1.0.
+#
+#   * Escape hatch for proper versioning later: push an explicit tag and the job
+#     honours that exact version instead of auto-bumping:
+#       git tag v1.2.3 && git push origin v1.2.3
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write   # needed to push the tag and create the GitHub Release
+
+jobs:
+  release:
+    runs-on: macos-14   # Apple Silicon (arm64)
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0      # need full tag history to compute the next version
+
+      - name: Install DCMTK
+        run: brew install dcmtk
+
+      - name: Resolve version
+        id: ver
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            # Triggered by an explicit tag push -> honour it verbatim.
+            TAG="${GITHUB_REF_NAME}"
+            V="${TAG#v}"
+          else
+            # Manual run -> auto-bump the minor of the latest v0.N.0 tag.
+            git fetch --tags --force --quiet
+            LATEST="$(git tag -l 'v0.*.0' | sort -V | tail -1)"
+            if [[ -z "$LATEST" ]]; then
+              MINOR=1                          # no tags yet -> v0.1.0
+            else
+              base="${LATEST#v}"; rest="${base#*.}"; MINOR=$(( ${rest%%.*} + 1 ))
+            fi
+            V="0.${MINOR}.0"
+            TAG="v${V}"
+            git config user.name  "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git tag "$TAG"
+            git push origin "$TAG"             # GITHUB_TOKEN pushes don't re-trigger this workflow
+          fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG"   >> "$GITHUB_OUTPUT"
+          echo "Releasing $TAG (version $V)"
+
+      # --- Optional: Developer ID signing + notarization (paid Apple account) ---
+      # When you have a paid Apple Developer Program membership, add these repo
+      # secrets and uncomment this block to ship a Gatekeeper-clean, notarized
+      # app (no right-click -> Open needed):
+      #   MACOS_CERT_P12_BASE64  - base64 of your Developer ID Application .p12
+      #   MACOS_CERT_PASSWORD    - password for that .p12
+      #   AC_API_KEY_ID / AC_API_ISSUER_ID / AC_API_KEY_BASE64 - notarytool key
+      # See README "Notarization" for the exact codesign / notarytool commands.
+      # - name: Import signing certificate
+      #   env:
+      #     MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+      #     MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+      #   run: ...
+
+      - name: Build .dmg
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: tools/make_dmg.sh
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LumenSlice-dmg
+          path: dist/LumenSlice.dmg
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.ver.outputs.tag }}
+        run: |
+          gh release create "$TAG" \
+            dist/LumenSlice.dmg \
+            --title "LumenSlice $TAG" \
+            --generate-notes \
+            --notes-file - <<'NOTES'
+          ### macOS (Apple Silicon)
+
+          A self-contained `.dmg` — DCMTK is statically linked and its data
+          dictionary is bundled, so there's no Homebrew/DCMTK dependency.
+
+          **Install:** open the `.dmg`, drag **LumenSlice.app** to Applications.
+
+          **First launch:** the app is ad-hoc signed but _not notarized_ (no paid
+          Apple Developer account), so macOS Gatekeeper will warn. Either:
+          - **right-click the app → Open** (then confirm), once, or
+          - run `xattr -dr com.apple.quarantine /Applications/LumenSlice.app`
+
+          Requires macOS 13+ on **Apple Silicon** (arm64).
+          NOTES

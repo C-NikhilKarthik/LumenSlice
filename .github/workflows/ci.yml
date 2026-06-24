@@ -15,12 +15,12 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write   # needed to replace the "latest" GitHub Release
+  contents: write # needed to replace the "latest" GitHub Release
 
 jobs:
   build-test:
     name: Build, test & package (ad-hoc)
-    runs-on: macos-14   # Apple Silicon
+    runs-on: macos-14 # Apple Silicon
     outputs:
       sha: ${{ github.sha }}
     steps:
