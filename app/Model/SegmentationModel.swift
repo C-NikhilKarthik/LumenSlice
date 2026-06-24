@@ -79,8 +79,15 @@ final class SegmentationModel: ObservableObject {
     // Names survive list rebuilds (the bridge only knows ids/colours/visibility).
     private var names: [Int: String] = [:]
     private var nextSegmentNumber = 1
+    // Monotonic palette cursor: advancing it (never resetting on delete) means a
+    // fresh segment never reuses a colour still on screen just because a middle
+    // segment was removed and the list count shrank.
+    private var nextColorIndex = 0
     // Coalesces a run of live-threshold edits into a single undo entry.
     private var thresholdNeedsUndoCapture = true
+    // Set when we apply a threshold programmatically (Otsu) so the debounced
+    // CombineLatest sink skips the redundant second full-volume threshold pass.
+    private var skipNextThresholdSink = false
 
     // Distinct, readable segment colours, cycled as segments are added.
     static let palette: [(Double, Double, Double)] = [
@@ -107,7 +114,9 @@ final class SegmentationModel: ObservableObject {
         Publishers.CombineLatest($thresholdLo, $thresholdHi)
             .debounce(for: .milliseconds(180), scheduler: RunLoop.main)
             .sink { [weak self] _, _ in
-                guard let self, self.tool == .threshold else { return }
+                guard let self else { return }
+                if self.skipNextThresholdSink { self.skipNextThresholdSink = false; return }
+                guard self.tool == .threshold else { return }
                 self.applyThreshold()
             }
             .store(in: &cancellables)
@@ -127,6 +136,7 @@ final class SegmentationModel: ObservableObject {
                 guard let self else { return }
                 self.names.removeAll()
                 self.nextSegmentNumber = 1
+                self.nextColorIndex = 0
                 self.overlayStore.images = [nil, nil, nil]
                 if has {
                     self.reloadSegments()
@@ -182,7 +192,8 @@ final class SegmentationModel: ObservableObject {
 
     func addSegment() {
         guard let h = volume.handle else { return }
-        let (r, g, b) = Self.palette[segments.count % Self.palette.count]
+        let (r, g, b) = Self.palette[nextColorIndex % Self.palette.count]
+        nextColorIndex += 1
         let id = Int(lumen_seg_add(h, Int32(r * 255), Int32(g * 255), Int32(b * 255)))
         guard id > 0 else { return }
         reloadSegments()
@@ -247,6 +258,9 @@ final class SegmentationModel: ObservableObject {
     func applyOtsu() {
         guard let h = volume.handle, activeID > 0 else { return }
         let t = lumen_seg_otsu(h)
+        // We apply the threshold directly below; setting these @Published values
+        // also trips the debounced sink, so tell it to skip the redundant pass.
+        skipNextThresholdSink = true
         thresholdLo = t
         thresholdHi = volume.huHi
         lumen_seg_push_undo(h)

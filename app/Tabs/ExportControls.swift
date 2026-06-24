@@ -20,9 +20,13 @@ struct ExportControls: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
-                .disabled(mesh.triangleCount == 0)
+                .disabled(mesh.triangleCount == 0 || mesh.isGenerating)
 
-                if mesh.triangleCount == 0 {
+                if mesh.isGenerating {
+                    Text("Generating… export is available once it finishes.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                } else if mesh.triangleCount == 0 {
                     Text("Generate a 3D surface first (3D tab).")
                         .font(.caption2)
                         .foregroundStyle(.secondary)

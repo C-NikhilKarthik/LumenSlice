@@ -47,7 +47,7 @@ final class MeshModel: ObservableObject {
     }
 
     func generate() {
-        guard let h = volume.handle, !isGenerating else { return }
+        guard volume.handle != nil, !isGenerating else { return }
         // Capture the visible, non-empty segments (id + colour components) up front
         // on the main actor; only Sendable value types cross into the task.
         let specs: [SegmentSpec] = segmentation.segments
@@ -62,8 +62,12 @@ final class MeshModel: ObservableObject {
             return
         }
 
+        // Pin the handle so loading a new volume mid-generation defers the free
+        // rather than pulling the buffer out from under the background march
+        // (use-after-free). Released in finishGenerate on every path.
+        guard let pinned = volume.pinHandle() else { return }
         isGenerating = true
-        let bits = UInt(bitPattern: h)
+        let bits = UInt(bitPattern: pinned)
         let smooth = Int32(max(0, smoothing))
         let ds = Int32(max(1, downsample))
 
@@ -95,21 +99,26 @@ final class MeshModel: ObservableObject {
                 if let result { built.append(result) }
             }
             let collected = built // immutable copy for the cross-actor hop
-            await MainActor.run { self.finishGenerate(collected) }
+            await MainActor.run { self.finishGenerate(collected, from: bits) }
         }
     }
 
-    private func finishGenerate(_ built: [Built]) {
+    private func finishGenerate(_ built: [Built], from bits: UInt) {
+        defer { isGenerating = false; volume.releaseHandle() }
+        // If the volume was swapped while we generated, the mesh belongs to a
+        // now-replaced handle — discard it rather than show it over the new volume.
+        guard OpaquePointer(bitPattern: bits) == volume.handle else { return }
         geometries = built.map { $0.geometry }
         triangleCount = built.reduce(0) { $0 + $1.triangles }
         vertexCount = built.reduce(0) { $0 + $1.vertices }
-        isGenerating = false
     }
 
     // Export the union of all segments as one binary STL (regenerates the combined
     // surface into the buffer; the on-screen per-segment geometries are unaffected).
+    // Refuses to run while a background generate is in flight — both write the one
+    // shared C++ mesh buffer, so overlapping them would tear the STL.
     func exportSTL(to url: URL) -> Bool {
-        guard let h = volume.handle else { return false }
+        guard let h = volume.handle, !isGenerating else { return false }
         lumen_mesh_snapshot(h) // every labelled voxel
         _ = lumen_mesh_generate(h, Int32(max(0, smoothing)), Int32(max(1, downsample)))
         return lumen_mesh_write_stl(h, url.path) == 0

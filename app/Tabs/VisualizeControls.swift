@@ -72,10 +72,11 @@ struct VisualizeControls: View {
                     Text("Drag on a slice to adjust, or set exact values here.")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
-                    wlRow("Level", value: $model.level,
-                          range: model.huLo...max(model.huHi, model.huLo + 1), step: 10)
-                    wlRow("Window", value: $model.window,
-                          range: 1...max(model.huHi - model.huLo, 2), step: 10)
+                    // Ranges always span the current value so a preset (e.g. Bone
+                    // L400/W1500) outside the volume's HU span doesn't get snapped
+                    // back the moment the user touches the slider or stepper.
+                    wlRow("Level", value: $model.level, range: levelRange, step: 10)
+                    wlRow("Window", value: $model.window, range: windowRange, step: 10)
                     HStack(spacing: 6) {
                         preset("Bone", level: 400, window: 1500)
                         preset("Soft", level: 40, window: 400)
@@ -97,6 +98,16 @@ struct VisualizeControls: View {
                 MetadataInspector(metadata: meta)
             }
         }
+    }
+
+    // W/L control ranges, widened to always contain the current value (presets can
+    // set values outside the volume's HU span; without this the first slider touch
+    // would snap them back).
+    private var levelRange: ClosedRange<Float> {
+        min(model.huLo, model.level)...max(model.huHi, model.level, model.huLo + 1)
+    }
+    private var windowRange: ClosedRange<Float> {
+        1...max(model.huHi - model.huLo, model.window, 2)
     }
 
     // Precise W/L control: an editable numeric field + stepper (arrow keys nudge
