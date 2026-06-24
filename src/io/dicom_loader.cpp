@@ -131,11 +131,16 @@ LoadResult LoadDicomFolder(const std::string& folder) {
         return result;
     }
 
+    // Patient/study/series metadata is identical across every slice in a series,
+    // so we only need one file's path to re-open for metadata later. Remember the
+    // first that parses rather than carrying a heap-allocated path on every Slice.
     std::vector<Slice> slices;
     slices.reserve(candidates.size());
+    fs::path representative_path;
     for (const auto& path : candidates) {
         Slice s;
         if (ParseSlice(path, s)) {
+            if (representative_path.empty()) representative_path = path;
             slices.push_back(std::move(s));
             ++result.slices_loaded;
         } else {
@@ -218,6 +223,20 @@ LoadResult LoadDicomFolder(const std::string& folder) {
     }
     vol.hu_min = hu_min;
     vol.hu_max = hu_max;
+
+    // Pull the human-readable context from a representative slice (patient,
+    // study, series, equipment + the full top-level tag list). These are
+    // identical across a series, so any successfully parsed file suffices. A
+    // failure here is non-fatal: the volume still loads, just without metadata.
+    {
+        DcmFileFormat meta_ff;
+        if (meta_ff.loadFile(representative_path.string().c_str()).good()) {
+            if (DcmDataset* meta_ds = meta_ff.getDataset()) {
+                result.meta = extract_study_meta(*meta_ds);
+                result.tags = enumerate_tags(*meta_ds);
+            }
+        }
+    }
 
     char buf[256];
     std::snprintf(buf, sizeof(buf),

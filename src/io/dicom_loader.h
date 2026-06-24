@@ -8,8 +8,10 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 #include "core/volume.h"
+#include "io/dicom_meta.hpp"
 
 namespace lumen {
 
@@ -20,6 +22,11 @@ struct LoadResult {
     int files_scanned = 0;   // regular files visited during the crawl
     int slices_loaded = 0;   // files that parsed into usable slices
     int files_skipped = 0;   // DICOM-looking files we couldn't use (compressed, mismatched, …)
+
+    // Context pulled from the representative slice (identical across a series):
+    // the curated fields and the full top-level tag enumeration. Empty on failure.
+    StudyMeta meta;
+    std::vector<DicomTag> tags;
 };
 
 // Load every usable DICOM slice under `folder` (searched recursively) into a

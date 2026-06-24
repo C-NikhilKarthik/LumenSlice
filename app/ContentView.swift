@@ -81,6 +81,7 @@ struct ContentView: View {
 
 private struct Sidebar: View {
     @EnvironmentObject var model: VolumeModel
+    @State private var showingInspector = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -95,6 +96,11 @@ private struct Sidebar: View {
             VisualEffectView(material: .sidebar, blendingMode: .behindWindow)
                 .ignoresSafeArea()
         )
+        .sheet(isPresented: $showingInspector) {
+            if let meta = model.metadata {
+                MetadataInspector(metadata: meta)
+            }
+        }
     }
 
     private var header: some View {
@@ -146,11 +152,43 @@ private struct Sidebar: View {
                         format: "%.0f … %.0f", model.huLo, model.huHi))
                 }
 
+                if let meta = model.metadata {
+                    Section("Patient / Study") {
+                        let m = meta.meta
+                        if !m.patientName.isEmpty {
+                            LabeledContent("Patient", value: m.patientName)
+                        }
+                        if !m.patientId.isEmpty {
+                            LabeledContent("ID", value: m.patientId)
+                        }
+                        if !m.modality.isEmpty {
+                            LabeledContent("Modality", value: m.modality)
+                        }
+                        if !m.studyDate.isEmpty {
+                            LabeledContent("Study date", value: m.studyDate)
+                        }
+                        if !m.studyDescription.isEmpty {
+                            LabeledContent("Study", value: m.studyDescription)
+                        }
+                        Button {
+                            showingInspector = true
+                        } label: {
+                            Label("Inspect all metadata…", systemImage: "list.bullet.rectangle")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+                }
+
                 Section("Window / Level (HU)") {
-                    sliderRow("Level", value: $model.level,
-                              range: model.huLo...max(model.huHi, model.huLo + 1))
-                    sliderRow("Window", value: $model.window,
-                              range: 1...max(model.huHi - model.huLo, 2))
+                    Text("Drag on a slice to adjust, or set exact values here.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    wlRow("Level", value: $model.level,
+                          range: model.huLo...max(model.huHi, model.huLo + 1), step: 10)
+                    wlRow("Window", value: $model.window,
+                          range: 1...max(model.huHi - model.huLo, 2), step: 10)
                     HStack(spacing: 6) {
                         preset("Bone", level: 400, window: 1500)
                         preset("Soft", level: 40, window: 400)
@@ -161,15 +199,23 @@ private struct Sidebar: View {
             }
     }
 
-    private func sliderRow(_ title: String, value: Binding<Float>,
-                           range: ClosedRange<Float>) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
+    // Precise W/L control: an editable numeric field + stepper (arrow keys
+    // nudge by `step`) over a coarse slider. The drag-on-image gesture is the
+    // fast path; this is for exact values and small adjustments.
+    private func wlRow(_ title: String, value: Binding<Float>,
+                       range: ClosedRange<Float>, step: Float) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text(title)
                 Spacer()
-                Text("\(Int(value.wrappedValue))")
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
+                TextField(title, value: value,
+                          format: .number.precision(.fractionLength(0)))
+                    .labelsHidden()
+                    .frame(width: 60)
+                    .multilineTextAlignment(.trailing)
+                    .textFieldStyle(.roundedBorder)
+                Stepper(title, value: value, in: range, step: step)
+                    .labelsHidden()
             }
             Slider(value: value, in: range)
         }
@@ -177,8 +223,7 @@ private struct Sidebar: View {
 
     private func preset(_ name: String, level: Float, window: Float) -> some View {
         Button(name) {
-            model.window = window
-            model.level = level
+            model.setWindowLevel(level: level, window: window)
         }
         .buttonStyle(.bordered)
         .controlSize(.small)
@@ -259,6 +304,17 @@ private struct SlicePane: View {
             }
             .clipShape(RoundedRectangle(cornerRadius: 10))
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Rectangle())       // whole pane is draggable, not just the pixels
+            .windowLevelDrag(model)
+            .overlay(alignment: .bottomLeading) {
+                Text("W \(Int(model.window))  L \(Int(model.level))")
+                    .font(.caption2.monospacedDigit())
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(.black.opacity(0.5), in: Capsule())
+                    .foregroundStyle(.white.opacity(0.9))
+                    .padding(10)
+            }
 
             Slider(
                 value: Binding(

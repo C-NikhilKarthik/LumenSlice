@@ -1,18 +1,26 @@
 name: CI
 
-# Build the C++ core + SwiftUI app and exercise DICOM ingestion end-to-end on
-# every push / PR to main, so regressions surface before a release.
+# Build + test on every push / PR. When a build on the main branch passes, the
+# ad-hoc .dmg (Option A — free, no Apple account) is published to a single
+# rolling "latest" GitHub Release: the previous release + assets are deleted and
+# recreated so only the newest .dmg is ever available.
+#
+# The runner MUST be Apple Silicon (macos-14+ is arm64): Package.swift links
+# DCMTK from /opt/homebrew and the app ships arm64-only.
+
 on:
   push:
-    branches: [main]
+    branches: ["**"]
   pull_request:
-    branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: write # needed to replace the "latest" GitHub Release
+
 jobs:
-  build-and-test:
-    # macos-14 is Apple Silicon (arm64) -- matches our arm64-only build.
-    runs-on: macos-14
+  build-test:
+    name: Build, test & package (ad-hoc)
+    runs-on: macos-14 # Apple Silicon
     steps:
       - uses: actions/checkout@v4
 
@@ -20,19 +28,41 @@ jobs:
         run: brew install dcmtk
 
       - name: Show toolchain
-        run: swift --version
-
-      - name: Build (release)
-        run: swift build -c release
-
-      - name: Generate synthetic CT phantom
-        # The runner's Python is Homebrew-managed (PEP 668 "externally managed"),
-        # so install into a throwaway venv instead of the system interpreter.
         run: |
-          python3 -m venv .venv
-          .venv/bin/python -m pip install --quiet --upgrade pip
-          .venv/bin/python -m pip install --quiet pydicom numpy
-          .venv/bin/python tools/make_test_series.py testdata/phantom
+          swift --version
+          echo "dcmtk prefix: $(brew --prefix dcmtk)"
 
-      - name: Headless ingestion test
-        run: swift run -c release IngestTest testdata/phantom
+      - name: Build (debug)
+        run: swift build
+
+      - name: C++ metadata / buffer test
+        run: swift run MetaTest
+
+      - name: Swift unit tests
+        run: swift test
+
+      - name: Package ad-hoc .dmg
+        run: ADHOC=1 tools/make_app.sh
+
+      - name: Upload .dmg artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LumenSlice-adhoc-dmg
+          path: dist/LumenSlice.dmg
+          if-no-files-found: error
+
+      # Publish only after build + tests pass, and only for pushes to main —
+      # PRs and feature branches just get the artifact above.
+      - name: Publish .dmg to the "latest" release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          NOTES=$'Latest ad-hoc build (free, not notarized). Always the newest commit on main.\n\nFirst launch on a downloaded copy: right-click LumenSlice.app -> Open -> Open, or run\n`xattr -dr com.apple.quarantine /Applications/LumenSlice.app`\n\nApple Silicon (arm64) only.'
+          # Delete the old release + its tag so nothing stale lingers, then make
+          # a fresh "latest" pointing at this commit with the new .dmg attached.
+          gh release delete latest --yes --cleanup-tag 2>/dev/null || true
+          gh release create latest dist/LumenSlice.dmg \
+            --title "LumenSlice (latest)" \
+            --notes "$NOTES" \
+            --target "$GITHUB_SHA"
