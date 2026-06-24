@@ -61,6 +61,12 @@ struct DicomTag {
 // Never throws.
 [[nodiscard]] std::vector<DicomTag> enumerate_tags(DcmItem& dataset);
 
+// True when extraction yielded anything worth showing: at least one tag, or at
+// least one non-empty curated field. Lets callers leave the metadata blob empty
+// (rather than emitting an all-empty JSON object) when extraction failed.
+[[nodiscard]] bool metadata_present(const StudyMeta& meta,
+                                    const std::vector<DicomTag>& tags);
+
 // Serialize curated meta + tag list to one JSON object string. All values are
 // JSON-escaped (quotes, backslashes, control chars), so arbitrary DICOM byte
 // values round-trip safely through the Swift parser.
