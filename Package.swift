@@ -30,7 +30,20 @@ let package = Package(
                 // dependency and can be shipped in a self-contained .app bundle.
                 // Only system libraries (libz, libc++, libSystem) remain.
                 .unsafeFlags([
+                    // Decoders for encapsulated (compressed) pixel data so real-world
+                    // JPEG / JPEG-LS / RLE DICOM series load, not just native LE.
+                    // Listed dependents-first (static link order): the dcm* codec
+                    // libs reference symbols resolved by dcmdata + the IJG/CharLS
+                    // backends that follow.
+                    "\(dcmtkLib)/libdcmjpls.a",
+                    "\(dcmtkLib)/libdcmjpeg.a",
+                    "\(dcmtkLib)/libdcmimage.a",
+                    "\(dcmtkLib)/libdcmimgle.a",
                     "\(dcmtkLib)/libdcmdata.a",
+                    "\(dcmtkLib)/libijg16.a",
+                    "\(dcmtkLib)/libijg12.a",
+                    "\(dcmtkLib)/libijg8.a",
+                    "\(dcmtkLib)/libdcmtkcharls.a",
                     "\(dcmtkLib)/liboflog.a",
                     "\(dcmtkLib)/libofstd.a",
                     "\(dcmtkLib)/liboficonv.a",
