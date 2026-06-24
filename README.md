@@ -122,31 +122,36 @@ Then in Xcode:
 > drag-and-drop. Segmentation, marching cubes, and STL export follow the
 > [8-week plan](docs/timelines.md).
 
-### Share the app with someone (notarized .dmg)
+### Share the app with someone (.dmg)
 
 ```bash
-tools/make_app.sh
+ADHOC=1 tools/make_app.sh
 ```
 
-This builds a release, wraps it in `dist/LumenSlice.app`, signs it with your
-**Developer ID** + hardened runtime, **notarizes** it with Apple, staples the
-ticket, and packages a drag-to-`/Applications` `dist/LumenSlice.dmg`. DCMTK is
-linked **statically** and its data dictionary is bundled in `Contents/Resources`,
-so the app has **no Homebrew or DCMTK dependency** — it runs on a clean Mac.
+This builds a release, wraps it in `dist/LumenSlice.app`, ad-hoc signs it, and
+packages a drag-to-`/Applications` `dist/LumenSlice.dmg`. DCMTK is linked
+**statically** and its data dictionary is bundled in `Contents/Resources`, so the
+app has **no Homebrew or DCMTK dependency** — it runs on a clean Mac. No Apple
+Developer account is required.
 
-Send `dist/LumenSlice.dmg`. Because it is notarized + stapled, the recipient just
-**double-clicks the DMG, drags `LumenSlice` to Applications, and opens it** — no
-Gatekeeper warning, no `xattr`, even offline.
+Send `dist/LumenSlice.dmg`. Because it is not notarized, the recipient clears
+Gatekeeper **once** on first launch — right-click `LumenSlice.app` → **Open** →
+**Open**, or run `xattr -dr com.apple.quarantine /Applications/LumenSlice.app`.
+After that it opens normally.
 
-**One-time setup** (paid Apple Developer membership + a _Developer ID
-Application_ certificate + `notarytool` credentials) is documented step-by-step in
-[`tools/NOTARIZE_SETUP.md`](tools/NOTARIZE_SETUP.md). Until that is in place, the
-script errors out with instructions; you can build a non-notarized DMG for local
-testing with `ADHOC=1 tools/make_app.sh` (that one _does_ need the recipient to
-right-click → Open or run `xattr -dr com.apple.quarantine ...`).
+**Don't want to build it yourself?** Every push to `main` runs CI
+([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) which builds, tests, and
+publishes the ad-hoc `.dmg` to the repository's rolling **`latest`** GitHub
+Release — download it from the Releases page.
+
+> **Optional — notarized, zero-warning .dmg.** With a *paid* Apple Developer
+> membership you can produce a notarized build that opens with a plain
+> double-click (no right-click dance). Run `tools/make_app.sh` (no `ADHOC=1`); the
+> one-time setup is documented in
+> [`tools/NOTARIZE_SETUP.md`](tools/NOTARIZE_SETUP.md).
 
 Caveat: the bundle targets the **build host's architecture** (Apple Silicon →
-arm64; an Intel Mac can't run it regardless of notarization).
+arm64; an Intel Mac can't run it).
 
 ### Architecture note (SwiftUI shell)
 

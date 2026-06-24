@@ -21,8 +21,6 @@ jobs:
   build-test:
     name: Build, test & package (ad-hoc)
     runs-on: macos-14 # Apple Silicon
-    outputs:
-      sha: ${{ github.sha }}
     steps:
       - uses: actions/checkout@v4
 
