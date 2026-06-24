@@ -24,7 +24,16 @@ final class VolumeModel: ObservableObject {
     // planes; use setWindowLevel(level:window:) to change both with one refresh
     // (e.g. presets, or the drag-on-image gesture).
     @Published var level: Float = 40 { didSet { if !suppressWLRefresh { refreshAll() } } }
-    @Published var window: Float = 400 { didSet { if !suppressWLRefresh { refreshAll() } } }
+    // A zero-width or negative window divides by zero in the extractor, so clamp
+    // to >= 1 HU here — the TextField lets users type values the slider/stepper
+    // can't, so the floor has to live in the model, not just the controls. The
+    // re-entrant set settles immediately (1 is already >= 1, so no loop).
+    @Published var window: Float = 400 {
+        didSet {
+            if window < 1 { window = 1; return }
+            if !suppressWLRefresh { refreshAll() }
+        }
+    }
     private var suppressWLRefresh = false
 
     // Per-axis scroll position and rendered slice.
@@ -118,8 +127,13 @@ final class VolumeModel: ObservableObject {
     private static func readMetadata(_ handle: OpaquePointer) -> DicomMetadata? {
         let needed = Int(lumen_meta_json(handle, nil, 0))
         guard needed > 0 else { return nil }
+        // `&buffer` would pass a pointer to the Array value, not its element
+        // storage — withUnsafeMutableBufferPointer hands the C function a valid
+        // UnsafeMutablePointer<CChar> into the contiguous backing buffer.
         var buffer = [CChar](repeating: 0, count: needed + 1)
-        _ = lumen_meta_json(handle, &buffer, Int32(needed + 1))
+        buffer.withUnsafeMutableBufferPointer { buf in
+            _ = lumen_meta_json(handle, buf.baseAddress, Int32(buf.count))
+        }
         return DicomMetadata.parse(String(cString: buffer))
     }
 

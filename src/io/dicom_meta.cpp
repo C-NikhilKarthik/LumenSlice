@@ -146,6 +146,22 @@ std::vector<DicomTag> enumerate_tags(DcmItem& dataset) {
     return out;
 }
 
+bool metadata_present(const StudyMeta& meta, const std::vector<DicomTag>& tags) {
+    if (!tags.empty()) return true;
+    for (const std::string* field : {
+             &meta.patient_name, &meta.patient_id, &meta.patient_birth_date,
+             &meta.patient_sex, &meta.patient_age, &meta.study_date,
+             &meta.study_time, &meta.study_description, &meta.study_instance_uid,
+             &meta.accession_number, &meta.referring_physician,
+             &meta.series_description, &meta.series_instance_uid,
+             &meta.series_number, &meta.modality, &meta.body_part,
+             &meta.manufacturer, &meta.model_name, &meta.station_name,
+             &meta.institution_name, &meta.software_versions}) {
+        if (!field->empty()) return true;
+    }
+    return false;
+}
+
 std::string serialize_meta_json(const StudyMeta& meta,
                                 const std::vector<DicomTag>& tags) {
     std::string out;
