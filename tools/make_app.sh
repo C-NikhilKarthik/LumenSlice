@@ -40,9 +40,36 @@ VERSION="0.1.0"
 NOTARY_PROFILE="${NOTARY_PROFILE:-lumenslice-notary}"
 ADHOC="${ADHOC:-0}"
 
+# Always clean up temp artifacts, even if a later step aborts under `set -e`.
+STAGING=""
+NZIP=""
+cleanup() {
+    [ -n "$STAGING" ] && rm -rf "$STAGING"
+    [ -n "$NZIP" ] && rm -f "$NZIP"
+    return 0
+}
+trap cleanup EXIT
+
 # Auto-detect the versioned DCMTK share dir (e.g. dcmtk-3.6.9, dcmtk-3.7.0) so we
 # always bundle the real dicom.dic regardless of the installed DCMTK version.
 DICT_DIR="$(ls -d "$(brew --prefix dcmtk)"/share/dcmtk-* 2>/dev/null | sort -V | tail -1)"
+if [ -z "$DICT_DIR" ] || [ ! -d "$DICT_DIR" ]; then
+    cat >&2 <<MSG
+
+ERROR: Could not locate the DCMTK data dictionary directory.
+Expected something like: $(brew --prefix dcmtk 2>/dev/null)/share/dcmtk-<version>
+
+The DICOM data dictionary (dicom.dic) is required to parse Implicit-VR DICOM and
+must be bundled into the .app. Install DCMTK via Homebrew and retry:
+
+    brew install dcmtk
+
+If DCMTK is installed in a non-standard location, set DICT_DIR to the directory
+containing dicom.dic before running this script.
+
+MSG
+    exit 1
+fi
 
 # ---- resolve the signing identity ------------------------------------------
 if [ "$ADHOC" = "1" ]; then
@@ -133,17 +160,16 @@ codesign --verify --strict --verbose=2 "$APP" 2>&1 | sed 's/^/    /'
 # ---- notarize + staple the .app --------------------------------------------
 if [ "$ADHOC" != "1" ]; then
     echo "==> Notarizing .app (this uploads to Apple and waits; ~1-3 min)..."
-    NZIP="dist/$APP_NAME-notarize.zip"
+    NZIP="dist/$APP_NAME-notarize.zip"  # cleaned up by the EXIT trap on any failure
     ditto -c -k --keepParent "$APP" "$NZIP"
     if ! xcrun notarytool submit "$NZIP" \
             --keychain-profile "$NOTARY_PROFILE" --wait; then
         echo "ERROR: notarization failed. Inspect the log with:" >&2
         echo "  xcrun notarytool history --keychain-profile $NOTARY_PROFILE" >&2
         echo "  xcrun notarytool log <submission-id> --keychain-profile $NOTARY_PROFILE" >&2
-        rm -f "$NZIP"
-        exit 1
+        exit 1  # EXIT trap removes $NZIP
     fi
-    rm -f "$NZIP"
+    rm -f "$NZIP"; NZIP=""
     echo "==> Stapling the notarization ticket to the .app..."
     xcrun stapler staple "$APP"
 fi
@@ -156,7 +182,7 @@ ln -s /Applications "$STAGING/Applications"
 rm -f "$DMG"
 hdiutil create -volname "$APP_NAME" -srcfolder "$STAGING" \
     -ov -format UDZO "$DMG" >/dev/null
-rm -rf "$STAGING"
+rm -rf "$STAGING"; STAGING=""
 
 # ---- sign + notarize + staple the .dmg -------------------------------------
 if [ "$ADHOC" != "1" ]; then
