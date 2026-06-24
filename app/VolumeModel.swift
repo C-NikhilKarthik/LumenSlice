@@ -10,6 +10,33 @@ final class VolumeModel: ObservableObject {
     // same C++ volume handle; only VolumeModel mutates it (load/free).
     private(set) var handle: OpaquePointer?
 
+    // Background mesh generation reads the handle off the main actor. A load that
+    // lands while that work is in flight must NOT free the handle underneath it, so
+    // a pinned handle is retired into `deferredFree` and released only once the last
+    // background reader balances its pin. All of this is touched on the main actor
+    // (finishLoad, pinHandle, releaseHandle), so the counter needs no locking.
+    private var pinnedReaders = 0
+    private var deferredFree: [OpaquePointer] = []
+
+    /// Pin the current handle so an in-flight load won't free it while background
+    /// work (e.g. marching cubes) is reading it. Returns nil if no volume is loaded.
+    /// Every successful pin MUST be balanced by exactly one `releaseHandle()`.
+    func pinHandle() -> OpaquePointer? {
+        guard let h = handle else { return nil }
+        pinnedReaders += 1
+        return h
+    }
+
+    /// Balance a `pinHandle()`. When the last pin is released, any handles a load
+    /// retired while pinned are freed.
+    func releaseHandle() {
+        pinnedReaders = max(0, pinnedReaders - 1)
+        if pinnedReaders == 0 {
+            for h in deferredFree { lumen_free(h) }
+            deferredFree.removeAll()
+        }
+    }
+
     @Published var status = "Open a DICOM folder to begin."
     @Published var hasVolume = false
     @Published var isLoading = false
@@ -87,6 +114,7 @@ final class VolumeModel: ObservableObject {
 
     deinit {
         if let h = handle { lumen_free(h) }
+        for h in deferredFree { lumen_free(h) }
     }
 
     func load(path: String) {
@@ -114,7 +142,11 @@ final class VolumeModel: ObservableObject {
         status = message
         guard let newHandle = OpaquePointer(bitPattern: handleBits) else { return }
 
-        if let old = handle { lumen_free(old) }
+        // Defer freeing while a background reader (mesh generation) still holds a
+        // pin on the old handle — releaseHandle() frees it once that work finishes.
+        if let old = handle {
+            if pinnedReaders > 0 { deferredFree.append(old) } else { lumen_free(old) }
+        }
         handle = newHandle
         hasVolume = true
 
