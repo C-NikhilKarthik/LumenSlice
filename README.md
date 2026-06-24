@@ -109,7 +109,7 @@ Then in Xcode:
    window either — pick `LumenSlice`.
 3. Set the destination to **My Mac**.
 4. Press **⌘R** to build and run.
-5. *(Optional)* To auto-load a folder on launch: **Product ▸ Scheme ▸ Edit Scheme… ▸ Run ▸ Arguments**, and add the folder path. Otherwise use **Open Folder** or drag a DICOM folder onto the window.
+5. _(Optional)_ To auto-load a folder on launch: **Product ▸ Scheme ▸ Edit Scheme… ▸ Run ▸ Arguments**, and add the folder path. Otherwise use **Open Folder** or drag a DICOM folder onto the window.
 
 > DCMTK is linked from Homebrew with absolute library paths, so the app finds it
 > at runtime under Xcode without any extra `DYLD`/rpath configuration.
@@ -138,11 +138,11 @@ Send `dist/LumenSlice.dmg`. Because it is notarized + stapled, the recipient jus
 **double-clicks the DMG, drags `LumenSlice` to Applications, and opens it** — no
 Gatekeeper warning, no `xattr`, even offline.
 
-**One-time setup** (paid Apple Developer membership + a *Developer ID
-Application* certificate + `notarytool` credentials) is documented step-by-step in
+**One-time setup** (paid Apple Developer membership + a _Developer ID
+Application_ certificate + `notarytool` credentials) is documented step-by-step in
 [`tools/NOTARIZE_SETUP.md`](tools/NOTARIZE_SETUP.md). Until that is in place, the
 script errors out with instructions; you can build a non-notarized DMG for local
-testing with `ADHOC=1 tools/make_app.sh` (that one *does* need the recipient to
+testing with `ADHOC=1 tools/make_app.sh` (that one _does_ need the recipient to
 right-click → Open or run `xattr -dr com.apple.quarantine ...`).
 
 Caveat: the bundle targets the **build host's architecture** (Apple Silicon →
@@ -152,7 +152,7 @@ arm64; an Intel Mac can't run it regardless of notarization).
 
 The original blueprint specified a Sokol + Dear ImGui shell for a single
 cross-platform binary. Phase 1 instead uses a **SwiftUI** front-end for a cleaner,
-fully-native macOS look. Crucially, this only swaps the *presentation layer*: the
+fully-native macOS look. Crucially, this only swaps the _presentation layer_: the
 data-oriented C++ core (`src/core`, `src/io`, `src/visualization`) is untouched
 and stays UI-agnostic per [`docs/agent.md`](docs/agent.md) §1, exposed to Swift
 through a thin C API (`src/bridge`). The Sokol/ImGui path can be revived for the
