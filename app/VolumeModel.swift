@@ -83,6 +83,14 @@ final class VolumeModel: ObservableObject {
                                            forKey: "showOrientationLabels") }
     }
 
+    // True only while the Shift key is held: a momentary cross-reference mode that
+    // shows the crosshair and makes a hover recenter the other panes (Slicer's
+    // Shift+move). Not persisted - it tracks a live key, not a preference.
+    @Published var shiftActive = false
+    func setShiftActive(_ active: Bool) {
+        if shiftActive != active { shiftActive = active }
+    }
+
     // Per-axis slice index derived from the focus voxel: axial steps Z, coronal
     // steps Y, sagittal steps X. Kept as an accessor so existing call sites and
     // the SlicePane sliders/labels keep working against the new source of truth.
@@ -199,11 +207,20 @@ final class VolumeModel: ObservableObject {
         refresh(axis)
     }
 
-    /// Jump the shared focus to a voxel (click-to-locate). Recenters all three
-    /// panes so they pass through the clicked anatomical point.
+    /// Jump the shared focus to a voxel (click-to-locate, or Shift+hover linked
+    /// navigation). Recenters all three panes so they pass through the point. Only
+    /// the planes whose slice index actually moved are re-extracted - the others
+    /// just redraw their crosshair from the published `focus`. That keeps a
+    /// continuous Shift-hover (one jump per mouse-move) cheap: the hovered pane's
+    /// own slice never changes, so at most the other two re-extract.
     func jump(to voxel: SIMD3<Int>) {
-        focus = SIMD3(clampX(voxel.x), clampY(voxel.y), clampZ(voxel.z))
-        refreshAll()
+        let next = SIMD3(clampX(voxel.x), clampY(voxel.y), clampZ(voxel.z))
+        let prev = focus
+        guard next != prev else { return }
+        focus = next
+        if next.z != prev.z { refresh(0) }
+        if next.y != prev.y { refresh(1) }
+        if next.x != prev.x { refresh(2) }
     }
 
     private func clampX(_ v: Int) -> Int { min(max(v, 0), max(width - 1, 0)) }

@@ -15,10 +15,16 @@ import CoreGraphics
 //   │                                │
 //   └───────────────────────────────┘
 enum SliceCoordinates {
-    // The aspect-correct rect the slice image actually occupies inside the pane
-    // content box (the area inside `padding`). Returns nil if the box is empty.
+    // The display rect the slice image occupies inside the pane content box. At
+    // zoom == 1 this is the aspect-correct fit (letterboxed inside `padding`); a
+    // higher zoom scales that rect about `anchor` (the cursor point where the
+    // right-drag began), so the area under the cursor stays put while the image
+    // grows. Because rendering, the crosshair, the brush, AND hit-testing all read
+    // this one rect, a zoomed pane keeps painting/locating the correct voxel.
+    // Returns nil if the box is empty.
     static func fittedRect(container: CGSize, aspect: CGFloat,
-                           padding: CGFloat = 8) -> CGRect? {
+                           padding: CGFloat = 8,
+                           zoom: CGFloat = 1, anchor: CGPoint = .zero) -> CGRect? {
         guard aspect > 0 else { return nil }
         let availW = container.width - 2 * padding
         let availH = container.height - 2 * padding
@@ -32,9 +38,18 @@ enum SliceCoordinates {
             fittedW = availW
             fittedH = availW / aspect
         }
-        return CGRect(x: padding + (availW - fittedW) / 2,
-                      y: padding + (availH - fittedH) / 2,
-                      width: fittedW, height: fittedH)
+        let base = CGRect(x: padding + (availW - fittedW) / 2,
+                          y: padding + (availH - fittedH) / 2,
+                          width: fittedW, height: fittedH)
+        return zoom == 1 ? base : zoomed(base, scale: zoom, anchor: anchor)
+    }
+
+    // Scale `base` by `scale` about `anchor`: the anchor point maps to itself, so
+    // zooming keeps whatever sits under the cursor fixed in place.
+    static func zoomed(_ base: CGRect, scale: CGFloat, anchor: CGPoint) -> CGRect {
+        CGRect(x: anchor.x + (base.minX - anchor.x) * scale,
+               y: anchor.y + (base.minY - anchor.y) * scale,
+               width: base.width * scale, height: base.height * scale)
     }
 
     // Tap point -> image pixel, or nil if the tap is in the letterbox margin.
@@ -43,10 +58,12 @@ enum SliceCoordinates {
                       imageWidth: Int,
                       imageHeight: Int,
                       aspect: CGFloat,
-                      padding: CGFloat = 8) -> (x: Int, y: Int)? {
+                      padding: CGFloat = 8,
+                      zoom: CGFloat = 1, anchor: CGPoint = .zero) -> (x: Int, y: Int)? {
         guard imageWidth > 0, imageHeight > 0,
               let rect = fittedRect(container: container, aspect: aspect,
-                                    padding: padding) else { return nil }
+                                    padding: padding, zoom: zoom,
+                                    anchor: anchor) else { return nil }
         let u = (tap.x - rect.minX) / rect.width
         let v = (tap.y - rect.minY) / rect.height
         guard u >= 0, u <= 1, v >= 0, v <= 1 else { return nil }
@@ -62,10 +79,12 @@ enum SliceCoordinates {
                       imageWidth: Int,
                       imageHeight: Int,
                       aspect: CGFloat,
-                      padding: CGFloat = 8) -> CGPoint? {
+                      padding: CGFloat = 8,
+                      zoom: CGFloat = 1, anchor: CGPoint = .zero) -> CGPoint? {
         guard imageWidth > 0, imageHeight > 0,
               let rect = fittedRect(container: container, aspect: aspect,
-                                    padding: padding) else { return nil }
+                                    padding: padding, zoom: zoom,
+                                    anchor: anchor) else { return nil }
         let u = (CGFloat(px) + 0.5) / CGFloat(imageWidth)
         let v = (CGFloat(py) + 0.5) / CGFloat(imageHeight)
         return CGPoint(x: rect.minX + u * rect.width,
