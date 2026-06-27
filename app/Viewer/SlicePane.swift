@@ -20,6 +20,13 @@ struct SlicePane: View {
     @State private var lastPaintPixel: (px: Int, py: Int)?
     @State private var strokeActive = false
 
+    // Per-pane zoom: 1 = fit, up to 8x, driven by a right-button drag. `zoomAnchor`
+    // is the cursor point where the drag began, so the view magnifies toward what
+    // is under the cursor. Each pane zooms independently (3D-Slicer behavior).
+    @State private var zoom: CGFloat = 1
+    @State private var zoomAnchor: CGPoint = .zero
+    private static let maxZoom: CGFloat = 8
+
     var body: some View {
         let count = model.sliceCount(axis)
         VStack(spacing: 8) {
@@ -66,32 +73,35 @@ struct SlicePane: View {
         GeometryReader { geo in
             let aspect = model.physicalAspect(axis)
             let container = geo.size
-            let fitted = SliceCoordinates.fittedRect(container: container, aspect: aspect)
+            // The one rect rendering, the crosshair, the brush AND hit-testing all
+            // read - zoom flows through it so nothing desyncs when magnified.
+            let display = SliceCoordinates.fittedRect(
+                container: container, aspect: aspect, zoom: zoom, anchor: zoomAnchor)
             ZStack {
                 RoundedRectangle(cornerRadius: 10)
                     .fill(.black)
-                if let img = model.images[axis] {
+                if let img = model.images[axis], let r = display {
                     Image(decorative: img, scale: 1)
                         .resizable()
                         .interpolation(.none)
-                        .aspectRatio(aspect, contentMode: .fit)
-                        .padding(8)
+                        .frame(width: r.width, height: r.height)
+                        .position(x: r.midX, y: r.midY)
                 }
-                if let seg = segment, seg.showOverlay {
-                    MaskOverlay(store: seg.overlayStore, axis: axis, aspect: aspect)
+                if let seg = segment, seg.showOverlay, let r = display {
+                    MaskOverlay(store: seg.overlayStore, axis: axis, rect: r)
                 }
-                if model.showCrosshair {
+                if model.showCrosshair || model.shiftActive {
                     let colors = PlaneColors.forPane(axis)
                     CrosshairOverlay(
                         point: crosshairPoint(container: container, aspect: aspect),
-                        rect: fitted,
+                        rect: display,
                         verticalColor: colors.vertical,
                         horizontalColor: colors.horizontal)
                 }
                 if model.showOrientationLabels {
-                    OrientationLabels(axis: axis, rect: fitted)
+                    OrientationLabels(axis: axis, rect: display)
                 }
-                brushRing(fitted: fitted)
+                brushRing(fitted: display)
             }
             .clipShape(RoundedRectangle(cornerRadius: 10))
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -99,7 +109,11 @@ struct SlicePane: View {
             .modifier(SliceInteraction(pane: self, container: container))
             .overlay(CanvasInputCatcher(
                 onStep: { model.setSlice(axis, model.sliceIndex[axis] + $0) },
-                onMove: { pointer = $0 }))
+                onMove: { pointer = $0 },
+                onZoomBegin: { zoomAnchor = $0 },
+                onZoom: { applyZoom($0) },
+                onShiftLocate: { locate(at: $0, container: container) },
+                onShiftChange: { model.setShiftActive($0) }))
             .overlay(alignment: .bottomLeading) {
                 Text("W \(Int(model.window))  L \(Int(model.level))")
                     .font(.caption2.monospacedDigit())
@@ -132,7 +146,16 @@ struct SlicePane: View {
               let c = model.crosshairPixel(onAxis: axis) else { return nil }
         return SliceCoordinates.point(forPixel: c.px, c.py, container: container,
                                       imageWidth: img.width, imageHeight: img.height,
-                                      aspect: aspect)
+                                      aspect: aspect, zoom: zoom, anchor: zoomAnchor)
+    }
+
+    // Right-drag vertical delta (window coords, up positive) -> magnification. The
+    // exponential makes each point of drag a constant percentage change, so zoom
+    // feels even at every level; clamped to [1, maxZoom] (1 = fit, no zoom-out
+    // below fit since there is no pan).
+    private func applyZoom(_ dy: CGFloat) {
+        let factor = CGFloat(exp(Double(dy) * 0.01))
+        zoom = min(Self.maxZoom, max(1, zoom * factor))
     }
 
     // MARK: - Interaction helpers (called from SliceInteraction)
@@ -142,7 +165,7 @@ struct SlicePane: View {
         return SliceCoordinates.pixel(
             forTap: point, container: container,
             imageWidth: img.width, imageHeight: img.height,
-            aspect: model.physicalAspect(axis))
+            aspect: model.physicalAspect(axis), zoom: zoom, anchor: zoomAnchor)
     }
 
     fileprivate func locate(at point: CGPoint, container: CGSize) {
@@ -187,15 +210,15 @@ struct SlicePane: View {
 private struct MaskOverlay: View {
     @ObservedObject var store: OverlayStore
     let axis: Int
-    let aspect: CGFloat
+    let rect: CGRect
 
     var body: some View {
         if let ov = store.images[axis] {
             Image(decorative: ov, scale: 1)
                 .resizable()
                 .interpolation(.none)
-                .aspectRatio(aspect, contentMode: .fit)
-                .padding(8)
+                .frame(width: rect.width, height: rect.height)
+                .position(x: rect.midX, y: rect.midY)
                 .allowsHitTesting(false)
         }
     }
