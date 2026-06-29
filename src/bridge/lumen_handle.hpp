@@ -27,10 +27,18 @@ struct LumenVolume {
     std::string meta_json;
 
     lumen::Mesh mesh;
-    std::vector<std::uint8_t> mesh_snapshot; // frozen mask the mesh is built from
+    std::vector<std::uint8_t> mesh_snapshot; // frozen mask, CROPPED to the labelled
+                                             // region's bounding box (not the whole
+                                             // volume) so marching cubes scales with
+                                             // what was segmented, not the scan size.
     int snap_w = 0;
     int snap_h = 0;
     int snap_d = 0;
+    // Origin of the cropped snapshot within the full volume (voxels). Mesh vertices
+    // come out in cropped-local mm and are shifted back by origin * spacing.
+    int snap_ox = 0;
+    int snap_oy = 0;
+    int snap_oz = 0;
 };
 
 namespace lumen_bridge_detail {

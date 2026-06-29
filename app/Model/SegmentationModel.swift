@@ -88,6 +88,12 @@ final class SegmentationModel: ObservableObject {
     // Set when we apply a threshold programmatically (Otsu) so the debounced
     // CombineLatest sink skips the redundant second full-volume threshold pass.
     private var skipNextThresholdSink = false
+    // Wall-clock of the last overlay rebuild during the active brush stroke. Each
+    // rebuild re-extracts the whole painted slice (cost grows with slice size — and
+    // coronal/sagittal slices grow with the file count), so we cap it to display
+    // rate while painting; endStroke does the final exact refresh.
+    private var lastStrokeOverlayTime: CFTimeInterval = 0
+    private static let strokeOverlayInterval: CFTimeInterval = 1.0 / 60.0
 
     // Distinct, readable segment colours, cycled as segments are added.
     static let palette: [(Double, Double, Double)] = [
@@ -158,6 +164,14 @@ final class SegmentationModel: ObservableObject {
 
     func reloadSegments() {
         guard let h = volume.handle else { segments = []; return }
+        // One pass over the mask yields every label's voxel count, instead of a
+        // full-volume scan per segment plus another for the total. On a large scan
+        // with several segments this is the difference between a smooth edit and a
+        // multi-hundred-ms hitch at the end of every brush stroke.
+        var histogram = [Int](repeating: 0, count: 256)
+        histogram.withUnsafeMutableBufferPointer { buf in
+            lumen_seg_label_histogram(h, buf.baseAddress)
+        }
         let count = Int(lumen_seg_segment_count(h))
         var rows: [SegmentRow] = []
         rows.reserveCapacity(count)
@@ -167,7 +181,7 @@ final class SegmentationModel: ObservableObject {
             var r: Int32 = 0, g: Int32 = 0, b: Int32 = 0
             lumen_seg_get_color(h, Int32(id), &r, &g, &b)
             let visible = lumen_seg_get_visible(h, Int32(id)) != 0
-            let voxels = Int(lumen_seg_label_count(h, Int32(id)))
+            let voxels = id < histogram.count ? histogram[id] : 0
             let name = names[id] ?? defaultName(for: id)
             names[id] = name
             rows.append(SegmentRow(
@@ -180,7 +194,7 @@ final class SegmentationModel: ObservableObject {
         }
         segments = rows
         activeID = Int(lumen_seg_active(h))
-        voxelCount = Int(lumen_seg_count(h))
+        voxelCount = histogram[1...].reduce(0, +)   // total labelled = all non-bg
         refreshUndoState()
     }
 
@@ -286,6 +300,7 @@ final class SegmentationModel: ObservableObject {
         guard let h = volume.handle else { return }
         lumen_seg_push_undo(h)
         thresholdNeedsUndoCapture = true
+        lastStrokeOverlayTime = 0   // first move in the stroke refreshes immediately
         refreshUndoState()
     }
 
@@ -316,7 +331,16 @@ final class SegmentationModel: ObservableObject {
         } else {
             stamp(to.px, to.py)
         }
-        if changed > 0 { refreshOverlay(axis) }
+        // Throttle the live overlay rebuild to display rate; intermediate frames are
+        // dropped (the paint itself already landed in the mask), and endStroke draws
+        // the final exact overlay for every plane.
+        if changed > 0 {
+            let now = CFAbsoluteTimeGetCurrent()
+            if now - lastStrokeOverlayTime >= Self.strokeOverlayInterval {
+                lastStrokeOverlayTime = now
+                refreshOverlay(axis)
+            }
+        }
     }
 
     func endStroke() { didMutateMask() }

@@ -78,6 +78,16 @@ long lumen_seg_label_count(const LumenVolume* v, int id) {
     return v->editor.label_count(static_cast<std::uint8_t>(id));
 }
 
+void lumen_seg_label_histogram(const LumenVolume* v, long* out) {
+    if (out == nullptr) return;
+    for (int i = 0; i < 256; ++i) out[i] = 0;
+    if (v == nullptr || !v->editor.mask().valid()) return;
+    const lumen::LabelVolume& mask = v->editor.mask();
+    const std::uint8_t* data = mask.data();
+    const std::size_t n = mask.voxel_count();
+    for (std::size_t i = 0; i < n; ++i) ++out[data[i]];
+}
+
 // --- Editing operations (act on the active segment) -------------------------
 
 void lumen_seg_threshold(LumenVolume* v, float lo, float hi) {
