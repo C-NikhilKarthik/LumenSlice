@@ -86,6 +86,12 @@ int lumen_seg_get_visible(const LumenVolume* v, int id);
 // Voxels currently labelled with segment `id`.
 long lumen_seg_label_count(const LumenVolume* v, int id);
 
+// Fill `out` (which MUST have room for 256 entries) with the per-label voxel
+// histogram in a single pass over the mask: out[id] = voxels carrying that label,
+// out[0] = background. Lets the UI refresh every segment's count (and the total,
+// = sum of out[1..255]) after an edit without one full-volume scan per segment.
+void lumen_seg_label_histogram(const LumenVolume* v, long* out);
+
 // --- Editing operations (act on the active segment) -------------------------
 
 // Re-fill the active segment from a HU window (does not disturb other segments).
