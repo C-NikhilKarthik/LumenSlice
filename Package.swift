@@ -29,6 +29,9 @@ let package = Package(
                     // slower, which is the difference between a snappy 3D generate
                     // and a multi-second (large-volume: minute-plus) stall during
                     // dev iteration. Release already optimizes; this lifts debug.
+                    // -O2 (not -O3): the work is memory-bound, so -O3's extra
+                    // unrolling/inlining measured no faster and only bloats code.
+                    // See docs/engineering/PERFORMANCE.md.
                     "-O2",
                 ]),
             ],

@@ -17,6 +17,10 @@ Read them in this order:
    (Facade, Strategy, Command/Memento, Adapter, and more), why each is here, and
    the exact class/file that implements it. Read this when you want to extend the
    app, e.g. add a new segmentation tool.
+4. **[PERFORMANCE.md](PERFORMANCE.md)** - why painting, 3D generation, and the build
+   are fast (and why they were once slow). The segmentation/mesh hot paths, the
+   bounding-box crop for marching cubes, the single-pass voxel counts, and the
+   build-config multiplier (`-O0` vs `-O2`). Read this before any perf change.
 
 ## The 30-second version
 
