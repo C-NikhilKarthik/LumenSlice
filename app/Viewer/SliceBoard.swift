@@ -1,15 +1,19 @@
 import SwiftUI
 
-// The tri-axis slice workspace: big Axial on top, Coronal + Sagittal below.
-// Extracted from ContentView during the tab-shell refactor; shared by the
-// Visualize and Segment tabs.
+// The slice workspace, laid out as a 2x2 quad: Axial + 3D surface on top, Coronal
+// + Sagittal below (the classic ortho-plus-3D viewer arrangement). Extracted from
+// ContentView during the tab-shell refactor; shared by the Visualize and Segment
+// tabs. Any pane can be maximized to fill the viewport.
 struct SliceBoard: View {
     @EnvironmentObject var model: VolumeModel
     @Binding var dropTargeted: Bool
     // Non-nil on the Segment tab: enables the mask overlay + seed/paint gestures.
     var segment: SegmentationModel? = nil
-    // When set, a single pane is maximized to fill the viewport; nil = tri-pane grid.
-    @State private var focusedAxis: Int?
+
+    // The maximized pane, or nil for the full quad grid. A slice plane (axis 0/1/2)
+    // or the 3D surface pane.
+    private enum Focus: Equatable { case axis(Int); case threeD }
+    @State private var focus: Focus?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -23,20 +27,30 @@ struct SliceBoard: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if model.hasVolume {
                 Group {
-                    if let f = focusedAxis {
-                        SlicePane(axis: f, segment: segment, isFocused: true,
-                                  onToggleFocus: { focusedAxis = nil })
-                            .frame(maxHeight: .infinity)
+                    if let f = focus {
+                        switch f {
+                        case .axis(let a):
+                            SlicePane(axis: a, segment: segment, isFocused: true,
+                                      onToggleFocus: { focus = nil })
+                                .frame(maxHeight: .infinity)
+                        case .threeD:
+                            ThreeDPane(isFocused: true,
+                                       onToggleFocus: { focus = nil })
+                                .frame(maxHeight: .infinity)
+                        }
                     } else {
                         VStack(spacing: 12) {
-                            SlicePane(axis: 0, segment: segment,
-                                      onToggleFocus: { focusedAxis = 0 })
-                                .frame(maxHeight: .infinity)
+                            HStack(spacing: 12) {
+                                SlicePane(axis: 0, segment: segment,
+                                          onToggleFocus: { focus = .axis(0) })
+                                ThreeDPane(onToggleFocus: { focus = .threeD })
+                            }
+                            .frame(maxHeight: .infinity)
                             HStack(spacing: 12) {
                                 SlicePane(axis: 1, segment: segment,
-                                          onToggleFocus: { focusedAxis = 1 })
+                                          onToggleFocus: { focus = .axis(1) })
                                 SlicePane(axis: 2, segment: segment,
-                                          onToggleFocus: { focusedAxis = 2 })
+                                          onToggleFocus: { focus = .axis(2) })
                             }
                             .frame(maxHeight: .infinity)
                         }
