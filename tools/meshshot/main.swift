@@ -32,9 +32,14 @@ print("threshold [\(Int(lowHU))..\(Int(highHU))] HU -> \(voxels) voxels")
 guard voxels > 0 else { die("no voxels in HU range; nothing to mesh") }
 
 // 3D: snapshot (main-thread step) then generate (the background step).
-lumen_mesh_snapshot(vol)
-let tris = lumen_mesh_generate(vol, 1, 1) // smoothing=1, full resolution
+func ms(_ block: () -> Void) -> Double {
+    let t0 = Date(); block(); return Date().timeIntervalSince(t0) * 1000
+}
+let tSnap = ms { lumen_mesh_snapshot(vol) }
+var tris: Int32 = 0
+let tGen = ms { tris = lumen_mesh_generate(vol, 1, 1) } // smoothing=1, full res
 let verts = lumen_mesh_vertex_count(vol)
+print(String(format: "snapshot %.0f ms, generate %.0f ms", tSnap, tGen))
 print("marching cubes -> \(tris) triangles, \(verts) vertices")
 guard tris > 0 else { die("marching cubes produced no triangles") }
 
