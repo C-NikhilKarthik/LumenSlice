@@ -447,6 +447,40 @@ static void test_segment_editor() {
           "removing a segment clears its voxels and forgets it");
 }
 
+// 16. grow_from_seeds: two labels seeded either side of a sharp HU edge each fill
+// their own basin and stop at the edge (tolerance-bounded competitive grow).
+static void test_grow_from_seeds() {
+    std::printf("-- grow_from_seeds\n");
+    Volume v = make_volume(8, 0.0f);
+    for (int z = 0; z < 8; ++z)
+        for (int y = 0; y < 8; ++y)
+            for (int x = 4; x < 8; ++x)
+                set_hu(v, x, y, z, 1000.0f); // right half is a different tissue
+
+    LabelVolume mask;
+    mask.reset_to(v);
+    mask.set(0, 0, 0, 1); // seed label 1 in the left (HU 0) basin
+    mask.set(7, 7, 7, 2); // seed label 2 in the right (HU 1000) basin
+    const long added = grow_from_seeds(v, mask, 100.0f);
+    CHECK(added == 510, "grow fills both basins minus the two seeds");
+    CHECK(mask.count_nonzero() == 512, "every voxel labelled");
+    CHECK(mask.at(3, 4, 4) == 1, "left basin claimed by label 1");
+    CHECK(mask.at(4, 4, 4) == 2, "right basin claimed by label 2 (edge respected)");
+
+    // One seed + tight tolerance grows only its own basin; the edge stops it.
+    LabelVolume mask2;
+    mask2.reset_to(v);
+    mask2.set(0, 0, 0, 1);
+    const long one = grow_from_seeds(v, mask2, 100.0f);
+    CHECK(one == 255, "one seed fills only its 256-voxel basin");
+    CHECK(mask2.at(4, 0, 0) == 0, "grow stops at the edge, far basin stays bg");
+
+    // No seeds -> no-op.
+    LabelVolume mask3;
+    mask3.reset_to(v);
+    CHECK(grow_from_seeds(v, mask3, 100.0f) == 0, "no seeds is a no-op");
+}
+
 int main() {
     std::printf("== SegTest ==\n");
     test_plane_map_roundtrip();
@@ -464,6 +498,7 @@ int main() {
     test_morphology();
     test_effects();
     test_segment_editor();
+    test_grow_from_seeds();
     if (g_failures == 0) {
         std::printf("All segmentation tests passed.\n");
         return 0;

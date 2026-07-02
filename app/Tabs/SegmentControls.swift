@@ -112,9 +112,10 @@ struct SegmentControls: View {
     }
 
     private var regionGrowSection: some View {
-        Section("Region grow") {
-            Text("Click a structure in any slice to flood-fill connected voxels "
-                 + "within the tolerance of the clicked voxel.")
+        Section("Grow") {
+            Text("Click a structure to flood-fill connected voxels within the "
+                 + "tolerance of the clicked voxel. Or paint seeds into two or more "
+                 + "segments and grow them competitively below.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
             VStack(alignment: .leading, spacing: 4) {
@@ -127,6 +128,49 @@ struct SegmentControls: View {
                 }
                 Slider(value: $seg.tolerance, in: 1...1000, step: 1)
             }
+            growFromSeedsPanel
+        }
+    }
+
+    // Competitive grow-from-seeds: every segment's painted voxels are seeds and the
+    // labels fill the background together, stopping at intensity edges (bounded by
+    // the tolerance above). Needs >= 2 segments. Initialise snapshots + grows one
+    // band; Update grows another; Cancel reverts; Apply keeps.
+    @ViewBuilder private var growFromSeedsPanel: some View {
+        Divider().padding(.vertical, 2)
+        Text("Grow from seeds")
+            .font(.caption.weight(.semibold))
+        if !seg.canGrowFromSeeds {
+            Text("Add a second segment and paint a few seeds in each to enable "
+                 + "competitive grow.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        if seg.growSessionActive {
+            Button { seg.growUpdate() } label: {
+                Label("Update", systemImage: "arrow.triangle.2.circlepath")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+            HStack(spacing: 8) {
+                Button(role: .cancel) { seg.growCancel() } label: {
+                    Label("Cancel", systemImage: "xmark").frame(maxWidth: .infinity)
+                }
+                Button { seg.growApply() } label: {
+                    Label("Apply", systemImage: "checkmark").frame(maxWidth: .infinity)
+                }
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        } else {
+            Button { seg.growInitialise() } label: {
+                Label("Initialise", systemImage: "square.stack.3d.up")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+            .disabled(!seg.canGrowFromSeeds)
         }
     }
 

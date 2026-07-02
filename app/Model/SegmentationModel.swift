@@ -321,6 +321,45 @@ final class SegmentationModel: ObservableObject {
 
     func endStroke() { didMutateMask() }
 
+    // MARK: - Grow from seeds (competitive, multi-label)
+
+    // Open while a grow session runs (after Initialise, before Apply/Cancel). Only
+    // a UI concern - each grow is an ordinary undoable edit, so Cmd-Z works too.
+    @Published var growSessionActive = false
+
+    // Segments compete for the background, so this needs at least two of them
+    // (typically the structure plus a background segment).
+    var canGrowFromSeeds: Bool { segments.count >= 2 }
+
+    // Initialise: snapshot, then grow every segment's painted seeds outward by one
+    // tolerance band. Cancel reverts this via undo; further Updates grow more.
+    func growInitialise() {
+        guard let h = volume.handle, canGrowFromSeeds else { return }
+        lumen_seg_push_undo(h)
+        thresholdNeedsUndoCapture = true
+        growSessionActive = true
+        _ = lumen_seg_grow_from_seeds(h, tolerance)
+        didMutateMask()
+    }
+
+    // Update: expand another tolerance band from the enlarged regions (or from any
+    // seeds the user painted since). Its own undo step.
+    func growUpdate() {
+        guard let h = volume.handle, growSessionActive else { return }
+        lumen_seg_push_undo(h)
+        _ = lumen_seg_grow_from_seeds(h, tolerance)
+        didMutateMask()
+    }
+
+    // Cancel reverts the last grow; Apply just closes the session (the result stays,
+    // reversible from the undo stack / Cmd-Z).
+    func growCancel() {
+        if growSessionActive { undo() }
+        growSessionActive = false
+    }
+
+    func growApply() { growSessionActive = false }
+
     func keepLargest() {
         guard let h = volume.handle, activeID > 0 else { return }
         lumen_seg_push_undo(h)

@@ -129,6 +129,13 @@ long lumen_seg_grow(LumenVolume* v, int iterations);
 long lumen_seg_shrink(LumenVolume* v, int iterations);
 long lumen_seg_smooth(LumenVolume* v, int iterations);
 
+// Grow-from-seeds across ALL segments (marker-controlled watershed): every
+// labelled voxel is a seed and segments compete to fill the background along
+// intensity edges. Needs >= 2 seed labels to be meaningful. `tolerance` (HU)
+// bounds the grow per call, so calling again expands another band. Returns voxels
+// newly labelled.
+long lumen_seg_grow_from_seeds(LumenVolume* v, float tolerance);
+
 // --- Undo / redo ------------------------------------------------------------
 // Snapshot the mask BEFORE a user operation, then undo/redo walks the history
 // (bounded to a fixed depth; oldest states are dropped).

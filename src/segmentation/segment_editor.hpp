@@ -90,6 +90,14 @@ public:
     long shrink_margin(int iterations);
     long smooth(int iterations);
 
+    // Multi-label grow-from-seeds (marker-controlled watershed): every labelled
+    // voxel is a seed and segments compete to fill the background. Unlike the
+    // methods above this spans ALL segments, so it does not go through the
+    // single-label effect Strategy - it calls the kernel directly. `tolerance` (HU)
+    // bounds how far it grows per call, so repeated calls expand another band.
+    // Returns voxels newly labelled.
+    long grow_from_seeds(float tolerance);
+
     // --- Undo / redo --------------------------------------------------------
     // Capture the mask state BEFORE a user operation (the caller picks the
     // boundaries so a whole drag or a slider session is one undo step).

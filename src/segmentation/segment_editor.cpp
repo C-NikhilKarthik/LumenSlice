@@ -2,6 +2,8 @@
 
 #include <cstddef>
 
+#include "segmentation/analysis.hpp"
+
 namespace lumen {
 
 void SegmentEditor::reset_to(const Volume& volume, Rgb default_color) {
@@ -76,6 +78,11 @@ long SegmentEditor::shrink_margin(int iterations) {
 
 long SegmentEditor::smooth(int iterations) {
     return apply(SmoothEffect{iterations});
+}
+
+long SegmentEditor::grow_from_seeds(float tolerance) {
+    if (volume_ == nullptr) return 0;
+    return lumen::grow_from_seeds(*volume_, mask_, tolerance);
 }
 
 } // namespace lumen

@@ -141,6 +141,10 @@ long lumen_seg_smooth(LumenVolume* v, int iterations) {
     return v == nullptr ? 0 : v->editor.smooth(iterations);
 }
 
+long lumen_seg_grow_from_seeds(LumenVolume* v, float tolerance) {
+    return v == nullptr ? 0 : v->editor.grow_from_seeds(tolerance);
+}
+
 // --- Undo / redo ------------------------------------------------------------
 
 void lumen_seg_push_undo(LumenVolume* v) {

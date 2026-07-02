@@ -41,4 +41,19 @@ long erode_label(LabelVolume& mask, std::uint8_t label, int iterations);
 // only `label` (other segments are untouched). Returns voxels changed.
 long smooth_label(LabelVolume& mask, std::uint8_t label, int iterations);
 
+// Grow-from-seeds (marker-controlled watershed). Treat every currently-labelled
+// voxel as a seed and assign each reachable BACKGROUND voxel to the label whose
+// seed reaches it along the path of least maximum HU step (a minimax / bottleneck
+// path), so segments compete along intensity edges. Existing labels are never
+// overwritten. Meaningful results need >= 2 distinct seed labels (e.g. structure
+// + background).
+//
+// `tolerance` (HU) bounds the grow: a voxel is only claimed if the worst step on
+// its cheapest path stays <= tolerance, so growth stops at strong intensity edges
+// and dissimilar background is left unlabelled. Calling again expands another band
+// from the enlarged regions (the iterative "grow / update" workflow). A tolerance
+// <= 0 fills every reachable voxel. Runs in O(voxels) via a bucketed cost queue.
+// Returns the number of voxels newly labelled; a no-op (0) when there are no seeds.
+long grow_from_seeds(const Volume& vol, LabelVolume& mask, float tolerance);
+
 } // namespace lumen
