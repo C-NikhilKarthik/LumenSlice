@@ -481,6 +481,29 @@ static void test_grow_from_seeds() {
     CHECK(grow_from_seeds(v, mask3, 100.0f) == 0, "no seeds is a no-op");
 }
 
+// 17. level_trace: clicking a bright square selects the connected pixels at/above
+// the clicked HU on that slice only; clicking level 0 fills the whole slice.
+static void test_level_trace() {
+    std::printf("-- level_trace\n");
+    Volume v = make_volume(8, 0.0f);
+    for (int y = 2; y < 5; ++y)
+        for (int x = 2; x < 5; ++x)
+            set_hu(v, x, y, 4, 500.0f); // a bright 3x3 square on axial slice z=4
+
+    LabelVolume mask;
+    mask.reset_to(v);
+    const long added = level_trace(v, Axis::Axial, 4, 3, 3, mask);
+    CHECK(added == 9, "level trace fills the connected bright 3x3 square");
+    CHECK(mask.at(2, 2, 4) == kActiveLabel, "corner of the square is labelled");
+    CHECK(mask.at(3, 3, 3) == 0, "the adjacent slice is untouched (2D only)");
+    CHECK(mask.at(0, 0, 4) == 0, "dark background below the level is not selected");
+
+    LabelVolume mask2;
+    mask2.reset_to(v);
+    const long bg = level_trace(v, Axis::Axial, 4, 0, 0, mask2);
+    CHECK(bg == 64, "clicking level 0 fills the whole slice (all >= 0)");
+}
+
 int main() {
     std::printf("== SegTest ==\n");
     test_plane_map_roundtrip();
@@ -499,6 +522,7 @@ int main() {
     test_effects();
     test_segment_editor();
     test_grow_from_seeds();
+    test_level_trace();
     if (g_failures == 0) {
         std::printf("All segmentation tests passed.\n");
         return 0;

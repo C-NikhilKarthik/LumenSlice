@@ -100,6 +100,11 @@ long lumen_seg_region_grow(LumenVolume* v, int x, int y, int z, float tol) {
     return v->editor.region_grow(x, y, z, tol);
 }
 
+long lumen_seg_level_trace(LumenVolume* v, int axis, int index, int cx, int cy) {
+    if (v == nullptr) return 0;
+    return v->editor.level_trace(static_cast<lumen::Axis>(axis), index, cx, cy);
+}
+
 long lumen_seg_paint(LumenVolume* v, int axis, int index, int cx, int cy,
                      int radius, int add) {
     if (v == nullptr) return 0;

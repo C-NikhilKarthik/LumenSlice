@@ -77,7 +77,18 @@ struct SegmentControls: View {
         switch seg.tool {
         case .threshold: thresholdSection
         case .regionGrow: regionGrowSection
+        case .levelTrace: levelTraceSection
         case .paint, .erase: brushSection
+        }
+    }
+
+    private var levelTraceSection: some View {
+        Section("Level tracing") {
+            Text("Click a bright structure in any slice to select every connected "
+                 + "voxel at or above the clicked intensity on that slice, into the "
+                 + "active segment.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
         }
     }
 

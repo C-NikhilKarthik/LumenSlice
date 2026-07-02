@@ -101,6 +101,11 @@ void lumen_seg_threshold(LumenVolume* v, float lo, float hi);
 // HU of the seed; adds to the active segment. Returns voxels newly labelled.
 long lumen_seg_region_grow(LumenVolume* v, int x, int y, int z, float tol);
 
+// Level tracing on one slice: from slice pixel (cx,cy) of `axis`/`index`, flood the
+// connected pixels whose HU is at or above the clicked pixel's into the active
+// segment. Returns voxels newly labelled.
+long lumen_seg_level_trace(LumenVolume* v, int axis, int index, int cx, int cy);
+
 // Paint (add != 0) or erase (add == 0) a filled disk of `radius` slice-pixels on
 // the given plane, on the active segment. Returns the number of voxels changed.
 long lumen_seg_paint(LumenVolume* v, int axis, int index, int cx, int cy,

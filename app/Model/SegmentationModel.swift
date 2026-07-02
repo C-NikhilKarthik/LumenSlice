@@ -6,6 +6,7 @@ import LumenCore
 enum SegTool: String, CaseIterable, Identifiable {
     case threshold
     case regionGrow
+    case levelTrace
     case paint
     case erase
 
@@ -14,6 +15,7 @@ enum SegTool: String, CaseIterable, Identifiable {
         switch self {
         case .threshold: return "Threshold"
         case .regionGrow: return "Grow"
+        case .levelTrace: return "Level"
         case .paint: return "Paint"
         case .erase: return "Erase"
         }
@@ -22,12 +24,15 @@ enum SegTool: String, CaseIterable, Identifiable {
         switch self {
         case .threshold: return "slider.horizontal.below.square.filled.and.square"
         case .regionGrow: return "drop.fill"
+        case .levelTrace: return "scope"
         case .paint: return "paintbrush.pointed.fill"
         case .erase: return "eraser.fill"
         }
     }
     // Tools that paint along a drag (vs. a single click / slider).
     var isBrush: Bool { self == .paint || self == .erase }
+    // Tools that act on a single click in the canvas (seed a fill).
+    var isClickSeed: Bool { self == .regionGrow || self == .levelTrace }
 }
 
 // One row in the segment list. `id` is the C++ label byte (1..255); `name` lives
@@ -267,6 +272,17 @@ final class SegmentationModel: ObservableObject {
         lumen_seg_push_undo(h)
         thresholdNeedsUndoCapture = true
         let added = lumen_seg_region_grow(h, x, y, z, tolerance)
+        if added > 0 { didMutateMask() } else { refreshUndoState() }
+    }
+
+    // Level tracing: click a slice to select its iso-level region (>= clicked HU)
+    // on that plane into the active segment.
+    func seedLevelTrace(axis: Int, px: Int, py: Int) {
+        guard let h = volume.handle, activeID > 0 else { return }
+        lumen_seg_push_undo(h)
+        thresholdNeedsUndoCapture = true
+        let added = lumen_seg_level_trace(h, Int32(axis), Int32(volume.sliceIndex[axis]),
+                                          Int32(px), Int32(py))
         if added > 0 { didMutateMask() } else { refreshUndoState() }
     }
 

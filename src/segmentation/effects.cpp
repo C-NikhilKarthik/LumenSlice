@@ -28,6 +28,11 @@ long PaintEffect::apply(const Volume& volume, LabelVolume& mask,
     return paint_disk(volume, axis_, index_, cx_, cy_, radius_, add_, mask, label);
 }
 
+long LevelTraceEffect::apply(const Volume& volume, LabelVolume& mask,
+                             std::uint8_t label) const {
+    return level_trace(volume, axis_, index_, px_, py_, mask, label);
+}
+
 long ClearEffect::apply(const Volume& /*volume*/, LabelVolume& mask,
                         std::uint8_t label) const {
     if (label == 0) return 0;

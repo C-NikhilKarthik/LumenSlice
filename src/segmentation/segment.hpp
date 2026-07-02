@@ -37,4 +37,14 @@ long paint_disk(const Volume& vol, Axis axis, int index, int cx, int cy,
                 int radius, bool add, LabelVolume& mask,
                 std::uint8_t label = kActiveLabel);
 
+// Level tracing on ONE slice: from pixel (cx,cy) of `axis`/`index`, flood the
+// 4-connected region of pixels whose HU is at or above the clicked pixel's HU (its
+// iso-level) into `label`. This traces a bright structure out to where the image
+// drops below the clicked level, so a click selects a whole level set on the slice.
+// Stops at voxels owned by another segment. 2D only (the current slice). Returns
+// the number of voxels newly labelled; 0 if the seed is out of range or owned by
+// another segment.
+long level_trace(const Volume& vol, Axis axis, int index, int cx, int cy,
+                 LabelVolume& mask, std::uint8_t label = kActiveLabel);
+
 } // namespace lumen

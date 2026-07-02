@@ -201,9 +201,13 @@ struct SlicePane: View {
             seg.endStroke()
             strokeActive = false
             lastPaintPixel = nil
-        } else if seg.tool == .regionGrow {
+        } else if seg.tool.isClickSeed {
             if let (px, py) = pixel(at: point, container: container) {
-                seg.seedRegionGrow(axis: axis, px: px, py: py)
+                if seg.tool == .levelTrace {
+                    seg.seedLevelTrace(axis: axis, px: px, py: py)
+                } else {
+                    seg.seedRegionGrow(axis: axis, px: px, py: py)
+                }
             }
         }
     }
