@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 import LumenCore
 
 // A markup is a small annotation placed in the volume: a list of points in voxel
@@ -82,12 +83,26 @@ final class MarkupsModel: ObservableObject {
 
     private var nextNumber = 1
     private var nextColorIndex = 0
+    private var cancellables = Set<AnyCancellable>()
 
     // Reuse the segmentation palette so markups and segments share a look.
     private static let palette = SegmentationModel.paletteColors
 
     init(volume: VolumeModel) {
         self.volume = volume
+
+        // Markup points are voxel coordinates tied to the loaded volume, so a new
+        // dataset must clear them - otherwise they render against unrelated anatomy
+        // in the new volume's space. Mirrors SegmentationModel's reset-on-load.
+        volume.$hasVolume
+            .sink { [weak self] _ in
+                guard let self else { return }
+                self.markups = []
+                self.activeID = nil
+                self.nextNumber = 1
+                self.nextColorIndex = 0
+            }
+            .store(in: &cancellables)
     }
 
     var active: Markup? { markups.first { $0.id == activeID } }

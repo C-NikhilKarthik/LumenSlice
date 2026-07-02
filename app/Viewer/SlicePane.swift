@@ -131,8 +131,16 @@ struct SlicePane: View {
                 onShiftLocate: { locate(at: $0, container: container) },
                 onShiftChange: { model.setShiftActive($0) },
                 onPan: { d in
-                    guard zoom > 1 else { return }  // nothing to pan at fit
-                    pan.width += d.width; pan.height += d.height
+                    // Clamp so the zoomed image can't be dragged entirely out of the
+                    // pane: the offset is bounded to half the zoomed image size, so
+                    // at least its centre stays reachable.
+                    guard zoom > 1,
+                          let base = SliceCoordinates.fittedRect(
+                            container: container, aspect: aspect) else { return }
+                    let maxX = base.width * zoom / 2
+                    let maxY = base.height * zoom / 2
+                    pan.width = min(maxX, max(-maxX, pan.width + d.width))
+                    pan.height = min(maxY, max(-maxY, pan.height + d.height))
                 }))
             .overlay(alignment: .bottomLeading) {
                 Text("W \(Int(model.window))  L \(Int(model.level))")
@@ -271,9 +279,14 @@ struct SlicePane: View {
     private func applyScissors(_ seg: SegmentationModel, at point: CGPoint,
                                container: CGSize) {
         defer { scissorsFrom = nil; scissorsTo = nil }
-        guard let start = scissorsFrom,
-              let a = pixel(at: start, container: container),
-              let b = pixel(at: point, container: container) else { return }
+        guard let start = scissorsFrom else { return }
+        // A stray click (no real drag) would make a zero-area rect - which with
+        // "Outside" selected erases the entire slice. Require a real drag, and a
+        // non-degenerate pixel rectangle, before cutting.
+        guard hypot(point.x - start.x, point.y - start.y) >= 6 else { return }
+        guard let a = pixel(at: start, container: container),
+              let b = pixel(at: point, container: container),
+              a.x != b.x, a.y != b.y else { return }
         seg.scissorsCut(axis: axis, x0: a.x, y0: a.y, x1: b.x, y1: b.y)
     }
 

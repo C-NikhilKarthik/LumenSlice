@@ -217,6 +217,9 @@ final class SegmentationModel: ObservableObject {
     func removeSegment(_ id: Int) {
         guard let h = volume.handle else { return }
         lumen_seg_push_undo(h)
+        // Removal is its own undo step, so the next threshold Apply must start a
+        // fresh snapshot rather than fold itself into this one.
+        thresholdNeedsUndoCapture = true
         lumen_seg_remove(h, Int32(id))
         names[id] = nil
         reloadSegments()
@@ -364,8 +367,11 @@ final class SegmentationModel: ObservableObject {
     // (typically the structure plus a background segment).
     var canGrowFromSeeds: Bool { segments.count >= 2 }
 
-    // Initialise: snapshot, then grow every segment's painted seeds outward by one
-    // tolerance band. Cancel reverts this via undo; further Updates grow more.
+    // Initialise: snapshot ONCE (the pre-session state), then grow every segment's
+    // painted seeds outward by one tolerance band. The whole session collapses into
+    // that single snapshot - Update grows further without a new snapshot - so Cancel
+    // (one undo) always reverts the entire session, and one Cmd-Z after Apply does
+    // the same.
     func growInitialise() {
         guard let h = volume.handle, canGrowFromSeeds else { return }
         lumen_seg_push_undo(h)
@@ -376,16 +382,16 @@ final class SegmentationModel: ObservableObject {
     }
 
     // Update: expand another tolerance band from the enlarged regions (or from any
-    // seeds the user painted since). Its own undo step.
+    // seeds painted since). Does NOT push a new snapshot - it builds on the session
+    // snapshot from Initialise - and needs the segments to still compete.
     func growUpdate() {
-        guard let h = volume.handle, growSessionActive else { return }
-        lumen_seg_push_undo(h)
+        guard let h = volume.handle, growSessionActive, canGrowFromSeeds else { return }
         _ = lumen_seg_grow_from_seeds(h, tolerance)
         didMutateMask()
     }
 
-    // Cancel reverts the last grow; Apply just closes the session (the result stays,
-    // reversible from the undo stack / Cmd-Z).
+    // Cancel reverts the whole session (single snapshot); Apply just closes it (the
+    // result stays, one Cmd-Z away).
     func growCancel() {
         if growSessionActive { undo() }
         growSessionActive = false

@@ -33,6 +33,9 @@ struct LumenSliceApp: App {
     @StateObject private var segmentation: SegmentationModel
     @StateObject private var markups: MarkupsModel
     @StateObject private var mesh: MeshModel
+    // The active workspace tab lives here so the global Undo command can route to
+    // the right model (markup points on the Markups tab, mask edits elsewhere).
+    @State private var selectedTab: WorkspaceTab = .visualize
 
     init() {
         // The segmentation + mesh models drive the same C++ volume handle the
@@ -62,7 +65,7 @@ struct LumenSliceApp: App {
 
     var body: some Scene {
         WindowGroup {
-            AppShell()
+            AppShell(selectedTab: $selectedTab)
                 .environmentObject(model)
                 .environmentObject(segmentation)
                 .environmentObject(markups)
@@ -79,19 +82,27 @@ struct LumenSliceApp: App {
         .windowStyle(.titleBar)
         .windowToolbarStyle(.unified)
         .commands {
-            // System-wide undo/redo for the segmentation module: Cmd-Z / Cmd-Shift-Z
-            // drive the same RLE snapshot stack the sidebar buttons use, so every
-            // edit (threshold, grow, paint, erase, refine, islands, clear) is
-            // reversible from the keyboard. Both are safe no-ops when the stack is
-            // empty; `canUndo`/`canRedo` gray the menu items out. The App observes
-            // `segmentation` (a StateObject), so these rebuild as the stack changes.
+            // System-wide undo/redo, routed by the active tab. On the Markups tab
+            // Cmd-Z removes the last placed markup point; everywhere else it drives
+            // the segmentation RLE snapshot stack the sidebar buttons use, so every
+            // mask edit (threshold, grow, paint, erase, refine, islands, clear) is
+            // reversible from the keyboard. Menu items gray out when there is nothing
+            // to undo/redo. The App observes its models + selectedTab, so these
+            // rebuild as state changes. (Markups has no redo.)
             CommandGroup(replacing: .undoRedo) {
-                Button("Undo") { segmentation.undo() }
-                    .keyboardShortcut("z", modifiers: .command)
-                    .disabled(!segmentation.canUndo)
-                Button("Redo") { segmentation.redo() }
-                    .keyboardShortcut("z", modifiers: [.command, .shift])
-                    .disabled(!segmentation.canRedo)
+                Button("Undo") {
+                    if selectedTab == .markups { markups.removeLastPoint() }
+                    else { segmentation.undo() }
+                }
+                .keyboardShortcut("z", modifiers: .command)
+                .disabled(selectedTab == .markups
+                          ? (markups.active?.points.isEmpty ?? true)
+                          : !segmentation.canUndo)
+                Button("Redo") {
+                    if selectedTab != .markups { segmentation.redo() }
+                }
+                .keyboardShortcut("z", modifiers: [.command, .shift])
+                .disabled(selectedTab == .markups || !segmentation.canRedo)
             }
         }
     }
