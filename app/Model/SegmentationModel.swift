@@ -9,6 +9,7 @@ enum SegTool: String, CaseIterable, Identifiable {
     case levelTrace
     case paint
     case erase
+    case scissors
 
     var id: String { rawValue }
     var title: String {
@@ -18,6 +19,7 @@ enum SegTool: String, CaseIterable, Identifiable {
         case .levelTrace: return "Level"
         case .paint: return "Paint"
         case .erase: return "Erase"
+        case .scissors: return "Scissors"
         }
     }
     var icon: String {
@@ -27,6 +29,7 @@ enum SegTool: String, CaseIterable, Identifiable {
         case .levelTrace: return "scope"
         case .paint: return "paintbrush.pointed.fill"
         case .erase: return "eraser.fill"
+        case .scissors: return "scissors"
         }
     }
     // Tools that paint along a drag (vs. a single click / slider).
@@ -71,6 +74,7 @@ final class SegmentationModel: ObservableObject {
     @Published var tolerance: Float = 120
     @Published var brushRadius: Int = 12          // slice pixels
     @Published var removeSmallMin: Int = 50       // islands cutoff (voxels)
+    @Published var scissorsEraseInside = true     // scissors: inside vs outside
     @Published var showOverlay = true { didSet { refreshAllOverlays() } }
 
     @Published private(set) var segments: [SegmentRow] = []
@@ -284,6 +288,19 @@ final class SegmentationModel: ObservableObject {
         let added = lumen_seg_level_trace(h, Int32(axis), Int32(volume.sliceIndex[axis]),
                                           Int32(px), Int32(py))
         if added > 0 { didMutateMask() } else { refreshUndoState() }
+    }
+
+    // Scissors: erase the active segment on this slice inside/outside a dragged
+    // rectangle (two corners in slice pixels).
+    func scissorsCut(axis: Int, x0: Int, y0: Int, x1: Int, y1: Int) {
+        guard let h = volume.handle, activeID > 0 else { return }
+        lumen_seg_push_undo(h)
+        thresholdNeedsUndoCapture = true
+        let changed = lumen_seg_scissors(
+            h, Int32(axis), Int32(volume.sliceIndex[axis]),
+            Int32(x0), Int32(y0), Int32(x1), Int32(y1),
+            scissorsEraseInside ? 1 : 0)
+        if changed > 0 { didMutateMask() } else { refreshUndoState() }
     }
 
     // Paint strokes: capture one undo entry at the start, paint per drag tick (only

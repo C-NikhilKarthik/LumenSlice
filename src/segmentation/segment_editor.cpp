@@ -64,6 +64,11 @@ long SegmentEditor::level_trace(Axis axis, int slice_index, int cx, int cy) {
     return apply(LevelTraceEffect{axis, slice_index, cx, cy});
 }
 
+long SegmentEditor::scissors(Axis axis, int slice_index, int x0, int y0, int x1,
+                             int y1, bool erase_inside) {
+    return apply(ScissorsEffect{axis, slice_index, x0, y0, x1, y1, erase_inside});
+}
+
 void SegmentEditor::clear_active() { apply(ClearEffect{}); }
 
 long SegmentEditor::keep_largest() { return apply(KeepLargestEffect{}); }

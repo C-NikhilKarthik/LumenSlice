@@ -101,6 +101,22 @@ private:
     int index_, px_, py_;
 };
 
+// Scissors: erase the active label on one slice, inside or outside a rectangle.
+class ScissorsEffect final : public SegmentationEffect {
+public:
+    ScissorsEffect(Axis axis, int slice_index, int x0, int y0, int x1, int y1,
+                   bool erase_inside)
+        : axis_(axis), index_(slice_index), x0_(x0), y0_(y0), x1_(x1), y1_(y1),
+          erase_inside_(erase_inside) {}
+    [[nodiscard]] long apply(const Volume& volume, LabelVolume& mask,
+                             std::uint8_t label) const override;
+
+private:
+    Axis axis_;
+    int index_, x0_, y0_, x1_, y1_;
+    bool erase_inside_;
+};
+
 // Clear every voxel of the active label back to background.
 class ClearEffect final : public SegmentationEffect {
 public:

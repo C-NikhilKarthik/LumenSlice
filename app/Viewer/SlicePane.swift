@@ -30,6 +30,10 @@ struct SlicePane: View {
     @State private var pan: CGSize = .zero
     private static let maxZoom: CGFloat = 8
 
+    // Scissors rubber-band: the drag's start + current point in display coords.
+    @State private var scissorsFrom: CGPoint?
+    @State private var scissorsTo: CGPoint?
+
     var body: some View {
         let count = model.sliceCount(axis)
         VStack(spacing: 8) {
@@ -106,6 +110,7 @@ struct SlicePane: View {
                     OrientationLabels(axis: axis, rect: display)
                 }
                 brushRing(fitted: display)
+                scissorsRect
             }
             .clipShape(RoundedRectangle(cornerRadius: 10))
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -136,6 +141,22 @@ struct SlicePane: View {
 
     // The brush footprint: a ring sized to brushRadius (slice pixels) scaled into
     // display points, tinted by the active segment (red while erasing).
+    // The scissors rubber-band rectangle, drawn while dragging; colour signals
+    // which side gets erased (red = inside, orange = outside).
+    @ViewBuilder private var scissorsRect: some View {
+        if let seg = segment, seg.tool == .scissors,
+           let a = scissorsFrom, let b = scissorsTo {
+            let rect = CGRect(x: min(a.x, b.x), y: min(a.y, b.y),
+                              width: abs(a.x - b.x), height: abs(a.y - b.y))
+            Rectangle()
+                .stroke(seg.scissorsEraseInside ? Color.red : Color.orange,
+                        style: StrokeStyle(lineWidth: 1.5, dash: [5]))
+                .frame(width: rect.width, height: rect.height)
+                .position(x: rect.midX, y: rect.midY)
+                .allowsHitTesting(false)
+        }
+    }
+
     @ViewBuilder private func brushRing(fitted: CGRect?) -> some View {
         if let seg = segment, seg.tool.isBrush, let p = pointer,
            let img = model.images[axis], let rect = fitted, rect.contains(p) {
@@ -188,6 +209,11 @@ struct SlicePane: View {
     fileprivate func brushChanged(_ seg: SegmentationModel, at point: CGPoint,
                                   container: CGSize) {
         pointer = point
+        if seg.tool == .scissors {
+            if scissorsFrom == nil { scissorsFrom = point }
+            scissorsTo = point
+            return
+        }
         guard seg.tool.isBrush else { return }
         if !strokeActive { seg.beginStroke(); strokeActive = true; lastPaintPixel = nil }
         paintMove(seg, to: point, container: container)
@@ -195,6 +221,10 @@ struct SlicePane: View {
 
     fileprivate func brushEnded(_ seg: SegmentationModel, at point: CGPoint,
                                 container: CGSize) {
+        if seg.tool == .scissors {
+            applyScissors(seg, at: point, container: container)
+            return
+        }
         if seg.tool.isBrush {
             if !strokeActive { seg.beginStroke(); strokeActive = true; lastPaintPixel = nil }
             paintMove(seg, to: point, container: container)
@@ -210,6 +240,15 @@ struct SlicePane: View {
                 }
             }
         }
+    }
+
+    private func applyScissors(_ seg: SegmentationModel, at point: CGPoint,
+                               container: CGSize) {
+        defer { scissorsFrom = nil; scissorsTo = nil }
+        guard let start = scissorsFrom,
+              let a = pixel(at: start, container: container),
+              let b = pixel(at: point, container: container) else { return }
+        seg.scissorsCut(axis: axis, x0: a.x, y0: a.y, x1: b.x, y1: b.y)
     }
 
     private func paintMove(_ seg: SegmentationModel, to point: CGPoint,

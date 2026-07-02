@@ -33,6 +33,12 @@ long LevelTraceEffect::apply(const Volume& volume, LabelVolume& mask,
     return level_trace(volume, axis_, index_, px_, py_, mask, label);
 }
 
+long ScissorsEffect::apply(const Volume& volume, LabelVolume& mask,
+                           std::uint8_t label) const {
+    return scissors_erase(volume, axis_, index_, x0_, y0_, x1_, y1_, erase_inside_,
+                          mask, label);
+}
+
 long ClearEffect::apply(const Volume& /*volume*/, LabelVolume& mask,
                         std::uint8_t label) const {
     if (label == 0) return 0;

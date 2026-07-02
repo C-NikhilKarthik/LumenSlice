@@ -105,6 +105,13 @@ long lumen_seg_level_trace(LumenVolume* v, int axis, int index, int cx, int cy) 
     return v->editor.level_trace(static_cast<lumen::Axis>(axis), index, cx, cy);
 }
 
+long lumen_seg_scissors(LumenVolume* v, int axis, int index, int x0, int y0,
+                        int x1, int y1, int erase_inside) {
+    if (v == nullptr) return 0;
+    return v->editor.scissors(static_cast<lumen::Axis>(axis), index, x0, y0, x1, y1,
+                              erase_inside != 0);
+}
+
 long lumen_seg_paint(LumenVolume* v, int axis, int index, int cx, int cy,
                      int radius, int add) {
     if (v == nullptr) return 0;

@@ -79,6 +79,7 @@ struct SegmentControls: View {
         case .regionGrow: regionGrowSection
         case .levelTrace: levelTraceSection
         case .paint, .erase: brushSection
+        case .scissors: scissorsSection
         }
     }
 
@@ -89,6 +90,20 @@ struct SegmentControls: View {
                  + "active segment.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    private var scissorsSection: some View {
+        Section("Scissors") {
+            Text("Drag a rectangle on a slice to erase the active segment on that "
+                 + "slice, on the chosen side of the rectangle.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Picker("Erase", selection: $seg.scissorsEraseInside) {
+                Text("Inside").tag(true)
+                Text("Outside").tag(false)
+            }
+            .pickerStyle(.segmented)
         }
     }
 

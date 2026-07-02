@@ -504,6 +504,32 @@ static void test_level_trace() {
     CHECK(bg == 64, "clicking level 0 fills the whole slice (all >= 0)");
 }
 
+// 18. scissors: erase the active label inside or outside a rectangle on one slice.
+static void test_scissors() {
+    std::printf("-- scissors\n");
+    Volume v = make_volume(8, 0.0f);
+
+    LabelVolume mask;
+    mask.reset_to(v);
+    for (int y = 0; y < 8; ++y)
+        for (int x = 0; x < 8; ++x)
+            mask.set(x, y, 4, kActiveLabel); // fill axial slice z=4
+    const long inside = scissors_erase(v, Axis::Axial, 4, 2, 2, 5, 5, true, mask);
+    CHECK(inside == 16, "erase inside clears the 4x4 rectangle");
+    CHECK(mask.at(3, 3, 4) == 0, "an inside voxel is cleared");
+    CHECK(mask.at(0, 0, 4) == kActiveLabel, "an outside voxel is kept");
+
+    LabelVolume mask2;
+    mask2.reset_to(v);
+    for (int y = 0; y < 8; ++y)
+        for (int x = 0; x < 8; ++x)
+            mask2.set(x, y, 4, kActiveLabel);
+    const long outside = scissors_erase(v, Axis::Axial, 4, 2, 2, 5, 5, false, mask2);
+    CHECK(outside == 48, "erase outside clears everything but the rectangle");
+    CHECK(mask2.at(3, 3, 4) == kActiveLabel, "an inside voxel is kept");
+    CHECK(mask2.at(0, 0, 4) == 0, "an outside voxel is cleared");
+}
+
 int main() {
     std::printf("== SegTest ==\n");
     test_plane_map_roundtrip();
@@ -523,6 +549,7 @@ int main() {
     test_segment_editor();
     test_grow_from_seeds();
     test_level_trace();
+    test_scissors();
     if (g_failures == 0) {
         std::printf("All segmentation tests passed.\n");
         return 0;

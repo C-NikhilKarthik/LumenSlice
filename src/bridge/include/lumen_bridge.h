@@ -106,6 +106,12 @@ long lumen_seg_region_grow(LumenVolume* v, int x, int y, int z, float tol);
 // segment. Returns voxels newly labelled.
 long lumen_seg_level_trace(LumenVolume* v, int axis, int index, int cx, int cy);
 
+// Scissors on one slice: erase the active segment inside (erase_inside != 0) or
+// outside the axis-aligned rectangle (two corners in slice pixels). Returns voxels
+// cleared.
+long lumen_seg_scissors(LumenVolume* v, int axis, int index, int x0, int y0,
+                        int x1, int y1, int erase_inside);
+
 // Paint (add != 0) or erase (add == 0) a filled disk of `radius` slice-pixels on
 // the given plane, on the active segment. Returns the number of voxels changed.
 long lumen_seg_paint(LumenVolume* v, int axis, int index, int cx, int cy,

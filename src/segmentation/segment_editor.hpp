@@ -84,6 +84,8 @@ public:
     long region_grow(int x, int y, int z, float tolerance);
     long paint(Axis axis, int slice_index, int cx, int cy, int radius, bool add);
     long level_trace(Axis axis, int slice_index, int cx, int cy);
+    long scissors(Axis axis, int slice_index, int x0, int y0, int x1, int y1,
+                  bool erase_inside);
     void clear_active();
     long keep_largest();
     long remove_small(long min_voxels);
