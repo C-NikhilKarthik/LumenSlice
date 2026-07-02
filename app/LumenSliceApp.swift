@@ -31,16 +31,19 @@ struct LumenSliceApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var model: VolumeModel
     @StateObject private var segmentation: SegmentationModel
+    @StateObject private var markups: MarkupsModel
     @StateObject private var mesh: MeshModel
 
     init() {
         // The segmentation + mesh models drive the same C++ volume handle the
-        // VolumeModel owns, so build them together and inject all three. The mesh
-        // model reads the segment list to build one colored surface per segment.
+        // VolumeModel owns, so build them together and inject all of them. The mesh
+        // model reads the segment list to build one colored surface per segment;
+        // the markups model only reads the volume geometry for its annotations.
         let volume = VolumeModel()
         let segmentation = SegmentationModel(volume: volume)
         _model = StateObject(wrappedValue: volume)
         _segmentation = StateObject(wrappedValue: segmentation)
+        _markups = StateObject(wrappedValue: MarkupsModel(volume: volume))
         _mesh = StateObject(wrappedValue: MeshModel(volume: volume,
                                                     segmentation: segmentation))
 
@@ -62,6 +65,7 @@ struct LumenSliceApp: App {
             AppShell()
                 .environmentObject(model)
                 .environmentObject(segmentation)
+                .environmentObject(markups)
                 .environmentObject(mesh)
                 .frame(minWidth: 1000, minHeight: 660)
                 .onAppear {

@@ -10,6 +10,7 @@ import Foundation
 enum WorkspaceTab: String, CaseIterable, Identifiable {
     case visualize
     case segment
+    case markups
     case threeD
     case export
 
@@ -19,6 +20,7 @@ enum WorkspaceTab: String, CaseIterable, Identifiable {
         switch self {
         case .visualize: return "Visualize"
         case .segment: return "Segment"
+        case .markups: return "Markups"
         case .threeD: return "3D"
         case .export: return "Export"
         }
@@ -29,6 +31,7 @@ enum WorkspaceTab: String, CaseIterable, Identifiable {
         switch self {
         case .visualize: return "square.stack.3d.up"
         case .segment: return "scribble.variable"
+        case .markups: return "mappin.and.ellipse"
         case .threeD: return "cube"
         case .export: return "square.and.arrow.up"
         }

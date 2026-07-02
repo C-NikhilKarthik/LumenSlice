@@ -408,8 +408,8 @@ private struct SegmentListRow: View {
 
 // A small grid of preset colour swatches shown in a popover. Replaces SwiftUI's
 // ColorPicker so we never touch the shared NSColorPanel (which otherwise lingers
-// and re-opens on every launch).
-private struct ColorPalettePopover: View {
+// and re-opens on every launch). Shared by the segment list and the markups table.
+struct ColorPalettePopover: View {
     let selected: Color
     let onPick: (Color) -> Void
 

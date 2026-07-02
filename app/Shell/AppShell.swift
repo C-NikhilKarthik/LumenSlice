@@ -19,6 +19,7 @@ import UniformTypeIdentifiers
 struct AppShell: View {
     @EnvironmentObject var model: VolumeModel
     @EnvironmentObject var segmentation: SegmentationModel
+    @EnvironmentObject var markups: MarkupsModel
     @EnvironmentObject var mesh: MeshModel
     @State private var selectedTab: WorkspaceTab = .visualize
     @State private var dropTargeted = false
@@ -27,8 +28,10 @@ struct AppShell: View {
         HStack(spacing: 0) {
             TabRail(selection: $selectedTab)
                 .onChange(of: selectedTab) { newTab in
-                    // Only the Segment tab does overlay extraction work.
+                    // Only the Segment tab does mask overlay extraction work; the
+                    // Markups tab wires placement + the markup overlay.
                     segmentation.isActive = (newTab == .segment)
+                    markups.isActive = (newTab == .markups)
                 }
             NavigationSplitView {
                 controlPanel
@@ -61,6 +64,7 @@ struct AppShell: View {
             switch selectedTab {
             case .visualize: VisualizeControls()
             case .segment:   SegmentControls()
+            case .markups:   MarkupControls()
             case .threeD:    ThreeDControls()
             case .export:    ExportControls()
             }
@@ -78,6 +82,8 @@ struct AppShell: View {
             SliceBoard(dropTargeted: $dropTargeted)
         case .segment:
             SliceBoard(dropTargeted: $dropTargeted, segment: segmentation)
+        case .markups:
+            SliceBoard(dropTargeted: $dropTargeted, markups: markups)
         case .threeD, .export:
             MeshCanvas()
         }
