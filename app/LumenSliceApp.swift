@@ -74,5 +74,21 @@ struct LumenSliceApp: App {
         }
         .windowStyle(.titleBar)
         .windowToolbarStyle(.unified)
+        .commands {
+            // System-wide undo/redo for the segmentation module: Cmd-Z / Cmd-Shift-Z
+            // drive the same RLE snapshot stack the sidebar buttons use, so every
+            // edit (threshold, grow, paint, erase, refine, islands, clear) is
+            // reversible from the keyboard. Both are safe no-ops when the stack is
+            // empty; `canUndo`/`canRedo` gray the menu items out. The App observes
+            // `segmentation` (a StateObject), so these rebuild as the stack changes.
+            CommandGroup(replacing: .undoRedo) {
+                Button("Undo") { segmentation.undo() }
+                    .keyboardShortcut("z", modifiers: .command)
+                    .disabled(!segmentation.canUndo)
+                Button("Redo") { segmentation.redo() }
+                    .keyboardShortcut("z", modifiers: [.command, .shift])
+                    .disabled(!segmentation.canRedo)
+            }
+        }
     }
 }

@@ -83,25 +83,29 @@ struct SegmentControls: View {
 
     private var thresholdSection: some View {
         Section("Threshold (HU)") {
-            Text("Label every voxel in this HU range into the active segment. "
-                 + "Drag to update live.")
+            Text("Set the level, then press Apply to label every voxel at or above "
+                 + "it into the active segment.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
-            huRow("Low", value: $seg.thresholdLo)
-            huRow("High", value: $seg.thresholdHi)
-            HStack(spacing: 6) {
-                presetButton("Bone", lo: 300, hi: 3000)
-                presetButton("Soft", lo: 40, hi: 80)
-                presetButton("Lung", lo: -900, hi: -400)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("Level")
+                    Spacer()
+                    Text("\(Int(seg.thresholdLo)) HU")
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                Slider(value: $seg.thresholdLo,
+                       in: model.huLo...max(model.huHi, model.huLo + 1))
             }
-            .padding(.top, 2)
             Button {
-                seg.applyOtsu()
+                seg.thresholdHi = model.huHi   // single slider = "at or above the level"
+                seg.applyThreshold()
             } label: {
-                Label("Otsu auto-threshold", systemImage: "wand.and.stars")
+                Label("Apply", systemImage: "checkmark.circle")
                     .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(.borderedProminent)
             .controlSize(.small)
             .disabled(seg.activeID == 0)
         }
@@ -250,35 +254,6 @@ struct SegmentControls: View {
         }
     }
 
-    // MARK: - Helpers
-
-    private func huRow(_ title: String, value: Binding<Float>) -> some View {
-        let lo = model.huLo
-        let hi = max(model.huHi, lo + 1)
-        return VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(title)
-                Spacer()
-                TextField(title, value: value,
-                          format: .number.precision(.fractionLength(0)))
-                    .labelsHidden()
-                    .frame(width: 64)
-                    .multilineTextAlignment(.trailing)
-                    .textFieldStyle(.roundedBorder)
-            }
-            Slider(value: value, in: lo...hi)
-        }
-    }
-
-    private func presetButton(_ name: String, lo: Float, hi: Float) -> some View {
-        Button(name) {
-            seg.thresholdLo = lo
-            seg.thresholdHi = hi
-        }
-        .buttonStyle(.bordered)
-        .controlSize(.small)
-        .frame(maxWidth: .infinity)
-    }
 }
 
 // One segment list row: visibility eye, colour well, editable name, voxel count,

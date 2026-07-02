@@ -83,11 +83,9 @@ final class SegmentationModel: ObservableObject {
     // fresh segment never reuses a colour still on screen just because a middle
     // segment was removed and the list count shrank.
     private var nextColorIndex = 0
-    // Coalesces a run of live-threshold edits into a single undo entry.
+    // Coalesces a run of threshold applies (one tool session) into a single undo
+    // entry: set true whenever the tool/segment changes, cleared on the first apply.
     private var thresholdNeedsUndoCapture = true
-    // Set when we apply a threshold programmatically (Otsu) so the debounced
-    // CombineLatest sink skips the redundant second full-volume threshold pass.
-    private var skipNextThresholdSink = false
     // Wall-clock of the last overlay rebuild during the active brush stroke. Each
     // rebuild re-extracts the whole painted slice (cost grows with slice size — and
     // coronal/sagittal slices grow with the file count), so we cap it to display
@@ -115,17 +113,9 @@ final class SegmentationModel: ObservableObject {
     init(volume: VolumeModel) {
         self.volume = volume
 
-        // Live threshold: debounce so dragging doesn't recompute the whole-volume
-        // mask on every tick. Only meaningful while the threshold tool is selected.
-        Publishers.CombineLatest($thresholdLo, $thresholdHi)
-            .debounce(for: .milliseconds(180), scheduler: RunLoop.main)
-            .sink { [weak self] _, _ in
-                guard let self else { return }
-                if self.skipNextThresholdSink { self.skipNextThresholdSink = false; return }
-                guard self.tool == .threshold else { return }
-                self.applyThreshold()
-            }
-            .store(in: &cancellables)
+        // Threshold is apply-on-demand (the sidebar "Apply" button), not live: a
+        // whole-volume threshold pass on every slider tick was the main source of
+        // latency, so the user sets the cutoff then applies once.
 
         // Focus/slice changes -> re-extract the overlays for the new planes.
         volume.$focus
@@ -265,20 +255,6 @@ final class SegmentationModel: ObservableObject {
             lumen_seg_push_undo(h)
             thresholdNeedsUndoCapture = false
         }
-        lumen_seg_threshold(h, thresholdLo, thresholdHi)
-        didMutateMask()
-    }
-
-    func applyOtsu() {
-        guard let h = volume.handle, activeID > 0 else { return }
-        let t = lumen_seg_otsu(h)
-        // We apply the threshold directly below; setting these @Published values
-        // also trips the debounced sink, so tell it to skip the redundant pass.
-        skipNextThresholdSink = true
-        thresholdLo = t
-        thresholdHi = volume.huHi
-        lumen_seg_push_undo(h)
-        thresholdNeedsUndoCapture = false
         lumen_seg_threshold(h, thresholdLo, thresholdHi)
         didMutateMask()
     }

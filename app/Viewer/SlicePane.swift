@@ -22,9 +22,12 @@ struct SlicePane: View {
 
     // Per-pane zoom: 1 = fit, up to 8x, driven by a right-button drag. `zoomAnchor`
     // is the cursor point where the drag began, so the view magnifies toward what
-    // is under the cursor. Each pane zooms independently (3D-Slicer behavior).
+    // is under the cursor. `pan` slides the zoomed image (middle-button drag) and
+    // resets to zero when the pane returns to fit. Each pane transforms
+    // independently (3D-Slicer behavior).
     @State private var zoom: CGFloat = 1
     @State private var zoomAnchor: CGPoint = .zero
+    @State private var pan: CGSize = .zero
     private static let maxZoom: CGFloat = 8
 
     var body: some View {
@@ -76,7 +79,8 @@ struct SlicePane: View {
             // The one rect rendering, the crosshair, the brush AND hit-testing all
             // read - zoom flows through it so nothing desyncs when magnified.
             let display = SliceCoordinates.fittedRect(
-                container: container, aspect: aspect, zoom: zoom, anchor: zoomAnchor)
+                container: container, aspect: aspect, zoom: zoom, anchor: zoomAnchor,
+                pan: pan)
             ZStack {
                 RoundedRectangle(cornerRadius: 10)
                     .fill(.black)
@@ -113,7 +117,11 @@ struct SlicePane: View {
                 onZoomBegin: { zoomAnchor = $0 },
                 onZoom: { applyZoom($0) },
                 onShiftLocate: { locate(at: $0, container: container) },
-                onShiftChange: { model.setShiftActive($0) }))
+                onShiftChange: { model.setShiftActive($0) },
+                onPan: { d in
+                    guard zoom > 1 else { return }  // nothing to pan at fit
+                    pan.width += d.width; pan.height += d.height
+                }))
             .overlay(alignment: .bottomLeading) {
                 Text("W \(Int(model.window))  L \(Int(model.level))")
                     .font(.caption2.monospacedDigit())
@@ -146,16 +154,18 @@ struct SlicePane: View {
               let c = model.crosshairPixel(onAxis: axis) else { return nil }
         return SliceCoordinates.point(forPixel: c.px, c.py, container: container,
                                       imageWidth: img.width, imageHeight: img.height,
-                                      aspect: aspect, zoom: zoom, anchor: zoomAnchor)
+                                      aspect: aspect, zoom: zoom, anchor: zoomAnchor,
+                                      pan: pan)
     }
 
     // Right-drag vertical delta (window coords, up positive) -> magnification. The
     // exponential makes each point of drag a constant percentage change, so zoom
-    // feels even at every level; clamped to [1, maxZoom] (1 = fit, no zoom-out
-    // below fit since there is no pan).
+    // feels even at every level; clamped to [1, maxZoom]. Returning to fit clears
+    // any pan so the image re-centers.
     private func applyZoom(_ dy: CGFloat) {
         let factor = CGFloat(exp(Double(dy) * 0.01))
         zoom = min(Self.maxZoom, max(1, zoom * factor))
+        if zoom == 1 { pan = .zero }
     }
 
     // MARK: - Interaction helpers (called from SliceInteraction)
@@ -165,7 +175,8 @@ struct SlicePane: View {
         return SliceCoordinates.pixel(
             forTap: point, container: container,
             imageWidth: img.width, imageHeight: img.height,
-            aspect: model.physicalAspect(axis), zoom: zoom, anchor: zoomAnchor)
+            aspect: model.physicalAspect(axis), zoom: zoom, anchor: zoomAnchor,
+            pan: pan)
     }
 
     fileprivate func locate(at point: CGPoint, container: CGSize) {
