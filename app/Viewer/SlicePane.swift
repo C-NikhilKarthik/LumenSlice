@@ -9,6 +9,7 @@ import SwiftUI
 // pane to fill the viewport.
 struct SlicePane: View {
     @EnvironmentObject var model: VolumeModel
+    @EnvironmentObject var markup: MarkupModel
     let axis: Int
     var segment: SegmentationModel? = nil
     var isFocused: Bool = false
@@ -102,6 +103,7 @@ struct SlicePane: View {
                     OrientationLabels(axis: axis, rect: display)
                 }
                 brushRing(fitted: display)
+                markupDots(container: container, aspect: aspect)
             }
             .clipShape(RoundedRectangle(cornerRadius: 10))
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -139,6 +141,50 @@ struct SlicePane: View {
                 .position(p)
                 .allowsHitTesting(false)
         }
+    }
+
+    // Dots for markup defining points (and any in-progress points) that lie on the
+    // slice currently shown in this pane. Placement happens here; this is the 2D
+    // echo of what the 3D pane draws.
+    @ViewBuilder private func markupDots(container: CGSize, aspect: CGFloat) -> some View {
+        ForEach(markup.markups) { m in
+            ForEach(Array(m.voxels.enumerated()), id: \.offset) { _, v in
+                if markup.onCurrentSlice(v, axis: axis),
+                   let pt = markupPoint(voxel: v, container: container, aspect: aspect) {
+                    Circle()
+                        .fill(markup.color(m))
+                        .frame(width: 9, height: 9)
+                        .overlay(Circle().strokeBorder(.white, lineWidth: 1))
+                        .position(pt)
+                        .allowsHitTesting(false)
+                }
+            }
+        }
+        ForEach(Array(markup.pending.enumerated()), id: \.offset) { _, v in
+            if markup.onCurrentSlice(v, axis: axis),
+               let pt = markupPoint(voxel: v, container: container, aspect: aspect) {
+                Circle()
+                    .strokeBorder(.white, lineWidth: 1.5)
+                    .frame(width: 10, height: 10)
+                    .position(pt)
+                    .allowsHitTesting(false)
+            }
+        }
+    }
+
+    private func markupPoint(voxel v: SIMD3<Int>, container: CGSize,
+                             aspect: CGFloat) -> CGPoint? {
+        guard let img = model.images[axis],
+              let c = model.slicePixel(onAxis: axis, voxel: v) else { return nil }
+        return SliceCoordinates.point(forPixel: c.px, c.py, container: container,
+                                      imageWidth: img.width, imageHeight: img.height,
+                                      aspect: aspect, zoom: zoom, anchor: zoomAnchor)
+    }
+
+    fileprivate func placeMarkup(at point: CGPoint, container: CGSize) {
+        guard let (px, py) = pixel(at: point, container: container),
+              let voxel = model.voxel(onAxis: axis, px: px, py: py) else { return }
+        markup.place(voxel)
     }
 
     private func crosshairPoint(container: CGSize, aspect: CGFloat) -> CGPoint? {
@@ -232,7 +278,13 @@ private struct SliceInteraction: ViewModifier {
     let container: CGSize
 
     func body(content: Content) -> some View {
-        if let seg = pane.segment {
+        if pane.markup.placing {
+            // Markup placement takes the canvas: each click drops one point.
+            content.gesture(
+                SpatialTapGesture(coordinateSpace: .local)
+                    .onEnded { pane.placeMarkup(at: $0.location, container: container) }
+            )
+        } else if let seg = pane.segment {
             content.gesture(
                 DragGesture(minimumDistance: 0, coordinateSpace: .local)
                     .onChanged { pane.brushChanged(seg, at: $0.location, container: container) }

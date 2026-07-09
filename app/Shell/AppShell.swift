@@ -20,6 +20,7 @@ struct AppShell: View {
     @EnvironmentObject var model: VolumeModel
     @EnvironmentObject var segmentation: SegmentationModel
     @EnvironmentObject var mesh: MeshModel
+    @EnvironmentObject var markup: MarkupModel
     @State private var selectedTab: WorkspaceTab = .visualize
     @State private var dropTargeted = false
 
@@ -29,6 +30,9 @@ struct AppShell: View {
                 .onChange(of: selectedTab) { newTab in
                     // Only the Segment tab does overlay extraction work.
                     segmentation.isActive = (newTab == .segment)
+                    // Leaving the Markups tab exits placement, so slice clicks go
+                    // back to navigation / painting instead of dropping points.
+                    if newTab != .markups { markup.placing = false }
                 }
             NavigationSplitView {
                 controlPanel
@@ -61,6 +65,7 @@ struct AppShell: View {
             switch selectedTab {
             case .visualize: VisualizeControls()
             case .segment:   SegmentControls()
+            case .markups:   MarkupControls()
             case .threeD:    ThreeDControls()
             case .export:    ExportControls()
             }
@@ -78,6 +83,8 @@ struct AppShell: View {
             SliceBoard(dropTargeted: $dropTargeted)
         case .segment:
             SliceBoard(dropTargeted: $dropTargeted, segment: segmentation)
+        case .markups:
+            SliceBoard(dropTargeted: $dropTargeted)
         case .threeD, .export:
             MeshCanvas()
         }

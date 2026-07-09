@@ -32,17 +32,20 @@ struct LumenSliceApp: App {
     @StateObject private var model: VolumeModel
     @StateObject private var segmentation: SegmentationModel
     @StateObject private var mesh: MeshModel
+    @StateObject private var markup: MarkupModel
 
     init() {
         // The segmentation + mesh models drive the same C++ volume handle the
-        // VolumeModel owns, so build them together and inject all three. The mesh
-        // model reads the segment list to build one colored surface per segment.
+        // VolumeModel owns, so build them together and inject all four. The mesh
+        // model reads the segment list to build one colored surface per segment;
+        // the markup model holds fiducials placed on the slices and shown in 3D.
         let volume = VolumeModel()
         let segmentation = SegmentationModel(volume: volume)
         _model = StateObject(wrappedValue: volume)
         _segmentation = StateObject(wrappedValue: segmentation)
         _mesh = StateObject(wrappedValue: MeshModel(volume: volume,
                                                     segmentation: segmentation))
+        _markup = StateObject(wrappedValue: MarkupModel(volume: volume))
 
         // When running from a distributed .app bundle, DCMTK can't find its data
         // dictionary at the Homebrew path. Point it at the copy we bundle in
@@ -63,6 +66,7 @@ struct LumenSliceApp: App {
                 .environmentObject(model)
                 .environmentObject(segmentation)
                 .environmentObject(mesh)
+                .environmentObject(markup)
                 .frame(minWidth: 1000, minHeight: 660)
                 .onAppear {
                     // Auto-load a folder passed on the command line.

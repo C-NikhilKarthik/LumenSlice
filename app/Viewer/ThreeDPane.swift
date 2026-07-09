@@ -10,6 +10,7 @@ import SceneKit
 struct ThreeDPane: View {
     @EnvironmentObject var mesh: MeshModel
     @EnvironmentObject var seg: SegmentationModel
+    @EnvironmentObject var markup: MarkupModel
     var isFocused: Bool = false
     var onToggleFocus: (() -> Void)? = nil
 
@@ -88,10 +89,14 @@ struct ThreeDPane: View {
         ZStack {
             RoundedRectangle(cornerRadius: 10)
                 .fill(.black)
-            if !mesh.geometries.isEmpty {
+            if !mesh.geometries.isEmpty || !markup.markups.isEmpty
+                || !markup.pending.isEmpty {
                 MeshSceneView(geometries: mesh.geometries,
                               scissorActive: mesh.scissorActive,
-                              onScissor: performScissor)
+                              onScissor: performScissor,
+                              markups: markup.renders(),
+                              pendingPoints: markup.pendingMM(),
+                              markerRadius: markup.markerRadius)
                     .clipShape(RoundedRectangle(cornerRadius: 10))
                     .overlay(alignment: .top) {
                         if mesh.scissorActive { ScissorBanner() }

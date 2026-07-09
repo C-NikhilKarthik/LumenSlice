@@ -1,5 +1,6 @@
 import SwiftUI
 import SceneKit
+import simd
 
 // SceneKit viewport for the marching-cubes surfaces. Built-in camera control gives
 // orbit/zoom/pan; the camera is framed to the meshes whenever they change. Each
@@ -13,11 +14,21 @@ struct MeshSceneView: NSViewRepresentable {
     // C bridge needs to cut the mask. Inactive: events pass through to the camera.
     var scissorActive: Bool = false
     var onScissor: ((_ mvp: [Float], _ vpW: Int, _ vpH: Int, _ polygon: [Float]) -> Void)? = nil
+    // Markups (point/line/plane) shown alongside the surface, plus any in-progress
+    // points, and a marker radius sized to the volume.
+    var markups: [MarkupRender] = []
+    var pendingPoints: [SCNVector3] = []
+    var markerRadius: Float = 2
 
     final class Coordinator {
         // Identity of the geometry set we last built nodes for, so orbit/zoom (which
         // re-invoke updateNSView) don't rebuild the scene or yank the camera.
         var rendered: [ObjectIdentifier] = []
+        // Signature of the markups we last built, so orbit doesn't rebuild them.
+        var markupSig = ""
+        // Whether we've framed the camera to markups (only matters when there is no
+        // mesh to frame to). Reset when markups go empty.
+        var framedMarkups = false
         // Kept fresh each update so the overlay callback reaches the current closure.
         var parent: MeshSceneView
         weak var overlay: LassoOverlayView?
@@ -103,37 +114,157 @@ struct MeshSceneView: NSViewRepresentable {
     }
 
     func updateNSView(_ view: SCNView, context: Context) {
-        context.coordinator.parent = self
-        context.coordinator.overlay?.active = scissorActive
+        let coord = context.coordinator
+        coord.parent = self
+        coord.overlay?.active = scissorActive
         guard let root = view.scene?.rootNode else { return }
+
+        // --- Meshes: rebuild only when the geometry set actually changes. ---------
         let ids = geometries.map { ObjectIdentifier($0) }
-        if ids == context.coordinator.rendered { return } // unchanged: leave camera alone
-        context.coordinator.rendered = ids
-
-        root.childNodes
-            .filter { $0.name == "mesh" || $0.name == "gnomon" }
-            .forEach { $0.removeFromParentNode() }
-        guard !geometries.isEmpty else { return }
-
-        let meshNodes = geometries.map { geo -> SCNNode in
-            let node = SCNNode(geometry: geo)
-            node.name = "mesh"
-            return node
+        let meshChanged = ids != coord.rendered
+        if meshChanged {
+            coord.rendered = ids
+            root.childNodes
+                .filter { $0.name == "mesh" || $0.name == "gnomon" }
+                .forEach { $0.removeFromParentNode() }
+            if !geometries.isEmpty {
+                let meshNodes = geometries.map { geo -> SCNNode in
+                    let node = SCNNode(geometry: geo)
+                    node.name = "mesh"
+                    return node
+                }
+                meshNodes.forEach { root.addChildNode($0) }
+                // Size the gnomon to the scene so it reads at any zoom, seated at the
+                // volume origin (a corner of the data).
+                let (minB, maxB) = bounds(of: meshNodes)
+                let extent = max(maxB.x - minB.x, max(maxB.y - minB.y, maxB.z - minB.z))
+                let gnomon = Self.makeGnomon(length: CGFloat(max(extent, 1)) * 0.18)
+                gnomon.position = minB
+                root.addChildNode(gnomon)
+                DispatchQueue.main.async {
+                    view.defaultCameraController.frameNodes(meshNodes)
+                }
+            }
         }
-        meshNodes.forEach { root.addChildNode($0) }
 
-        // Size the gnomon to the scene so it reads at any zoom, and seat it at the
-        // volume origin (a corner of the data).
-        let (minB, maxB) = bounds(of: meshNodes)
-        let extent = max(maxB.x - minB.x, max(maxB.y - minB.y, maxB.z - minB.z))
-        let gnomon = Self.makeGnomon(length: CGFloat(max(extent, 1)) * 0.18)
-        gnomon.position = minB
-        root.addChildNode(gnomon)
-
-        // Frame the camera once, only when the geometry actually changed.
-        DispatchQueue.main.async {
-            view.defaultCameraController.frameNodes(meshNodes)
+        // --- Markups: rebuild only when their signature changes. ------------------
+        let sig = markupSignature()
+        if sig != coord.markupSig {
+            coord.markupSig = sig
+            root.childNodes.filter { $0.name == "markup" }
+                .forEach { $0.removeFromParentNode() }
+            buildMarkupNodes().forEach { root.addChildNode($0) }
+            if markups.isEmpty { coord.framedMarkups = false }
         }
+
+        // When there is no surface to frame to, frame the camera to the markups once
+        // (so the first dropped point isn't lost off-screen).
+        if geometries.isEmpty && !markups.isEmpty && !coord.framedMarkups {
+            coord.framedMarkups = true
+            let markupNodes = root.childNodes.filter { $0.name == "markup" }
+            if !markupNodes.isEmpty {
+                DispatchQueue.main.async {
+                    view.defaultCameraController.frameNodes(markupNodes)
+                }
+            }
+        }
+    }
+
+    // A cheap change key over every markup point + pending point, so orbit/zoom
+    // (which re-invoke updateNSView) don't rebuild markup nodes needlessly.
+    private func markupSignature() -> String {
+        var s = ""
+        for m in markups {
+            s += m.id.uuidString
+            for p in m.points { s += "\(p.x),\(p.y),\(p.z);" }
+        }
+        s += "|"
+        for p in pendingPoints { s += "\(p.x),\(p.y),\(p.z);" }
+        return s
+    }
+
+    private func buildMarkupNodes() -> [SCNNode] {
+        var nodes: [SCNNode] = []
+        for m in markups {
+            let pts = m.points
+            switch m.kind {
+            case .point:
+                if let p = pts.first { nodes.append(Self.sphere(at: p, radius: markerRadius, color: m.color)) }
+            case .line:
+                for p in pts { nodes.append(Self.sphere(at: p, radius: markerRadius, color: m.color)) }
+                if pts.count >= 2 {
+                    nodes.append(Self.cylinder(from: pts[0], to: pts[1],
+                                               radius: markerRadius * 0.4, color: m.color))
+                }
+            case .plane:
+                for p in pts { nodes.append(Self.sphere(at: p, radius: markerRadius, color: m.color)) }
+                if pts.count >= 3 {
+                    nodes.append(Self.triangle(pts[0], pts[1], pts[2], color: m.color))
+                    // Outline the three edges so the plane reads even edge-on.
+                    nodes.append(Self.cylinder(from: pts[0], to: pts[1], radius: markerRadius * 0.25, color: m.color))
+                    nodes.append(Self.cylinder(from: pts[1], to: pts[2], radius: markerRadius * 0.25, color: m.color))
+                    nodes.append(Self.cylinder(from: pts[2], to: pts[0], radius: markerRadius * 0.25, color: m.color))
+                }
+            }
+        }
+        // In-progress points: dim white spheres so you can see the seed landing.
+        for p in pendingPoints {
+            nodes.append(Self.sphere(at: p, radius: markerRadius * 0.8,
+                                     color: NSColor.white.withAlphaComponent(0.6)))
+        }
+        return nodes
+    }
+
+    // MARK: - Markup primitives
+
+    private static func markupMaterial(_ color: NSColor, alpha: CGFloat = 1) -> SCNMaterial {
+        let mat = SCNMaterial()
+        let c = color.withAlphaComponent(alpha)
+        mat.diffuse.contents = c
+        mat.emission.contents = c // readable regardless of scene lighting
+        mat.isDoubleSided = true
+        mat.transparency = alpha
+        return mat
+    }
+
+    private static func sphere(at p: SCNVector3, radius: Float, color: NSColor) -> SCNNode {
+        let g = SCNSphere(radius: CGFloat(radius))
+        g.materials = [markupMaterial(color)]
+        let n = SCNNode(geometry: g)
+        n.name = "markup"
+        n.position = p
+        return n
+    }
+
+    private static func cylinder(from a: SCNVector3, to b: SCNVector3, radius: Float,
+                                 color: NSColor) -> SCNNode {
+        let va = simd_float3(Float(a.x), Float(a.y), Float(a.z))
+        let vb = simd_float3(Float(b.x), Float(b.y), Float(b.z))
+        let d = vb - va
+        let len = simd_length(d)
+        let g = SCNCylinder(radius: CGFloat(radius), height: CGFloat(max(len, 0.0001)))
+        g.materials = [markupMaterial(color)]
+        let n = SCNNode(geometry: g)
+        n.name = "markup"
+        n.simdPosition = (va + vb) * 0.5
+        // Cylinder's long axis is +Y; rotate it onto the a→b direction.
+        if len > 1e-5 {
+            n.simdOrientation = simd_quatf(from: simd_float3(0, 1, 0), to: d / len)
+        }
+        return n
+    }
+
+    private static func triangle(_ a: SCNVector3, _ b: SCNVector3, _ c: SCNVector3,
+                                 color: NSColor) -> SCNNode {
+        let verts = [a, b, c]
+        let src = SCNGeometrySource(vertices: verts)
+        let idx: [UInt16] = [0, 1, 2]
+        let elem = SCNGeometryElement(indices: idx, primitiveType: .triangles)
+        let g = SCNGeometry(sources: [src], elements: [elem])
+        g.materials = [markupMaterial(color, alpha: 0.35)]
+        let n = SCNNode(geometry: g)
+        n.name = "markup"
+        return n
     }
 
     private func bounds(of nodes: [SCNNode]) -> (SCNVector3, SCNVector3) {
@@ -237,14 +368,19 @@ final class LassoOverlayView: NSView {
 struct MeshCanvas: View {
     @EnvironmentObject var mesh: MeshModel
     @EnvironmentObject var seg: SegmentationModel
+    @EnvironmentObject var markup: MarkupModel
 
     var body: some View {
         ZStack {
             Color.black
-            if !mesh.geometries.isEmpty {
+            if !mesh.geometries.isEmpty || !markup.markups.isEmpty
+                || !markup.pending.isEmpty {
                 MeshSceneView(geometries: mesh.geometries,
                               scissorActive: mesh.scissorActive,
-                              onScissor: performScissor)
+                              onScissor: performScissor,
+                              markups: markup.renders(),
+                              pendingPoints: markup.pendingMM(),
+                              markerRadius: markup.markerRadius)
             } else {
                 VStack(spacing: 12) {
                     Image(systemName: "cube.transparent")
