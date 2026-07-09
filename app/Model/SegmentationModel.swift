@@ -13,7 +13,7 @@ enum SegTool: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .threshold: return "Threshold"
-        case .regionGrow: return "Grow"
+        case .regionGrow: return "Fill"
         case .paint: return "Paint"
         case .erase: return "Erase"
         }
@@ -160,6 +160,14 @@ final class SegmentationModel: ObservableObject {
     var activeColor: Color {
         segments.first { $0.id == activeID }?.color ?? .accentColor
     }
+
+    // Segments that currently hold seed voxels. Grow-from-seeds partitions the
+    // region *between* seeds, so (as in 3D Slicer) it needs at least two seeded
+    // segments — typically the structure and a background — before it can run.
+    var seededSegmentCount: Int {
+        segments.reduce(0) { $0 + ($1.voxels > 0 ? 1 : 0) }
+    }
+    var canGrowFromSeeds: Bool { seededSegmentCount >= 2 }
 
     // MARK: - Segment list
 
@@ -365,7 +373,7 @@ final class SegmentationModel: ObservableObject {
     // bounding box in the C++ core; the whole mask is one undo step. Slower than the
     // other ops (bounded by seed extent × iterations), but capped by growSeedIters.
     func growFromSeeds() {
-        guard let h = volume.handle, voxelCount > 0 else { return }
+        guard let h = volume.handle, canGrowFromSeeds else { return }
         lumen_seg_push_undo(h)
         thresholdNeedsUndoCapture = true
         if lumen_seg_grow_from_seeds(h, Int32(growSeedIters)) > 0 { didMutateMask() }

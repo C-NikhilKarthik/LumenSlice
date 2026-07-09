@@ -108,9 +108,10 @@ struct SegmentControls: View {
     }
 
     private var regionGrowSection: some View {
-        Section("Region grow") {
+        Section("Fill (flood)") {
             Text("Click a structure in any slice to flood-fill connected voxels "
-                 + "within the tolerance of the clicked voxel.")
+                 + "within the tolerance of the clicked voxel. Each click fills; "
+                 + "this is not the seed brush for Grow from seeds (use Paint for that).")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
             VStack(alignment: .leading, spacing: 4) {
@@ -179,9 +180,9 @@ struct SegmentControls: View {
 
     private var growSeedsSection: some View {
         Section("Grow from seeds") {
-            Text("Paint seed strokes on two or more segments — include a background "
-                 + "segment to contain the growth — then grow them competitively to "
-                 + "fill the region between the seeds.")
+            Text("With the Paint tool, dab a seed inside two or more segments — one "
+                 + "per structure plus a background — then click Grow. Growth only "
+                 + "happens when you click; nothing grows while you paint.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
             VStack(alignment: .leading, spacing: 4) {
@@ -196,6 +197,14 @@ struct SegmentControls: View {
                                       set: { seg.growSeedIters = Int($0) }),
                        in: 5...100, step: 1)
             }
+            // Gate exactly like Slicer: at least two segments must carry seeds.
+            if !seg.canGrowFromSeeds {
+                Label("Seed at least two segments to enable "
+                      + "(\(seg.seededSegmentCount)/2 seeded).",
+                      systemImage: "exclamationmark.triangle")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
             Button {
                 seg.growFromSeeds()
             } label: {
@@ -204,7 +213,7 @@ struct SegmentControls: View {
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
-            .disabled(seg.voxelCount == 0)
+            .disabled(!seg.canGrowFromSeeds)
         }
     }
 
