@@ -21,7 +21,7 @@ struct SegmentControls: View {
                 toolSection
                 toolDetailSection
                 refineSection
-                cleanupSection
+                growSeedsSection
                 editSection
             }
         }
@@ -175,41 +175,36 @@ struct SegmentControls: View {
         .controlSize(.small)
     }
 
-    // MARK: - Cleanup (islands)
+    // MARK: - Grow from seeds
 
-    private var cleanupSection: some View {
-        Section("Islands") {
+    private var growSeedsSection: some View {
+        Section("Grow from seeds") {
+            Text("Paint seed strokes on two or more segments — include a background "
+                 + "segment to contain the growth — then grow them competitively to "
+                 + "fill the region between the seeds.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("Iterations")
+                    Spacer()
+                    Text("\(seg.growSeedIters)")
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                Slider(value: Binding(get: { Double(seg.growSeedIters) },
+                                      set: { seg.growSeedIters = Int($0) }),
+                       in: 5...100, step: 1)
+            }
             Button {
-                seg.keepLargest()
+                seg.growFromSeeds()
             } label: {
-                Label("Keep largest island", systemImage: "circle.circle")
+                Label("Grow from seeds", systemImage: "aqi.medium")
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
-            .disabled(seg.activeID == 0)
-
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text("Remove smaller than")
-                    Spacer()
-                    Text("\(seg.removeSmallMin) vox")
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                }
-                Slider(value: Binding(get: { Double(seg.removeSmallMin) },
-                                      set: { seg.removeSmallMin = Int($0) }),
-                       in: 2...1000, step: 1)
-                Button {
-                    seg.removeSmall()
-                } label: {
-                    Label("Remove small islands", systemImage: "scribble")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .disabled(seg.activeID == 0)
-            }
+            .disabled(seg.voxelCount == 0)
         }
     }
 

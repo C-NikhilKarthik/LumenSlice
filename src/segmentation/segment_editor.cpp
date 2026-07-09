@@ -2,6 +2,9 @@
 
 #include <cstddef>
 
+#include "segmentation/grow_from_seeds.hpp"
+#include "segmentation/scissor.hpp"
+
 namespace lumen {
 
 void SegmentEditor::reset_to(const Volume& volume, Rgb default_color) {
@@ -76,6 +79,19 @@ long SegmentEditor::shrink_margin(int iterations) {
 
 long SegmentEditor::smooth(int iterations) {
     return apply(SmoothEffect{iterations});
+}
+
+long SegmentEditor::grow_from_seeds(int max_iters, int margin) {
+    if (volume_ == nullptr) return 0;
+    return lumen::grow_from_seeds(*volume_, mask_, max_iters, margin);
+}
+
+long SegmentEditor::scissor_cut(const float* mvp, int vp_w, int vp_h,
+                                const float* poly_xy, int poly_count,
+                                bool erase_inside, std::uint8_t only_label) {
+    if (volume_ == nullptr) return 0;
+    return lumen::scissor_cut(*volume_, mask_, mvp, vp_w, vp_h, poly_xy, poly_count,
+                              erase_inside, only_label);
 }
 
 } // namespace lumen

@@ -25,6 +25,18 @@ struct ThreeDPane: View {
                         .monospacedDigit()
                         .foregroundStyle(.secondary)
                 }
+                if !mesh.geometries.isEmpty {
+                    Button {
+                        mesh.scissorActive.toggle()
+                    } label: {
+                        Image(systemName: "scissors")
+                            .foregroundStyle(mesh.scissorActive ? Color.yellow : .secondary)
+                    }
+                    .buttonStyle(.borderless)
+                    .help(mesh.scissorActive
+                          ? "Scissor on: draw a loop to erase inside it"
+                          : "Scissor: cut the surface with a lasso")
+                }
                 if let onToggleFocus {
                     Button(action: onToggleFocus) {
                         Image(systemName: isFocused
@@ -64,13 +76,26 @@ struct ThreeDPane: View {
         return mesh.triangleCount > 0 ? "Update 3D" : "Generate 3D"
     }
 
+    // Cut the mask by the finished lasso, then rebuild the surface so the cut shows.
+    private func performScissor(mvp: [Float], vpW: Int, vpH: Int, polygon: [Float]) {
+        if seg.scissorCut(mvp: mvp, viewportWidth: vpW, viewportHeight: vpH,
+                          polygon: polygon) {
+            mesh.generate()
+        }
+    }
+
     private var sceneArea: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 10)
                 .fill(.black)
             if !mesh.geometries.isEmpty {
-                MeshSceneView(geometries: mesh.geometries)
+                MeshSceneView(geometries: mesh.geometries,
+                              scissorActive: mesh.scissorActive,
+                              onScissor: performScissor)
                     .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .overlay(alignment: .top) {
+                        if mesh.scissorActive { ScissorBanner() }
+                    }
             } else {
                 VStack(spacing: 10) {
                     Image(systemName: "cube.transparent")

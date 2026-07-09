@@ -90,6 +90,15 @@ public:
     long shrink_margin(int iterations);
     long smooth(int iterations);
 
+    // Grow the current multi-label seeds competitively (grow-cut) over the seeds'
+    // bounding box; see grow_from_seeds.hpp. Returns voxels relabelled.
+    long grow_from_seeds(int max_iters, int margin);
+
+    // Erase labelled voxels by a screen-space lasso; see scissor.hpp. Returns
+    // voxels cleared.
+    long scissor_cut(const float* mvp, int vp_w, int vp_h, const float* poly_xy,
+                     int poly_count, bool erase_inside, std::uint8_t only_label);
+
     // --- Undo / redo --------------------------------------------------------
     // Capture the mask state BEFORE a user operation (the caller picks the
     // boundaries so a whole drag or a slider session is one undo step).

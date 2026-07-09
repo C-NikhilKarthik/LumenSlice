@@ -55,6 +55,15 @@ struct ThreeDControls: View {
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
+
+                Section("Scissor") {
+                    Toggle("Scissor mode", isOn: $mesh.scissorActive)
+                    Text("When on, draw a freehand loop over the surface to erase "
+                         + "every voxel inside it (through the full depth), then the "
+                         + "surface rebuilds. Turn off to orbit again.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .formStyle(.grouped)

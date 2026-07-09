@@ -66,6 +66,7 @@ final class SegmentationModel: ObservableObject {
     @Published var tolerance: Float = 120
     @Published var brushRadius: Int = 12          // slice pixels
     @Published var removeSmallMin: Int = 50       // islands cutoff (voxels)
+    @Published var growSeedIters: Int = 25        // grow-from-seeds passes
     @Published var showOverlay = true { didSet { refreshAllOverlays() } }
 
     @Published private(set) var segments: [SegmentRow] = []
@@ -358,6 +359,44 @@ final class SegmentationModel: ObservableObject {
         thresholdNeedsUndoCapture = true
         if lumen_seg_remove_small(h, Int(removeSmallMin)) > 0 { didMutateMask() }
         else { refreshUndoState() }
+    }
+
+    // Competitive grow-cut from the current multi-label seeds. Runs over the seeds'
+    // bounding box in the C++ core; the whole mask is one undo step. Slower than the
+    // other ops (bounded by seed extent × iterations), but capped by growSeedIters.
+    func growFromSeeds() {
+        guard let h = volume.handle, voxelCount > 0 else { return }
+        lumen_seg_push_undo(h)
+        thresholdNeedsUndoCapture = true
+        if lumen_seg_grow_from_seeds(h, Int32(growSeedIters)) > 0 { didMutateMask() }
+        else { refreshUndoState() }
+    }
+
+    // Erase labelled voxels by a screen-space lasso drawn over the 3D surface. The
+    // caller (the 3D pane) supplies the combined view*projection matrix (16 floats,
+    // row-major) SceneKit is using, the viewport size, and the outline as a flat
+    // [x0,y0,x1,y1,…] pixel list in the same top-left/y-down space. `onlyLabel` == 0
+    // cuts every labelled voxel inside the outline. Returns whether anything changed.
+    @discardableResult
+    func scissorCut(mvp: [Float], viewportWidth: Int, viewportHeight: Int,
+                    polygon: [Float], eraseInside: Bool = true,
+                    onlyLabel: Int = 0) -> Bool {
+        guard let h = volume.handle, mvp.count == 16, polygon.count >= 6 else {
+            return false
+        }
+        lumen_seg_push_undo(h)
+        thresholdNeedsUndoCapture = true
+        let cleared = mvp.withUnsafeBufferPointer { m in
+            polygon.withUnsafeBufferPointer { p in
+                lumen_seg_scissor_cut(h, m.baseAddress, Int32(viewportWidth),
+                                      Int32(viewportHeight), p.baseAddress,
+                                      Int32(polygon.count / 2), eraseInside ? 1 : 0,
+                                      Int32(onlyLabel))
+            }
+        }
+        if cleared > 0 { didMutateMask(); return true }
+        refreshUndoState()
+        return false
     }
 
     func growMargin() { applyMorphology { lumen_seg_grow($0, 1) } }

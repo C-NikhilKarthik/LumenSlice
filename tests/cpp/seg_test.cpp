@@ -13,7 +13,9 @@
 #include "geometry/plane_map.hpp"
 #include "segmentation/analysis.hpp"
 #include "segmentation/effects.hpp"
+#include "segmentation/grow_from_seeds.hpp"
 #include "segmentation/label_volume.hpp"
+#include "segmentation/scissor.hpp"
 #include "segmentation/marching_cubes.hpp"
 #include "segmentation/mask_view.hpp"
 #include "segmentation/segment.hpp"
@@ -447,6 +449,76 @@ static void test_segment_editor() {
           "removing a segment clears its voxels and forgets it");
 }
 
+// Competitive grow-cut: two seeds in two HU zones should partition the box, each
+// zone falling to the seed that matches its intensity.
+static void test_grow_from_seeds() {
+    std::printf("grow from seeds\n");
+    const int n = 9;
+    Volume v = make_volume(n, 0.0f);
+    // Left third low HU, right third high HU, a middle transition column.
+    for (int z = 0; z < n; ++z)
+        for (int y = 0; y < n; ++y)
+            for (int x = 0; x < n; ++x)
+                set_hu(v, x, y, z, x < 4 ? 0.0f : (x >= 5 ? 1000.0f : 500.0f));
+    v.hu_min = 0.0f;
+    v.hu_max = 1000.0f;
+
+    SegmentEditor editor;
+    editor.reset_to(v, Rgb{0, 180, 180}); // segment 1 active
+    editor.paint(Axis::Axial, 4, 1, 4, 1, true); // seed seg 1 in the low-HU zone
+    const std::uint8_t two = editor.add_segment(Rgb{200, 60, 60}); // seg 2 active
+    CHECK(two == 2, "second seed segment is id 2");
+    editor.paint(Axis::Axial, 4, 7, 4, 1, true); // seed seg 2 in the high-HU zone
+    const long seeded = editor.total_labelled();
+    CHECK(seeded > 0, "seeds were painted");
+
+    const long changed = editor.grow_from_seeds(50, 8); // margin covers the volume
+    CHECK(changed > 0, "grow-from-seeds relabelled voxels");
+    // With no background seed the whole box is partitioned between the two labels.
+    const long total = editor.label_count(1) + editor.label_count(2);
+    CHECK(total == static_cast<long>(v.voxel_count()),
+          "grow-from-seeds fills the seed box");
+    CHECK(editor.mask().at(0, 0, 0) == 1, "low-HU corner falls to seed 1");
+    CHECK(editor.mask().at(n - 1, n - 1, n - 1) == 2,
+          "high-HU corner falls to seed 2");
+}
+
+// 3D scissor: an orthographic MVP that maps voxel (x,y) to screen (x, H-y), with a
+// lasso over the right half, should clear exactly the labelled voxels with x>=4.
+static void test_scissor() {
+    std::printf("scissor cut\n");
+    const int n = 8;
+    Volume v = make_volume(n, 0.0f); // spacing 1, so world == voxel coords
+    v.hu_min = -100.0f;
+    v.hu_max = 100.0f;
+
+    SegmentEditor editor;
+    editor.reset_to(v, Rgb{0, 180, 180});
+    editor.threshold(-10.0f, 10.0f); // label every voxel (all HU 0) as segment 1
+    CHECK(editor.label_count(1) == static_cast<long>(v.voxel_count()),
+          "all voxels labelled before scissor");
+
+    // Row-major, row-vector MVP: ndc.x = x*(2/n)-1, ndc.y = y*(2/n)-1, w = 1.
+    const float s = 2.0f / static_cast<float>(n);
+    float mvp[16] = {0};
+    mvp[0] = s;   // clip.x from wx
+    mvp[5] = s;   // clip.y from wy
+    mvp[15] = 1;  // clip.w
+    mvp[12] = -1; // clip.x offset
+    mvp[13] = -1; // clip.y offset
+    // Screen maps to (x, n-y). A rectangle over screen x in [3.5, n] (all y) selects
+    // voxels with x >= 4.
+    const float poly[] = {3.5f, -1.0f, static_cast<float>(n) + 1.0f, -1.0f,
+                          static_cast<float>(n) + 1.0f, static_cast<float>(n) + 1.0f,
+                          3.5f, static_cast<float>(n) + 1.0f};
+    // Exercised through the editor facade (the same call the bridge makes).
+    const long cleared =
+        editor.scissor_cut(mvp, n, n, poly, 4, /*erase_inside*/ true, 0);
+    CHECK(cleared == 4 * n * n, "scissor cleared the x>=4 half");
+    CHECK(editor.mask().at(1, 2, 2) == 1, "left half kept");
+    CHECK(editor.mask().at(5, 2, 2) == 0, "right half cut");
+}
+
 int main() {
     std::printf("== SegTest ==\n");
     test_plane_map_roundtrip();
@@ -464,6 +536,8 @@ int main() {
     test_morphology();
     test_effects();
     test_segment_editor();
+    test_grow_from_seeds();
+    test_scissor();
     if (g_failures == 0) {
         std::printf("All segmentation tests passed.\n");
         return 0;

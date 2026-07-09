@@ -141,6 +141,24 @@ long lumen_seg_smooth(LumenVolume* v, int iterations) {
     return v == nullptr ? 0 : v->editor.smooth(iterations);
 }
 
+long lumen_seg_grow_from_seeds(LumenVolume* v, int max_iters) {
+    if (v == nullptr) return 0;
+    // Fixed 8-voxel margin around the seeds: enough headroom for the grow to reach
+    // structure edges without ballooning the working box on a large scan.
+    return v->editor.grow_from_seeds(max_iters, 8);
+}
+
+long lumen_seg_scissor_cut(LumenVolume* v, const float* mvp, int vp_w, int vp_h,
+                           const float* poly_xy, int poly_count, int erase_inside,
+                           int only_label) {
+    if (v == nullptr) return 0;
+    const std::uint8_t label =
+        (only_label > 0 && only_label < 256) ? static_cast<std::uint8_t>(only_label)
+                                             : 0;
+    return v->editor.scissor_cut(mvp, vp_w, vp_h, poly_xy, poly_count,
+                                 erase_inside != 0, label);
+}
+
 // --- Undo / redo ------------------------------------------------------------
 
 void lumen_seg_push_undo(LumenVolume* v) {

@@ -129,6 +129,23 @@ long lumen_seg_grow(LumenVolume* v, int iterations);
 long lumen_seg_shrink(LumenVolume* v, int iterations);
 long lumen_seg_smooth(LumenVolume* v, int iterations);
 
+// Competitive grow-cut from the current multi-label seeds: grow every painted
+// segment outward over the seeds' bounding box (expanded by a fixed margin) so each
+// voxel is claimed by the most HU-similar seed. Painted strokes are preserved.
+// Paint a background segment too, or the whole box is partitioned among the
+// foreground labels. `max_iters` bounds the passes. Returns voxels relabelled.
+long lumen_seg_grow_from_seeds(LumenVolume* v, int max_iters);
+
+// Erase labelled voxels by a screen-space lasso outline drawn over the 3D view.
+// `mvp` is the 16-float combined view*projection matrix (row-major, row-vector
+// convention — see scissor.hpp); `poly_xy` is `poly_count` (x,y) pixel pairs in the
+// same top-left, y-down space as the `vp_w`×`vp_h` viewport. Cuts INSIDE the lasso
+// when `erase_inside` != 0, else outside; `only_label` limits the cut to that
+// segment id (0 = every labelled voxel). Returns voxels cleared.
+long lumen_seg_scissor_cut(LumenVolume* v, const float* mvp, int vp_w, int vp_h,
+                           const float* poly_xy, int poly_count, int erase_inside,
+                           int only_label);
+
 // --- Undo / redo ------------------------------------------------------------
 // Snapshot the mask BEFORE a user operation, then undo/redo walks the history
 // (bounded to a fixed depth; oldest states are dropped).
