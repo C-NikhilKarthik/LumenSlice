@@ -47,12 +47,4 @@ long paint_disk(const Volume& vol, Axis axis, int index, int cx, int cy,
 long level_trace(const Volume& vol, Axis axis, int index, int cx, int cy,
                  LabelVolume& mask, std::uint8_t label = kActiveLabel);
 
-// Scissors: erase `label` on ONE slice on one side of an axis-aligned rectangle
-// (given by two opposite corners in slice-pixel space). `erase_inside` true clears
-// the segment inside the rectangle, false clears everything outside it. Only the
-// active segment is touched. Returns the number of voxels cleared.
-long scissors_erase(const Volume& vol, Axis axis, int index, int x0, int y0,
-                    int x1, int y1, bool erase_inside, LabelVolume& mask,
-                    std::uint8_t label = kActiveLabel);
-
 } // namespace lumen

@@ -101,21 +101,15 @@ void lumen_seg_threshold(LumenVolume* v, float lo, float hi);
 // HU of the seed; adds to the active segment. Returns voxels newly labelled.
 long lumen_seg_region_grow(LumenVolume* v, int x, int y, int z, float tol);
 
-// Level tracing on one slice: from slice pixel (cx,cy) of `axis`/`index`, flood the
-// connected pixels whose HU is at or above the clicked pixel's into the active
-// segment. Returns voxels newly labelled.
-long lumen_seg_level_trace(LumenVolume* v, int axis, int index, int cx, int cy);
-
-// Scissors on one slice: erase the active segment inside (erase_inside != 0) or
-// outside the axis-aligned rectangle (two corners in slice pixels). Returns voxels
-// cleared.
-long lumen_seg_scissors(LumenVolume* v, int axis, int index, int x0, int y0,
-                        int x1, int y1, int erase_inside);
-
 // Paint (add != 0) or erase (add == 0) a filled disk of `radius` slice-pixels on
 // the given plane, on the active segment. Returns the number of voxels changed.
 long lumen_seg_paint(LumenVolume* v, int axis, int index, int cx, int cy,
                      int radius, int add);
+
+// Level trace on one slice: from pixel (cx,cy) of `axis`/`index`, add the iso-level
+// (HU >= clicked pixel) 4-connected region to the active segment. Slice-only.
+// Returns the number of voxels newly labelled.
+long lumen_seg_level_trace(LumenVolume* v, int axis, int index, int cx, int cy);
 
 // Clear only the active segment's voxels to background.
 void lumen_seg_clear(LumenVolume* v);
@@ -140,12 +134,22 @@ long lumen_seg_grow(LumenVolume* v, int iterations);
 long lumen_seg_shrink(LumenVolume* v, int iterations);
 long lumen_seg_smooth(LumenVolume* v, int iterations);
 
-// Grow-from-seeds across ALL segments (marker-controlled watershed): every
-// labelled voxel is a seed and segments compete to fill the background along
-// intensity edges. Needs >= 2 seed labels to be meaningful. `tolerance` (HU)
-// bounds the grow per call, so calling again expands another band. Returns voxels
-// newly labelled.
-long lumen_seg_grow_from_seeds(LumenVolume* v, float tolerance);
+// Competitive grow-cut from the current multi-label seeds: grow every painted
+// segment outward over the seeds' bounding box (expanded by a fixed margin) so each
+// voxel is claimed by the most HU-similar seed. Painted strokes are preserved.
+// Paint a background segment too, or the whole box is partitioned among the
+// foreground labels. `max_iters` bounds the passes. Returns voxels relabelled.
+long lumen_seg_grow_from_seeds(LumenVolume* v, int max_iters);
+
+// Erase labelled voxels by a screen-space lasso outline drawn over the 3D view.
+// `mvp` is the 16-float combined view*projection matrix (row-major, row-vector
+// convention — see scissor.hpp); `poly_xy` is `poly_count` (x,y) pixel pairs in the
+// same top-left, y-down space as the `vp_w`×`vp_h` viewport. Cuts INSIDE the lasso
+// when `erase_inside` != 0, else outside; `only_label` limits the cut to that
+// segment id (0 = every labelled voxel). Returns voxels cleared.
+long lumen_seg_scissor_cut(LumenVolume* v, const float* mvp, int vp_w, int vp_h,
+                           const float* poly_xy, int poly_count, int erase_inside,
+                           int only_label);
 
 // --- Undo / redo ------------------------------------------------------------
 // Snapshot the mask BEFORE a user operation, then undo/redo walks the history

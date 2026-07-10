@@ -21,7 +21,7 @@ struct SegmentControls: View {
                 toolSection
                 toolDetailSection
                 refineSection
-                cleanupSection
+                growSeedsSection
                 editSection
             }
         }
@@ -79,69 +79,40 @@ struct SegmentControls: View {
         case .regionGrow: regionGrowSection
         case .levelTrace: levelTraceSection
         case .paint, .erase: brushSection
-        case .scissors: scissorsSection
-        }
-    }
-
-    private var levelTraceSection: some View {
-        Section("Level tracing") {
-            Text("Click a bright structure in any slice to select every connected "
-                 + "voxel at or above the clicked intensity on that slice, into the "
-                 + "active segment.")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    private var scissorsSection: some View {
-        Section("Scissors") {
-            Text("Drag a rectangle on a slice to erase the active segment on that "
-                 + "slice, on the chosen side of the rectangle.")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-            Picker("Erase", selection: $seg.scissorsEraseInside) {
-                Text("Inside").tag(true)
-                Text("Outside").tag(false)
-            }
-            .pickerStyle(.segmented)
         }
     }
 
     private var thresholdSection: some View {
         Section("Threshold (HU)") {
-            Text("Set the level, then press Apply to label every voxel at or above "
-                 + "it into the active segment.")
+            Text("Label every voxel in this HU range into the active segment. "
+                 + "Drag to update live.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text("Level")
-                    Spacer()
-                    Text("\(Int(seg.thresholdLo)) HU")
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                }
-                Slider(value: $seg.thresholdLo,
-                       in: model.huLo...max(model.huHi, model.huLo + 1))
+            huRow("Low", value: $seg.thresholdLo)
+            huRow("High", value: $seg.thresholdHi)
+            HStack(spacing: 6) {
+                presetButton("Bone", lo: 300, hi: 3000)
+                presetButton("Soft", lo: 40, hi: 80)
+                presetButton("Lung", lo: -900, hi: -400)
             }
+            .padding(.top, 2)
             Button {
-                seg.thresholdHi = model.huHi   // single slider = "at or above the level"
-                seg.applyThreshold()
+                seg.applyOtsu()
             } label: {
-                Label("Apply", systemImage: "checkmark.circle")
+                Label("Otsu auto-threshold", systemImage: "wand.and.stars")
                     .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.bordered)
             .controlSize(.small)
             .disabled(seg.activeID == 0)
         }
     }
 
     private var regionGrowSection: some View {
-        Section("Grow") {
-            Text("Click a structure to flood-fill connected voxels within the "
-                 + "tolerance of the clicked voxel. Or paint seeds into two or more "
-                 + "segments and grow them competitively below.")
+        Section("Fill (flood)") {
+            Text("Click a structure in any slice to flood-fill connected voxels "
+                 + "within the tolerance of the clicked voxel. Each click fills; "
+                 + "this is not the seed brush for Grow from seeds (use Paint for that).")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
             VStack(alignment: .leading, spacing: 4) {
@@ -154,49 +125,16 @@ struct SegmentControls: View {
                 }
                 Slider(value: $seg.tolerance, in: 1...1000, step: 1)
             }
-            growFromSeedsPanel
         }
     }
 
-    // Competitive grow-from-seeds: every segment's painted voxels are seeds and the
-    // labels fill the background together, stopping at intensity edges (bounded by
-    // the tolerance above). Needs >= 2 segments. Initialise snapshots + grows one
-    // band; Update grows another; Cancel reverts; Apply keeps.
-    @ViewBuilder private var growFromSeedsPanel: some View {
-        Divider().padding(.vertical, 2)
-        Text("Grow from seeds")
-            .font(.caption.weight(.semibold))
-        if !seg.canGrowFromSeeds {
-            Text("Add a second segment and paint a few seeds in each to enable "
-                 + "competitive grow.")
+    private var levelTraceSection: some View {
+        Section("Level Trace") {
+            Text("Click a bright structure on any slice to select its whole level "
+                 + "set: every connected pixel at or above the clicked HU is added to "
+                 + "the active segment. Works on the clicked slice only.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
-        }
-        if seg.growSessionActive {
-            Button { seg.growUpdate() } label: {
-                Label("Update", systemImage: "arrow.triangle.2.circlepath")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.small)
-            HStack(spacing: 8) {
-                Button(role: .cancel) { seg.growCancel() } label: {
-                    Label("Cancel", systemImage: "xmark").frame(maxWidth: .infinity)
-                }
-                Button { seg.growApply() } label: {
-                    Label("Apply", systemImage: "checkmark").frame(maxWidth: .infinity)
-                }
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-        } else {
-            Button { seg.growInitialise() } label: {
-                Label("Initialise", systemImage: "square.stack.3d.up")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.small)
-            .disabled(!seg.canGrowFromSeeds)
         }
     }
 
@@ -249,41 +187,44 @@ struct SegmentControls: View {
         .controlSize(.small)
     }
 
-    // MARK: - Cleanup (islands)
+    // MARK: - Grow from seeds
 
-    private var cleanupSection: some View {
-        Section("Islands") {
+    private var growSeedsSection: some View {
+        Section("Grow from seeds") {
+            Text("With the Paint tool, dab a seed inside two or more segments — one "
+                 + "per structure plus a background — then click Grow. Growth only "
+                 + "happens when you click; nothing grows while you paint.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("Iterations")
+                    Spacer()
+                    Text("\(seg.growSeedIters)")
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                Slider(value: Binding(get: { Double(seg.growSeedIters) },
+                                      set: { seg.growSeedIters = Int($0) }),
+                       in: 5...100, step: 1)
+            }
+            // Gate exactly like Slicer: at least two segments must carry seeds.
+            if !seg.canGrowFromSeeds {
+                Label("Seed at least two segments to enable "
+                      + "(\(seg.seededSegmentCount)/2 seeded).",
+                      systemImage: "exclamationmark.triangle")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
             Button {
-                seg.keepLargest()
+                seg.growFromSeeds()
             } label: {
-                Label("Keep largest island", systemImage: "circle.circle")
+                Label("Grow from seeds", systemImage: "aqi.medium")
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
-            .disabled(seg.activeID == 0)
-
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text("Remove smaller than")
-                    Spacer()
-                    Text("\(seg.removeSmallMin) vox")
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                }
-                Slider(value: Binding(get: { Double(seg.removeSmallMin) },
-                                      set: { seg.removeSmallMin = Int($0) }),
-                       in: 2...1000, step: 1)
-                Button {
-                    seg.removeSmall()
-                } label: {
-                    Label("Remove small islands", systemImage: "scribble")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .disabled(seg.activeID == 0)
-            }
+            .disabled(!seg.canGrowFromSeeds)
         }
     }
 
@@ -324,6 +265,35 @@ struct SegmentControls: View {
         }
     }
 
+    // MARK: - Helpers
+
+    private func huRow(_ title: String, value: Binding<Float>) -> some View {
+        let lo = model.huLo
+        let hi = max(model.huHi, lo + 1)
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(title)
+                Spacer()
+                TextField(title, value: value,
+                          format: .number.precision(.fractionLength(0)))
+                    .labelsHidden()
+                    .frame(width: 64)
+                    .multilineTextAlignment(.trailing)
+                    .textFieldStyle(.roundedBorder)
+            }
+            Slider(value: value, in: lo...hi)
+        }
+    }
+
+    private func presetButton(_ name: String, lo: Float, hi: Float) -> some View {
+        Button(name) {
+            seg.thresholdLo = lo
+            seg.thresholdHi = hi
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .frame(maxWidth: .infinity)
+    }
 }
 
 // One segment list row: visibility eye, colour well, editable name, voxel count,
@@ -408,8 +378,8 @@ private struct SegmentListRow: View {
 
 // A small grid of preset colour swatches shown in a popover. Replaces SwiftUI's
 // ColorPicker so we never touch the shared NSColorPanel (which otherwise lingers
-// and re-opens on every launch). Shared by the segment list and the markups table.
-struct ColorPalettePopover: View {
+// and re-opens on every launch).
+private struct ColorPalettePopover: View {
     let selected: Color
     let onPick: (Color) -> Void
 

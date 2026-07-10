@@ -9,8 +9,6 @@ struct SliceBoard: View {
     @Binding var dropTargeted: Bool
     // Non-nil on the Segment tab: enables the mask overlay + seed/paint gestures.
     var segment: SegmentationModel? = nil
-    // Non-nil on the Markups tab: enables markup placement + the markup overlay.
-    var markups: MarkupsModel? = nil
 
     // The maximized pane, or nil for the full quad grid. A slice plane (axis 0/1/2)
     // or the 3D surface pane.
@@ -32,8 +30,7 @@ struct SliceBoard: View {
                     if let f = focus {
                         switch f {
                         case .axis(let a):
-                            SlicePane(axis: a, segment: segment, markups: markups,
-                                      isFocused: true,
+                            SlicePane(axis: a, segment: segment, isFocused: true,
                                       onToggleFocus: { focus = nil })
                                 .frame(maxHeight: .infinity)
                         case .threeD:
@@ -44,15 +41,15 @@ struct SliceBoard: View {
                     } else {
                         VStack(spacing: 12) {
                             HStack(spacing: 12) {
-                                SlicePane(axis: 0, segment: segment, markups: markups,
+                                SlicePane(axis: 0, segment: segment,
                                           onToggleFocus: { focus = .axis(0) })
                                 ThreeDPane(onToggleFocus: { focus = .threeD })
                             }
                             .frame(maxHeight: .infinity)
                             HStack(spacing: 12) {
-                                SlicePane(axis: 1, segment: segment, markups: markups,
+                                SlicePane(axis: 1, segment: segment,
                                           onToggleFocus: { focus = .axis(1) })
-                                SlicePane(axis: 2, segment: segment, markups: markups,
+                                SlicePane(axis: 2, segment: segment,
                                           onToggleFocus: { focus = .axis(2) })
                             }
                             .frame(maxHeight: .infinity)

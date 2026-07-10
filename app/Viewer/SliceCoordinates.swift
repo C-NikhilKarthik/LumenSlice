@@ -43,8 +43,9 @@ enum SliceCoordinates {
                           y: padding + (availH - fittedH) / 2,
                           width: fittedW, height: fittedH)
         let scaled = zoom == 1 ? base : zoomed(base, scale: zoom, anchor: anchor)
-        return (pan == .zero) ? scaled
-                              : scaled.offsetBy(dx: pan.width, dy: pan.height)
+        // `pan` slides the (zoomed) image so an off-centre detail can be brought into
+        // view; it is zero at fit. Applied last, after zoom, so it is a pure offset.
+        return pan == .zero ? scaled : scaled.offsetBy(dx: pan.width, dy: pan.height)
     }
 
     // Scale `base` by `scale` about `anchor`: the anchor point maps to itself, so

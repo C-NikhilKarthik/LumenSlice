@@ -28,17 +28,6 @@ long PaintEffect::apply(const Volume& volume, LabelVolume& mask,
     return paint_disk(volume, axis_, index_, cx_, cy_, radius_, add_, mask, label);
 }
 
-long LevelTraceEffect::apply(const Volume& volume, LabelVolume& mask,
-                             std::uint8_t label) const {
-    return level_trace(volume, axis_, index_, px_, py_, mask, label);
-}
-
-long ScissorsEffect::apply(const Volume& volume, LabelVolume& mask,
-                           std::uint8_t label) const {
-    return scissors_erase(volume, axis_, index_, x0_, y0_, x1_, y1_, erase_inside_,
-                          mask, label);
-}
-
 long ClearEffect::apply(const Volume& /*volume*/, LabelVolume& mask,
                         std::uint8_t label) const {
     if (label == 0) return 0;
@@ -77,6 +66,11 @@ long ShrinkMarginEffect::apply(const Volume& /*volume*/, LabelVolume& mask,
 long SmoothEffect::apply(const Volume& /*volume*/, LabelVolume& mask,
                          std::uint8_t label) const {
     return smooth_label(mask, label, iterations_);
+}
+
+long LevelTraceEffect::apply(const Volume& volume, LabelVolume& mask,
+                             std::uint8_t label) const {
+    return level_trace(volume, axis_, index_, px_, py_, mask, label);
 }
 
 } // namespace lumen

@@ -13,7 +13,9 @@
 #include "geometry/plane_map.hpp"
 #include "segmentation/analysis.hpp"
 #include "segmentation/effects.hpp"
+#include "segmentation/grow_from_seeds.hpp"
 #include "segmentation/label_volume.hpp"
+#include "segmentation/scissor.hpp"
 #include "segmentation/marching_cubes.hpp"
 #include "segmentation/mask_view.hpp"
 #include "segmentation/segment.hpp"
@@ -447,42 +449,78 @@ static void test_segment_editor() {
           "removing a segment clears its voxels and forgets it");
 }
 
-// 16. grow_from_seeds: two labels seeded either side of a sharp HU edge each fill
-// their own basin and stop at the edge (tolerance-bounded competitive grow).
+// Competitive grow-cut: two seeds in two HU zones should partition the box, each
+// zone falling to the seed that matches its intensity.
 static void test_grow_from_seeds() {
-    std::printf("-- grow_from_seeds\n");
-    Volume v = make_volume(8, 0.0f);
-    for (int z = 0; z < 8; ++z)
-        for (int y = 0; y < 8; ++y)
-            for (int x = 4; x < 8; ++x)
-                set_hu(v, x, y, z, 1000.0f); // right half is a different tissue
+    std::printf("grow from seeds\n");
+    const int n = 9;
+    Volume v = make_volume(n, 0.0f);
+    // Left third low HU, right third high HU, a middle transition column.
+    for (int z = 0; z < n; ++z)
+        for (int y = 0; y < n; ++y)
+            for (int x = 0; x < n; ++x)
+                set_hu(v, x, y, z, x < 4 ? 0.0f : (x >= 5 ? 1000.0f : 500.0f));
+    v.hu_min = 0.0f;
+    v.hu_max = 1000.0f;
 
-    LabelVolume mask;
-    mask.reset_to(v);
-    mask.set(0, 0, 0, 1); // seed label 1 in the left (HU 0) basin
-    mask.set(7, 7, 7, 2); // seed label 2 in the right (HU 1000) basin
-    const long added = grow_from_seeds(v, mask, 100.0f);
-    CHECK(added == 510, "grow fills both basins minus the two seeds");
-    CHECK(mask.count_nonzero() == 512, "every voxel labelled");
-    CHECK(mask.at(3, 4, 4) == 1, "left basin claimed by label 1");
-    CHECK(mask.at(4, 4, 4) == 2, "right basin claimed by label 2 (edge respected)");
+    SegmentEditor editor;
+    editor.reset_to(v, Rgb{0, 180, 180}); // segment 1 active
+    editor.paint(Axis::Axial, 4, 1, 4, 1, true); // seed seg 1 in the low-HU zone
+    const std::uint8_t two = editor.add_segment(Rgb{200, 60, 60}); // seg 2 active
+    CHECK(two == 2, "second seed segment is id 2");
+    editor.paint(Axis::Axial, 4, 7, 4, 1, true); // seed seg 2 in the high-HU zone
+    const long seeded = editor.total_labelled();
+    CHECK(seeded > 0, "seeds were painted");
 
-    // One seed + tight tolerance grows only its own basin; the edge stops it.
-    LabelVolume mask2;
-    mask2.reset_to(v);
-    mask2.set(0, 0, 0, 1);
-    const long one = grow_from_seeds(v, mask2, 100.0f);
-    CHECK(one == 255, "one seed fills only its 256-voxel basin");
-    CHECK(mask2.at(4, 0, 0) == 0, "grow stops at the edge, far basin stays bg");
-
-    // No seeds -> no-op.
-    LabelVolume mask3;
-    mask3.reset_to(v);
-    CHECK(grow_from_seeds(v, mask3, 100.0f) == 0, "no seeds is a no-op");
+    const long changed = editor.grow_from_seeds(50, 8); // margin covers the volume
+    CHECK(changed > 0, "grow-from-seeds relabelled voxels");
+    // With no background seed the whole box is partitioned between the two labels.
+    const long total = editor.label_count(1) + editor.label_count(2);
+    CHECK(total == static_cast<long>(v.voxel_count()),
+          "grow-from-seeds fills the seed box");
+    CHECK(editor.mask().at(0, 0, 0) == 1, "low-HU corner falls to seed 1");
+    CHECK(editor.mask().at(n - 1, n - 1, n - 1) == 2,
+          "high-HU corner falls to seed 2");
 }
 
-// 17. level_trace: clicking a bright square selects the connected pixels at/above
-// the clicked HU on that slice only; clicking level 0 fills the whole slice.
+// 3D scissor: an orthographic MVP that maps voxel (x,y) to screen (x, H-y), with a
+// lasso over the right half, should clear exactly the labelled voxels with x>=4.
+static void test_scissor() {
+    std::printf("scissor cut\n");
+    const int n = 8;
+    Volume v = make_volume(n, 0.0f); // spacing 1, so world == voxel coords
+    v.hu_min = -100.0f;
+    v.hu_max = 100.0f;
+
+    SegmentEditor editor;
+    editor.reset_to(v, Rgb{0, 180, 180});
+    editor.threshold(-10.0f, 10.0f); // label every voxel (all HU 0) as segment 1
+    CHECK(editor.label_count(1) == static_cast<long>(v.voxel_count()),
+          "all voxels labelled before scissor");
+
+    // Row-major, row-vector MVP: ndc.x = x*(2/n)-1, ndc.y = y*(2/n)-1, w = 1.
+    const float s = 2.0f / static_cast<float>(n);
+    float mvp[16] = {0};
+    mvp[0] = s;   // clip.x from wx
+    mvp[5] = s;   // clip.y from wy
+    mvp[15] = 1;  // clip.w
+    mvp[12] = -1; // clip.x offset
+    mvp[13] = -1; // clip.y offset
+    // Screen maps to (x, n-y). A rectangle over screen x in [3.5, n] (all y) selects
+    // voxels with x >= 4.
+    const float poly[] = {3.5f, -1.0f, static_cast<float>(n) + 1.0f, -1.0f,
+                          static_cast<float>(n) + 1.0f, static_cast<float>(n) + 1.0f,
+                          3.5f, static_cast<float>(n) + 1.0f};
+    // Exercised through the editor facade (the same call the bridge makes).
+    const long cleared =
+        editor.scissor_cut(mvp, n, n, poly, 4, /*erase_inside*/ true, 0);
+    CHECK(cleared == 4 * n * n, "scissor cleared the x>=4 half");
+    CHECK(editor.mask().at(1, 2, 2) == 1, "left half kept");
+    CHECK(editor.mask().at(5, 2, 2) == 0, "right half cut");
+}
+
+// level_trace: one click floods the connected iso-level (HU >= clicked) region on
+// the clicked slice only, stopping where the image drops below the clicked level.
 static void test_level_trace() {
     std::printf("-- level_trace\n");
     Volume v = make_volume(8, 0.0f);
@@ -504,32 +542,6 @@ static void test_level_trace() {
     CHECK(bg == 64, "clicking level 0 fills the whole slice (all >= 0)");
 }
 
-// 18. scissors: erase the active label inside or outside a rectangle on one slice.
-static void test_scissors() {
-    std::printf("-- scissors\n");
-    Volume v = make_volume(8, 0.0f);
-
-    LabelVolume mask;
-    mask.reset_to(v);
-    for (int y = 0; y < 8; ++y)
-        for (int x = 0; x < 8; ++x)
-            mask.set(x, y, 4, kActiveLabel); // fill axial slice z=4
-    const long inside = scissors_erase(v, Axis::Axial, 4, 2, 2, 5, 5, true, mask);
-    CHECK(inside == 16, "erase inside clears the 4x4 rectangle");
-    CHECK(mask.at(3, 3, 4) == 0, "an inside voxel is cleared");
-    CHECK(mask.at(0, 0, 4) == kActiveLabel, "an outside voxel is kept");
-
-    LabelVolume mask2;
-    mask2.reset_to(v);
-    for (int y = 0; y < 8; ++y)
-        for (int x = 0; x < 8; ++x)
-            mask2.set(x, y, 4, kActiveLabel);
-    const long outside = scissors_erase(v, Axis::Axial, 4, 2, 2, 5, 5, false, mask2);
-    CHECK(outside == 48, "erase outside clears everything but the rectangle");
-    CHECK(mask2.at(3, 3, 4) == kActiveLabel, "an inside voxel is kept");
-    CHECK(mask2.at(0, 0, 4) == 0, "an outside voxel is cleared");
-}
-
 int main() {
     std::printf("== SegTest ==\n");
     test_plane_map_roundtrip();
@@ -548,8 +560,8 @@ int main() {
     test_effects();
     test_segment_editor();
     test_grow_from_seeds();
+    test_scissor();
     test_level_trace();
-    test_scissors();
     if (g_failures == 0) {
         std::printf("All segmentation tests passed.\n");
         return 0;

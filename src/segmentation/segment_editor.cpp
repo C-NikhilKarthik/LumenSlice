@@ -2,7 +2,8 @@
 
 #include <cstddef>
 
-#include "segmentation/analysis.hpp"
+#include "segmentation/grow_from_seeds.hpp"
+#include "segmentation/scissor.hpp"
 
 namespace lumen {
 
@@ -64,11 +65,6 @@ long SegmentEditor::level_trace(Axis axis, int slice_index, int cx, int cy) {
     return apply(LevelTraceEffect{axis, slice_index, cx, cy});
 }
 
-long SegmentEditor::scissors(Axis axis, int slice_index, int x0, int y0, int x1,
-                             int y1, bool erase_inside) {
-    return apply(ScissorsEffect{axis, slice_index, x0, y0, x1, y1, erase_inside});
-}
-
 void SegmentEditor::clear_active() { apply(ClearEffect{}); }
 
 long SegmentEditor::keep_largest() { return apply(KeepLargestEffect{}); }
@@ -89,9 +85,17 @@ long SegmentEditor::smooth(int iterations) {
     return apply(SmoothEffect{iterations});
 }
 
-long SegmentEditor::grow_from_seeds(float tolerance) {
+long SegmentEditor::grow_from_seeds(int max_iters, int margin) {
     if (volume_ == nullptr) return 0;
-    return lumen::grow_from_seeds(*volume_, mask_, tolerance);
+    return lumen::grow_from_seeds(*volume_, mask_, max_iters, margin);
+}
+
+long SegmentEditor::scissor_cut(const float* mvp, int vp_w, int vp_h,
+                                const float* poly_xy, int poly_count,
+                                bool erase_inside, std::uint8_t only_label) {
+    if (volume_ == nullptr) return 0;
+    return lumen::scissor_cut(*volume_, mask_, mvp, vp_w, vp_h, poly_xy, poly_count,
+                              erase_inside, only_label);
 }
 
 } // namespace lumen

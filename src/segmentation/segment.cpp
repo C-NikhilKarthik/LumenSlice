@@ -162,29 +162,4 @@ long level_trace(const Volume& vol, Axis axis, int index, int cx, int cy,
     return changed;
 }
 
-long scissors_erase(const Volume& vol, Axis axis, int index, int x0, int y0,
-                    int x1, int y1, bool erase_inside, LabelVolume& mask,
-                    std::uint8_t label) {
-    if (!vol.valid() || !mask.valid() || label == 0) return 0;
-
-    const SliceDims dims = slice_dims(vol, axis);
-    const int lx = std::min(x0, x1), hx = std::max(x0, x1);
-    const int ly = std::min(y0, y1), hy = std::max(y0, y1);
-    long changed = 0;
-
-    for (int py = 0; py < dims.height; ++py) {
-        for (int px = 0; px < dims.width; ++px) {
-            const bool inside = px >= lx && px <= hx && py >= ly && py <= hy;
-            if (inside != erase_inside) continue; // keep the other side
-            const VoxelCoord c = plane_to_voxel(vol, axis, index, px, py);
-            if (!mask.in_bounds(c.x, c.y, c.z)) continue;
-            if (mask.at(c.x, c.y, c.z) == label) {
-                mask.set(c.x, c.y, c.z, 0);
-                ++changed;
-            }
-        }
-    }
-    return changed;
-}
-
 } // namespace lumen

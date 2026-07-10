@@ -19,8 +19,8 @@ import UniformTypeIdentifiers
 struct AppShell: View {
     @EnvironmentObject var model: VolumeModel
     @EnvironmentObject var segmentation: SegmentationModel
-    @EnvironmentObject var markups: MarkupsModel
     @EnvironmentObject var mesh: MeshModel
+    @EnvironmentObject var markup: MarkupModel
     // Owned by the App so the global Undo command can route by active tab.
     @Binding var selectedTab: WorkspaceTab
     @State private var dropTargeted = false
@@ -29,10 +29,11 @@ struct AppShell: View {
         HStack(spacing: 0) {
             TabRail(selection: $selectedTab)
                 .onChange(of: selectedTab) { newTab in
-                    // Only the Segment tab does mask overlay extraction work; the
-                    // Markups tab wires placement + the markup overlay.
+                    // Only the Segment tab does overlay extraction work.
                     segmentation.isActive = (newTab == .segment)
-                    markups.isActive = (newTab == .markups)
+                    // Leaving the Markups tab exits placement, so slice clicks go
+                    // back to navigation / painting instead of dropping points.
+                    if newTab != .markups { markup.placing = false }
                 }
             NavigationSplitView {
                 controlPanel
@@ -84,7 +85,7 @@ struct AppShell: View {
         case .segment:
             SliceBoard(dropTargeted: $dropTargeted, segment: segmentation)
         case .markups:
-            SliceBoard(dropTargeted: $dropTargeted, markups: markups)
+            SliceBoard(dropTargeted: $dropTargeted)
         case .threeD, .export:
             MeshCanvas()
         }

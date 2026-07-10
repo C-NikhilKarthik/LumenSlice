@@ -1,6 +1,5 @@
 #include "segmentation/analysis.hpp"
 
-#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -234,77 +233,6 @@ long smooth_label(LabelVolume& mask, std::uint8_t label, int iterations) {
                 }
     }
     return changed;
-}
-
-long grow_from_seeds(const Volume& vol, LabelVolume& mask, float tolerance) {
-    if (!vol.valid() || !mask.valid()) return 0;
-    if (vol.voxel_count() != mask.voxel_count()) return 0;
-
-    const int w = mask.width();
-    const int h = mask.height();
-    const int d = mask.depth();
-    const std::size_t n = mask.voxel_count();
-    std::uint8_t* out = mask.data();
-    const float* hu = vol.voxel_buffer.get();
-
-    // Bottleneck (minimax) path cost is an integer HU step in [0, kMaxCost]. Since
-    // max(current_cost, edge) is never below the current cost, processing a bucket
-    // queue in increasing cost visits every voxel exactly once - Dial's algorithm,
-    // an O(voxels) Dijkstra. dist holds each voxel's best cost so far; a voxel is
-    // finalized (its label fixed) when first popped. `maxCost` caps the grow at the
-    // tolerance so it stops at intensity edges (tolerance <= 0 -> fill everything).
-    constexpr int kMaxCost = 4095;
-    constexpr std::uint16_t kInf = 0xFFFF;
-    const int maxCost = (tolerance <= 0.0f)
-                            ? kMaxCost
-                            : std::min(kMaxCost,
-                                       static_cast<int>(std::lround(tolerance)));
-    std::vector<std::uint16_t> dist(n, kInf);
-    std::vector<std::uint8_t> done(n, 0);
-    std::vector<std::vector<std::size_t>> buckets(
-        static_cast<std::size_t>(maxCost) + 1);
-
-    long seeds = 0;
-    for (std::size_t i = 0; i < n; ++i) {
-        if (out[i] != 0) { dist[i] = 0; buckets[0].push_back(i); ++seeds; }
-    }
-    if (seeds == 0) return 0;
-
-    for (int c = 0; c <= maxCost; ++c) {
-        std::vector<std::size_t>& bucket = buckets[c];
-        // A cost-0 (equal-HU) relaxation appends to the current bucket, so index it
-        // by hand rather than a range-for, which would miss the appended entries.
-        for (std::size_t bi = 0; bi < bucket.size(); ++bi) {
-            const std::size_t i = bucket[bi];
-            if (done[i] || dist[i] != static_cast<std::uint16_t>(c)) continue;
-            done[i] = 1;
-            const std::uint8_t lbl = out[i];
-            const int x = static_cast<int>(i % static_cast<std::size_t>(w));
-            const int y = static_cast<int>((i / static_cast<std::size_t>(w)) %
-                                           static_cast<std::size_t>(h));
-            const int z = static_cast<int>(
-                i / (static_cast<std::size_t>(w) * static_cast<std::size_t>(h)));
-            for (int k = 0; k < 6; ++k) {
-                const int xn = x + kNx[k], yn = y + kNy[k], zn = z + kNz[k];
-                if (xn < 0 || yn < 0 || zn < 0 || xn >= w || yn >= h || zn >= d)
-                    continue;
-                const std::size_t j = mask.index(xn, yn, zn);
-                if (done[j]) continue;
-                int e = static_cast<int>(std::lround(std::fabs(hu[j] - hu[i])));
-                if (e > kMaxCost) e = kMaxCost;
-                const int nc = c > e ? c : e; // minimax: worst step on the path
-                if (nc > maxCost) continue;   // beyond tolerance: leave background
-                if (nc < dist[j]) {
-                    dist[j] = static_cast<std::uint16_t>(nc);
-                    out[j] = lbl; // tentative; fixed when j is popped
-                    buckets[nc].push_back(j);
-                }
-            }
-        }
-        std::vector<std::size_t>().swap(bucket); // free this cost level's memory
-    }
-
-    return mask.count_nonzero() - seeds;
 }
 
 } // namespace lumen

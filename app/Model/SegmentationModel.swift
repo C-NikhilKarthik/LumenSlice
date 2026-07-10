@@ -9,32 +9,29 @@ enum SegTool: String, CaseIterable, Identifiable {
     case levelTrace
     case paint
     case erase
-    case scissors
 
     var id: String { rawValue }
     var title: String {
         switch self {
         case .threshold: return "Threshold"
-        case .regionGrow: return "Grow"
-        case .levelTrace: return "Level"
+        case .regionGrow: return "Fill"
+        case .levelTrace: return "Level Trace"
         case .paint: return "Paint"
         case .erase: return "Erase"
-        case .scissors: return "Scissors"
         }
     }
     var icon: String {
         switch self {
         case .threshold: return "slider.horizontal.below.square.filled.and.square"
         case .regionGrow: return "drop.fill"
-        case .levelTrace: return "scope"
+        case .levelTrace: return "camera.filters"
         case .paint: return "paintbrush.pointed.fill"
         case .erase: return "eraser.fill"
-        case .scissors: return "scissors"
         }
     }
     // Tools that paint along a drag (vs. a single click / slider).
     var isBrush: Bool { self == .paint || self == .erase }
-    // Tools that act on a single click in the canvas (seed a fill).
+    // Tools driven by a single click on a slice (vs. a drag or a slider).
     var isClickSeed: Bool { self == .regionGrow || self == .levelTrace }
 }
 
@@ -74,7 +71,7 @@ final class SegmentationModel: ObservableObject {
     @Published var tolerance: Float = 120
     @Published var brushRadius: Int = 12          // slice pixels
     @Published var removeSmallMin: Int = 50       // islands cutoff (voxels)
-    @Published var scissorsEraseInside = true     // scissors: inside vs outside
+    @Published var growSeedIters: Int = 25        // grow-from-seeds passes
     @Published var showOverlay = true { didSet { refreshAllOverlays() } }
 
     @Published private(set) var segments: [SegmentRow] = []
@@ -92,9 +89,11 @@ final class SegmentationModel: ObservableObject {
     // fresh segment never reuses a colour still on screen just because a middle
     // segment was removed and the list count shrank.
     private var nextColorIndex = 0
-    // Coalesces a run of threshold applies (one tool session) into a single undo
-    // entry: set true whenever the tool/segment changes, cleared on the first apply.
+    // Coalesces a run of live-threshold edits into a single undo entry.
     private var thresholdNeedsUndoCapture = true
+    // Set when we apply a threshold programmatically (Otsu) so the debounced
+    // CombineLatest sink skips the redundant second full-volume threshold pass.
+    private var skipNextThresholdSink = false
     // Wall-clock of the last overlay rebuild during the active brush stroke. Each
     // rebuild re-extracts the whole painted slice (cost grows with slice size — and
     // coronal/sagittal slices grow with the file count), so we cap it to display
@@ -122,9 +121,17 @@ final class SegmentationModel: ObservableObject {
     init(volume: VolumeModel) {
         self.volume = volume
 
-        // Threshold is apply-on-demand (the sidebar "Apply" button), not live: a
-        // whole-volume threshold pass on every slider tick was the main source of
-        // latency, so the user sets the cutoff then applies once.
+        // Live threshold: debounce so dragging doesn't recompute the whole-volume
+        // mask on every tick. Only meaningful while the threshold tool is selected.
+        Publishers.CombineLatest($thresholdLo, $thresholdHi)
+            .debounce(for: .milliseconds(180), scheduler: RunLoop.main)
+            .sink { [weak self] _, _ in
+                guard let self else { return }
+                if self.skipNextThresholdSink { self.skipNextThresholdSink = false; return }
+                guard self.tool == .threshold else { return }
+                self.applyThreshold()
+            }
+            .store(in: &cancellables)
 
         // Focus/slice changes -> re-extract the overlays for the new planes.
         volume.$focus
@@ -158,6 +165,14 @@ final class SegmentationModel: ObservableObject {
     var activeColor: Color {
         segments.first { $0.id == activeID }?.color ?? .accentColor
     }
+
+    // Segments that currently hold seed voxels. Grow-from-seeds partitions the
+    // region *between* seeds, so (as in 3D Slicer) it needs at least two seeded
+    // segments — typically the structure and a background — before it can run.
+    var seededSegmentCount: Int {
+        segments.reduce(0) { $0 + ($1.voxels > 0 ? 1 : 0) }
+    }
+    var canGrowFromSeeds: Bool { seededSegmentCount >= 2 }
 
     // MARK: - Segment list
 
@@ -217,9 +232,6 @@ final class SegmentationModel: ObservableObject {
     func removeSegment(_ id: Int) {
         guard let h = volume.handle else { return }
         lumen_seg_push_undo(h)
-        // Removal is its own undo step, so the next threshold Apply must start a
-        // fresh snapshot rather than fold itself into this one.
-        thresholdNeedsUndoCapture = true
         lumen_seg_remove(h, Int32(id))
         names[id] = nil
         reloadSegments()
@@ -271,6 +283,20 @@ final class SegmentationModel: ObservableObject {
         didMutateMask()
     }
 
+    func applyOtsu() {
+        guard let h = volume.handle, activeID > 0 else { return }
+        let t = lumen_seg_otsu(h)
+        // We apply the threshold directly below; setting these @Published values
+        // also trips the debounced sink, so tell it to skip the redundant pass.
+        skipNextThresholdSink = true
+        thresholdLo = t
+        thresholdHi = volume.huHi
+        lumen_seg_push_undo(h)
+        thresholdNeedsUndoCapture = false
+        lumen_seg_threshold(h, thresholdLo, thresholdHi)
+        didMutateMask()
+    }
+
     func seedRegionGrow(axis: Int, px: Int, py: Int) {
         guard let h = volume.handle, activeID > 0 else { return }
         var x: Int32 = 0, y: Int32 = 0, z: Int32 = 0
@@ -282,8 +308,9 @@ final class SegmentationModel: ObservableObject {
         if added > 0 { didMutateMask() } else { refreshUndoState() }
     }
 
-    // Level tracing: click a slice to select its iso-level region (>= clicked HU)
-    // on that plane into the active segment.
+    // Level trace: one click selects the iso-level (HU >= clicked pixel) region on
+    // the clicked slice. The C++ kernel maps the pixel to a voxel itself, so we pass
+    // slice-pixel coordinates straight through (unlike Fill, which seeds a voxel).
     func seedLevelTrace(axis: Int, px: Int, py: Int) {
         guard let h = volume.handle, activeID > 0 else { return }
         lumen_seg_push_undo(h)
@@ -291,19 +318,6 @@ final class SegmentationModel: ObservableObject {
         let added = lumen_seg_level_trace(h, Int32(axis), Int32(volume.sliceIndex[axis]),
                                           Int32(px), Int32(py))
         if added > 0 { didMutateMask() } else { refreshUndoState() }
-    }
-
-    // Scissors: erase the active segment on this slice inside/outside a dragged
-    // rectangle (two corners in slice pixels).
-    func scissorsCut(axis: Int, x0: Int, y0: Int, x1: Int, y1: Int) {
-        guard let h = volume.handle, activeID > 0 else { return }
-        lumen_seg_push_undo(h)
-        thresholdNeedsUndoCapture = true
-        let changed = lumen_seg_scissors(
-            h, Int32(axis), Int32(volume.sliceIndex[axis]),
-            Int32(x0), Int32(y0), Int32(x1), Int32(y1),
-            scissorsEraseInside ? 1 : 0)
-        if changed > 0 { didMutateMask() } else { refreshUndoState() }
     }
 
     // Paint strokes: capture one undo entry at the start, paint per drag tick (only
@@ -357,48 +371,6 @@ final class SegmentationModel: ObservableObject {
 
     func endStroke() { didMutateMask() }
 
-    // MARK: - Grow from seeds (competitive, multi-label)
-
-    // Open while a grow session runs (after Initialise, before Apply/Cancel). Only
-    // a UI concern - each grow is an ordinary undoable edit, so Cmd-Z works too.
-    @Published var growSessionActive = false
-
-    // Segments compete for the background, so this needs at least two of them
-    // (typically the structure plus a background segment).
-    var canGrowFromSeeds: Bool { segments.count >= 2 }
-
-    // Initialise: snapshot ONCE (the pre-session state), then grow every segment's
-    // painted seeds outward by one tolerance band. The whole session collapses into
-    // that single snapshot - Update grows further without a new snapshot - so Cancel
-    // (one undo) always reverts the entire session, and one Cmd-Z after Apply does
-    // the same.
-    func growInitialise() {
-        guard let h = volume.handle, canGrowFromSeeds else { return }
-        lumen_seg_push_undo(h)
-        thresholdNeedsUndoCapture = true
-        growSessionActive = true
-        _ = lumen_seg_grow_from_seeds(h, tolerance)
-        didMutateMask()
-    }
-
-    // Update: expand another tolerance band from the enlarged regions (or from any
-    // seeds painted since). Does NOT push a new snapshot - it builds on the session
-    // snapshot from Initialise - and needs the segments to still compete.
-    func growUpdate() {
-        guard let h = volume.handle, growSessionActive, canGrowFromSeeds else { return }
-        _ = lumen_seg_grow_from_seeds(h, tolerance)
-        didMutateMask()
-    }
-
-    // Cancel reverts the whole session (single snapshot); Apply just closes it (the
-    // result stays, one Cmd-Z away).
-    func growCancel() {
-        if growSessionActive { undo() }
-        growSessionActive = false
-    }
-
-    func growApply() { growSessionActive = false }
-
     func keepLargest() {
         guard let h = volume.handle, activeID > 0 else { return }
         lumen_seg_push_undo(h)
@@ -412,6 +384,44 @@ final class SegmentationModel: ObservableObject {
         thresholdNeedsUndoCapture = true
         if lumen_seg_remove_small(h, Int(removeSmallMin)) > 0 { didMutateMask() }
         else { refreshUndoState() }
+    }
+
+    // Competitive grow-cut from the current multi-label seeds. Runs over the seeds'
+    // bounding box in the C++ core; the whole mask is one undo step. Slower than the
+    // other ops (bounded by seed extent × iterations), but capped by growSeedIters.
+    func growFromSeeds() {
+        guard let h = volume.handle, canGrowFromSeeds else { return }
+        lumen_seg_push_undo(h)
+        thresholdNeedsUndoCapture = true
+        if lumen_seg_grow_from_seeds(h, Int32(growSeedIters)) > 0 { didMutateMask() }
+        else { refreshUndoState() }
+    }
+
+    // Erase labelled voxels by a screen-space lasso drawn over the 3D surface. The
+    // caller (the 3D pane) supplies the combined view*projection matrix (16 floats,
+    // row-major) SceneKit is using, the viewport size, and the outline as a flat
+    // [x0,y0,x1,y1,…] pixel list in the same top-left/y-down space. `onlyLabel` == 0
+    // cuts every labelled voxel inside the outline. Returns whether anything changed.
+    @discardableResult
+    func scissorCut(mvp: [Float], viewportWidth: Int, viewportHeight: Int,
+                    polygon: [Float], eraseInside: Bool = true,
+                    onlyLabel: Int = 0) -> Bool {
+        guard let h = volume.handle, mvp.count == 16, polygon.count >= 6 else {
+            return false
+        }
+        lumen_seg_push_undo(h)
+        thresholdNeedsUndoCapture = true
+        let cleared = mvp.withUnsafeBufferPointer { m in
+            polygon.withUnsafeBufferPointer { p in
+                lumen_seg_scissor_cut(h, m.baseAddress, Int32(viewportWidth),
+                                      Int32(viewportHeight), p.baseAddress,
+                                      Int32(polygon.count / 2), eraseInside ? 1 : 0,
+                                      Int32(onlyLabel))
+            }
+        }
+        if cleared > 0 { didMutateMask(); return true }
+        refreshUndoState()
+        return false
     }
 
     func growMargin() { applyMorphology { lumen_seg_grow($0, 1) } }

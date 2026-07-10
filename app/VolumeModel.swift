@@ -243,6 +243,15 @@ final class VolumeModel: ObservableObject {
         return SIMD3(Int(x), Int(y), Int(z))
     }
 
+    /// Where an arbitrary voxel projects onto pane `axis` (for markup dots).
+    func slicePixel(onAxis axis: Int, voxel v: SIMD3<Int>) -> (px: Int, py: Int)? {
+        guard let h = handle else { return nil }
+        var px: Int32 = 0, py: Int32 = 0
+        lumen_voxel_to_slice_pixel(h, Int32(axis), Int32(v.x), Int32(v.y), Int32(v.z),
+                                   &px, &py)
+        return (Int(px), Int(py))
+    }
+
     /// Where the shared focus voxel projects onto pane `axis` (for the crosshair).
     func crosshairPixel(onAxis axis: Int) -> (px: Int, py: Int)? {
         guard let h = handle else { return nil }
@@ -250,25 +259,6 @@ final class VolumeModel: ObservableObject {
         lumen_voxel_to_slice_pixel(h, Int32(axis), Int32(focus.x), Int32(focus.y),
                                    Int32(focus.z), &px, &py)
         return (Int(px), Int(py))
-    }
-
-    /// Where an arbitrary voxel projects onto pane `axis` (for markup glyphs).
-    func slicePixel(onAxis axis: Int, voxel: SIMD3<Int>) -> (px: Int, py: Int)? {
-        guard let h = handle else { return nil }
-        var px: Int32 = 0, py: Int32 = 0
-        lumen_voxel_to_slice_pixel(h, Int32(axis), Int32(voxel.x), Int32(voxel.y),
-                                   Int32(voxel.z), &px, &py)
-        return (Int(px), Int(py))
-    }
-
-    /// True when `voxel` lies on the slice currently shown on `axis` (its
-    /// off-plane coordinate equals that pane's slice index).
-    func voxelOnSlice(_ axis: Int, _ voxel: SIMD3<Int>) -> Bool {
-        switch axis {
-        case 0: return voxel.z == focus.z   // axial steps Z
-        case 1: return voxel.y == focus.y   // coronal steps Y
-        default: return voxel.x == focus.x  // sagittal steps X
-        }
     }
 
     /// Set window and level together with a single re-render. Clamps window to

@@ -31,24 +31,24 @@ struct LumenSliceApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var model: VolumeModel
     @StateObject private var segmentation: SegmentationModel
-    @StateObject private var markups: MarkupsModel
     @StateObject private var mesh: MeshModel
+    @StateObject private var markup: MarkupModel
     // The active workspace tab lives here so the global Undo command can route to
     // the right model (markup points on the Markups tab, mask edits elsewhere).
     @State private var selectedTab: WorkspaceTab = .visualize
 
     init() {
         // The segmentation + mesh models drive the same C++ volume handle the
-        // VolumeModel owns, so build them together and inject all of them. The mesh
+        // VolumeModel owns, so build them together and inject all four. The mesh
         // model reads the segment list to build one colored surface per segment;
-        // the markups model only reads the volume geometry for its annotations.
+        // the markup model holds fiducials placed on the slices and shown in 3D.
         let volume = VolumeModel()
         let segmentation = SegmentationModel(volume: volume)
         _model = StateObject(wrappedValue: volume)
         _segmentation = StateObject(wrappedValue: segmentation)
-        _markups = StateObject(wrappedValue: MarkupsModel(volume: volume))
         _mesh = StateObject(wrappedValue: MeshModel(volume: volume,
                                                     segmentation: segmentation))
+        _markup = StateObject(wrappedValue: MarkupModel(volume: volume))
 
         // When running from a distributed .app bundle, DCMTK can't find its data
         // dictionary at the Homebrew path. Point it at the copy we bundle in
@@ -68,8 +68,8 @@ struct LumenSliceApp: App {
             AppShell(selectedTab: $selectedTab)
                 .environmentObject(model)
                 .environmentObject(segmentation)
-                .environmentObject(markups)
                 .environmentObject(mesh)
+                .environmentObject(markup)
                 .frame(minWidth: 1000, minHeight: 660)
                 .onAppear {
                     // Auto-load a folder passed on the command line.
@@ -83,20 +83,21 @@ struct LumenSliceApp: App {
         .windowToolbarStyle(.unified)
         .commands {
             // System-wide undo/redo, routed by the active tab. On the Markups tab
-            // Cmd-Z removes the last placed markup point; everywhere else it drives
-            // the segmentation RLE snapshot stack the sidebar buttons use, so every
-            // mask edit (threshold, grow, paint, erase, refine, islands, clear) is
-            // reversible from the keyboard. Menu items gray out when there is nothing
-            // to undo/redo. The App observes its models + selectedTab, so these
-            // rebuild as state changes. (Markups has no redo.)
+            // Cmd-Z drops the last placed markup point (or the last committed markup);
+            // everywhere else it drives the segmentation RLE snapshot stack the
+            // sidebar buttons use, so every mask edit (threshold, grow, paint, erase,
+            // refine, grow-from-seeds, scissor, clear) is reversible from the
+            // keyboard. Menu items gray out when there is nothing to undo/redo. The
+            // App observes its models + selectedTab, so these rebuild as state
+            // changes. (Markups has no redo.)
             CommandGroup(replacing: .undoRedo) {
                 Button("Undo") {
-                    if selectedTab == .markups { markups.removeLastPoint() }
+                    if selectedTab == .markups { markup.removeLast() }
                     else { segmentation.undo() }
                 }
                 .keyboardShortcut("z", modifiers: .command)
                 .disabled(selectedTab == .markups
-                          ? (markups.active?.points.isEmpty ?? true)
+                          ? !markup.canRemoveLast
                           : !segmentation.canUndo)
                 Button("Redo") {
                     if selectedTab != .markups { segmentation.redo() }

@@ -100,23 +100,16 @@ long lumen_seg_region_grow(LumenVolume* v, int x, int y, int z, float tol) {
     return v->editor.region_grow(x, y, z, tol);
 }
 
-long lumen_seg_level_trace(LumenVolume* v, int axis, int index, int cx, int cy) {
-    if (v == nullptr) return 0;
-    return v->editor.level_trace(static_cast<lumen::Axis>(axis), index, cx, cy);
-}
-
-long lumen_seg_scissors(LumenVolume* v, int axis, int index, int x0, int y0,
-                        int x1, int y1, int erase_inside) {
-    if (v == nullptr) return 0;
-    return v->editor.scissors(static_cast<lumen::Axis>(axis), index, x0, y0, x1, y1,
-                              erase_inside != 0);
-}
-
 long lumen_seg_paint(LumenVolume* v, int axis, int index, int cx, int cy,
                      int radius, int add) {
     if (v == nullptr) return 0;
     return v->editor.paint(static_cast<lumen::Axis>(axis), index, cx, cy, radius,
                            add != 0);
+}
+
+long lumen_seg_level_trace(LumenVolume* v, int axis, int index, int cx, int cy) {
+    if (v == nullptr) return 0;
+    return v->editor.level_trace(static_cast<lumen::Axis>(axis), index, cx, cy);
 }
 
 void lumen_seg_clear(LumenVolume* v) {
@@ -153,8 +146,22 @@ long lumen_seg_smooth(LumenVolume* v, int iterations) {
     return v == nullptr ? 0 : v->editor.smooth(iterations);
 }
 
-long lumen_seg_grow_from_seeds(LumenVolume* v, float tolerance) {
-    return v == nullptr ? 0 : v->editor.grow_from_seeds(tolerance);
+long lumen_seg_grow_from_seeds(LumenVolume* v, int max_iters) {
+    if (v == nullptr) return 0;
+    // Fixed 8-voxel margin around the seeds: enough headroom for the grow to reach
+    // structure edges without ballooning the working box on a large scan.
+    return v->editor.grow_from_seeds(max_iters, 8);
+}
+
+long lumen_seg_scissor_cut(LumenVolume* v, const float* mvp, int vp_w, int vp_h,
+                           const float* poly_xy, int poly_count, int erase_inside,
+                           int only_label) {
+    if (v == nullptr) return 0;
+    const std::uint8_t label =
+        (only_label > 0 && only_label < 256) ? static_cast<std::uint8_t>(only_label)
+                                             : 0;
+    return v->editor.scissor_cut(mvp, vp_w, vp_h, poly_xy, poly_count,
+                                 erase_inside != 0, label);
 }
 
 // --- Undo / redo ------------------------------------------------------------

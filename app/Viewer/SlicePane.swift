@@ -9,9 +9,9 @@ import SwiftUI
 // pane to fill the viewport.
 struct SlicePane: View {
     @EnvironmentObject var model: VolumeModel
+    @EnvironmentObject var markup: MarkupModel
     let axis: Int
     var segment: SegmentationModel? = nil
-    var markups: MarkupsModel? = nil
     var isFocused: Bool = false
     var onToggleFocus: (() -> Void)? = nil
 
@@ -23,17 +23,13 @@ struct SlicePane: View {
 
     // Per-pane zoom: 1 = fit, up to 8x, driven by a right-button drag. `zoomAnchor`
     // is the cursor point where the drag began, so the view magnifies toward what
-    // is under the cursor. `pan` slides the zoomed image (middle-button drag) and
-    // resets to zero when the pane returns to fit. Each pane transforms
-    // independently (3D-Slicer behavior).
+    // is under the cursor. `pan` slides the zoomed image (middle-button / scroll-
+    // wheel-button drag) and resets to zero when the pane returns to fit. Each pane
+    // transforms independently (3D-Slicer behavior).
     @State private var zoom: CGFloat = 1
     @State private var zoomAnchor: CGPoint = .zero
     @State private var pan: CGSize = .zero
     private static let maxZoom: CGFloat = 8
-
-    // Scissors rubber-band: the drag's start + current point in display coords.
-    @State private var scissorsFrom: CGPoint?
-    @State private var scissorsTo: CGPoint?
 
     var body: some View {
         let count = model.sliceCount(axis)
@@ -111,13 +107,7 @@ struct SlicePane: View {
                     OrientationLabels(axis: axis, rect: display)
                 }
                 brushRing(fitted: display)
-                scissorsRect
-                if let markups {
-                    MarkupOverlay(
-                        markups: markups,
-                        project: { projectVoxel($0, container: container, aspect: aspect) },
-                        onSlice: { model.voxelOnSlice(axis, $0) })
-                }
+                markupDots(container: container, aspect: aspect)
             }
             .clipShape(RoundedRectangle(cornerRadius: 10))
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -133,7 +123,7 @@ struct SlicePane: View {
                 onPan: { d in
                     // Clamp so the zoomed image can't be dragged entirely out of the
                     // pane: the offset is bounded to half the zoomed image size, so
-                    // at least its centre stays reachable.
+                    // at least its centre stays reachable. No pan at fit (zoom == 1).
                     guard zoom > 1,
                           let base = SliceCoordinates.fittedRect(
                             container: container, aspect: aspect) else { return }
@@ -156,22 +146,6 @@ struct SlicePane: View {
 
     // The brush footprint: a ring sized to brushRadius (slice pixels) scaled into
     // display points, tinted by the active segment (red while erasing).
-    // The scissors rubber-band rectangle, drawn while dragging; colour signals
-    // which side gets erased (red = inside, orange = outside).
-    @ViewBuilder private var scissorsRect: some View {
-        if let seg = segment, seg.tool == .scissors,
-           let a = scissorsFrom, let b = scissorsTo {
-            let rect = CGRect(x: min(a.x, b.x), y: min(a.y, b.y),
-                              width: abs(a.x - b.x), height: abs(a.y - b.y))
-            Rectangle()
-                .stroke(seg.scissorsEraseInside ? Color.red : Color.orange,
-                        style: StrokeStyle(lineWidth: 1.5, dash: [5]))
-                .frame(width: rect.width, height: rect.height)
-                .position(x: rect.midX, y: rect.midY)
-                .allowsHitTesting(false)
-        }
-    }
-
     @ViewBuilder private func brushRing(fitted: CGRect?) -> some View {
         if let seg = segment, seg.tool.isBrush, let p = pointer,
            let img = model.images[axis], let rect = fitted, rect.contains(p) {
@@ -185,6 +159,51 @@ struct SlicePane: View {
         }
     }
 
+    // Dots for markup defining points (and any in-progress points) that lie on the
+    // slice currently shown in this pane. Placement happens here; this is the 2D
+    // echo of what the 3D pane draws.
+    @ViewBuilder private func markupDots(container: CGSize, aspect: CGFloat) -> some View {
+        ForEach(markup.markups) { m in
+            ForEach(Array(m.voxels.enumerated()), id: \.offset) { _, v in
+                if markup.onCurrentSlice(v, axis: axis),
+                   let pt = markupPoint(voxel: v, container: container, aspect: aspect) {
+                    Circle()
+                        .fill(markup.color(m))
+                        .frame(width: 9, height: 9)
+                        .overlay(Circle().strokeBorder(.white, lineWidth: 1))
+                        .position(pt)
+                        .allowsHitTesting(false)
+                }
+            }
+        }
+        ForEach(Array(markup.pending.enumerated()), id: \.offset) { _, v in
+            if markup.onCurrentSlice(v, axis: axis),
+               let pt = markupPoint(voxel: v, container: container, aspect: aspect) {
+                Circle()
+                    .strokeBorder(.white, lineWidth: 1.5)
+                    .frame(width: 10, height: 10)
+                    .position(pt)
+                    .allowsHitTesting(false)
+            }
+        }
+    }
+
+    private func markupPoint(voxel v: SIMD3<Int>, container: CGSize,
+                             aspect: CGFloat) -> CGPoint? {
+        guard let img = model.images[axis],
+              let c = model.slicePixel(onAxis: axis, voxel: v) else { return nil }
+        return SliceCoordinates.point(forPixel: c.px, c.py, container: container,
+                                      imageWidth: img.width, imageHeight: img.height,
+                                      aspect: aspect, zoom: zoom, anchor: zoomAnchor,
+                                      pan: pan)
+    }
+
+    fileprivate func placeMarkup(at point: CGPoint, container: CGSize) {
+        guard let (px, py) = pixel(at: point, container: container),
+              let voxel = model.voxel(onAxis: axis, px: px, py: py) else { return }
+        markup.place(voxel)
+    }
+
     private func crosshairPoint(container: CGSize, aspect: CGFloat) -> CGPoint? {
         guard let img = model.images[axis],
               let c = model.crosshairPixel(onAxis: axis) else { return nil }
@@ -194,26 +213,14 @@ struct SlicePane: View {
                                       pan: pan)
     }
 
-    // Project a voxel to a point on this pane (for markup glyphs), honouring the
-    // pane's current zoom / anchor / pan through the shared coordinate mapping.
-    private func projectVoxel(_ voxel: SIMD3<Int>, container: CGSize,
-                              aspect: CGFloat) -> CGPoint? {
-        guard let img = model.images[axis],
-              let p = model.slicePixel(onAxis: axis, voxel: voxel) else { return nil }
-        return SliceCoordinates.point(forPixel: p.px, p.py, container: container,
-                                      imageWidth: img.width, imageHeight: img.height,
-                                      aspect: aspect, zoom: zoom, anchor: zoomAnchor,
-                                      pan: pan)
-    }
-
     // Right-drag vertical delta (window coords, up positive) -> magnification. The
     // exponential makes each point of drag a constant percentage change, so zoom
-    // feels even at every level; clamped to [1, maxZoom]. Returning to fit clears
-    // any pan so the image re-centers.
+    // feels even at every level; clamped to [1, maxZoom] (1 = fit, no zoom-out
+    // below fit since there is no pan).
     private func applyZoom(_ dy: CGFloat) {
         let factor = CGFloat(exp(Double(dy) * 0.01))
         zoom = min(Self.maxZoom, max(1, zoom * factor))
-        if zoom == 1 { pan = .zero }
+        if zoom == 1 { pan = .zero } // back to fit: recenter, no stale offset
     }
 
     // MARK: - Interaction helpers (called from SliceInteraction)
@@ -233,21 +240,9 @@ struct SlicePane: View {
         model.jump(to: voxel)
     }
 
-    fileprivate func placeMarkup(_ markups: MarkupsModel, at point: CGPoint,
-                                 container: CGSize) {
-        guard let (px, py) = pixel(at: point, container: container),
-              let voxel = model.voxel(onAxis: axis, px: px, py: py) else { return }
-        markups.addPoint(voxel)
-    }
-
     fileprivate func brushChanged(_ seg: SegmentationModel, at point: CGPoint,
                                   container: CGSize) {
         pointer = point
-        if seg.tool == .scissors {
-            if scissorsFrom == nil { scissorsFrom = point }
-            scissorsTo = point
-            return
-        }
         guard seg.tool.isBrush else { return }
         if !strokeActive { seg.beginStroke(); strokeActive = true; lastPaintPixel = nil }
         paintMove(seg, to: point, container: container)
@@ -255,39 +250,21 @@ struct SlicePane: View {
 
     fileprivate func brushEnded(_ seg: SegmentationModel, at point: CGPoint,
                                 container: CGSize) {
-        if seg.tool == .scissors {
-            applyScissors(seg, at: point, container: container)
-            return
-        }
         if seg.tool.isBrush {
             if !strokeActive { seg.beginStroke(); strokeActive = true; lastPaintPixel = nil }
             paintMove(seg, to: point, container: container)
             seg.endStroke()
             strokeActive = false
             lastPaintPixel = nil
-        } else if seg.tool.isClickSeed {
+        } else if seg.tool == .regionGrow {
             if let (px, py) = pixel(at: point, container: container) {
-                if seg.tool == .levelTrace {
-                    seg.seedLevelTrace(axis: axis, px: px, py: py)
-                } else {
-                    seg.seedRegionGrow(axis: axis, px: px, py: py)
-                }
+                seg.seedRegionGrow(axis: axis, px: px, py: py)
+            }
+        } else if seg.tool == .levelTrace {
+            if let (px, py) = pixel(at: point, container: container) {
+                seg.seedLevelTrace(axis: axis, px: px, py: py)
             }
         }
-    }
-
-    private func applyScissors(_ seg: SegmentationModel, at point: CGPoint,
-                               container: CGSize) {
-        defer { scissorsFrom = nil; scissorsTo = nil }
-        guard let start = scissorsFrom else { return }
-        // A stray click (no real drag) would make a zero-area rect - which with
-        // "Outside" selected erases the entire slice. Require a real drag, and a
-        // non-degenerate pixel rectangle, before cutting.
-        guard hypot(point.x - start.x, point.y - start.y) >= 6 else { return }
-        guard let a = pixel(at: start, container: container),
-              let b = pixel(at: point, container: container),
-              a.x != b.x, a.y != b.y else { return }
-        seg.scissorsCut(axis: axis, x0: a.x, y0: a.y, x1: b.x, y1: b.y)
     }
 
     private func paintMove(_ seg: SegmentationModel, to point: CGPoint,
@@ -325,15 +302,12 @@ private struct SliceInteraction: ViewModifier {
     let container: CGSize
 
     func body(content: Content) -> some View {
-        if let markups = pane.markups {
-            // Markups tab: click drops a point on the active markup; W/L drag stays.
-            content
-                .windowLevelDrag(pane.model)
-                .simultaneousGesture(
-                    SpatialTapGesture(coordinateSpace: .local)
-                        .onEnded { pane.placeMarkup(markups, at: $0.location,
-                                                    container: container) }
-                )
+        if pane.markup.placing {
+            // Markup placement takes the canvas: each click drops one point.
+            content.gesture(
+                SpatialTapGesture(coordinateSpace: .local)
+                    .onEnded { pane.placeMarkup(at: $0.location, container: container) }
+            )
         } else if let seg = pane.segment {
             content.gesture(
                 DragGesture(minimumDistance: 0, coordinateSpace: .local)

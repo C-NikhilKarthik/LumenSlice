@@ -18,6 +18,9 @@ final class MeshModel: ObservableObject {
 
     @Published var smoothing: Int = 1
     @Published var downsample: Int = 1
+    // Scissor mode: when on, a freehand lasso over the 3D surface cuts the mask
+    // (and camera orbit is suspended while drawing). Toggled from the 3D controls.
+    @Published var scissorActive = false
     @Published private(set) var isGenerating = false
     @Published private(set) var triangleCount = 0
     @Published private(set) var vertexCount = 0

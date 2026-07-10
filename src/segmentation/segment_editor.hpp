@@ -83,9 +83,8 @@ public:
     void threshold(float low_hu, float high_hu);
     long region_grow(int x, int y, int z, float tolerance);
     long paint(Axis axis, int slice_index, int cx, int cy, int radius, bool add);
+    // Level tracing: select the iso-level (>= clicked HU) region on one slice.
     long level_trace(Axis axis, int slice_index, int cx, int cy);
-    long scissors(Axis axis, int slice_index, int x0, int y0, int x1, int y1,
-                  bool erase_inside);
     void clear_active();
     long keep_largest();
     long remove_small(long min_voxels);
@@ -93,13 +92,14 @@ public:
     long shrink_margin(int iterations);
     long smooth(int iterations);
 
-    // Multi-label grow-from-seeds (marker-controlled watershed): every labelled
-    // voxel is a seed and segments compete to fill the background. Unlike the
-    // methods above this spans ALL segments, so it does not go through the
-    // single-label effect Strategy - it calls the kernel directly. `tolerance` (HU)
-    // bounds how far it grows per call, so repeated calls expand another band.
-    // Returns voxels newly labelled.
-    long grow_from_seeds(float tolerance);
+    // Grow the current multi-label seeds competitively (grow-cut) over the seeds'
+    // bounding box; see grow_from_seeds.hpp. Returns voxels relabelled.
+    long grow_from_seeds(int max_iters, int margin);
+
+    // Erase labelled voxels by a screen-space lasso; see scissor.hpp. Returns
+    // voxels cleared.
+    long scissor_cut(const float* mvp, int vp_w, int vp_h, const float* poly_xy,
+                     int poly_count, bool erase_inside, std::uint8_t only_label);
 
     // --- Undo / redo --------------------------------------------------------
     // Capture the mask state BEFORE a user operation (the caller picks the
