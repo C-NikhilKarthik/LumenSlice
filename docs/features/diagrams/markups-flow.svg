@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 560">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#2b3a4a"/>
+    </marker>
+  </defs>
+
+  <text x="450" y="34" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="20" font-weight="bold" fill="#1b2733">Markups: from click to 2D dots + 3D node</text>
+
+  <!-- Row 1: click -> voxel -->
+  <rect x="40" y="70" width="220" height="80" rx="10" fill="#e8eef7" stroke="#2b3a4a" stroke-width="2"/>
+  <text x="150" y="100" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="14" font-weight="bold" fill="#1b2733">Click on a slice pane</text>
+  <text x="150" y="122" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">only while placing is on</text>
+  <text x="150" y="140" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">SlicePane.placeMarkup(...)</text>
+
+  <rect x="340" y="70" width="220" height="80" rx="10" fill="#e8eef7" stroke="#2b3a4a" stroke-width="2"/>
+  <text x="450" y="100" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="14" font-weight="bold" fill="#1b2733">Tap -> pixel -> voxel</text>
+  <text x="450" y="122" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">via SliceCoordinates</text>
+  <text x="450" y="140" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">respects zoom / pan</text>
+
+  <rect x="640" y="70" width="220" height="80" rx="10" fill="#dfe8dc" stroke="#2b3a4a" stroke-width="2"/>
+  <text x="750" y="100" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="14" font-weight="bold" fill="#1b2733">MarkupModel.place(voxel)</text>
+  <text x="750" y="122" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">append to pending[]</text>
+  <text x="750" y="140" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">(voxel coords)</text>
+
+  <line x1="260" y1="110" x2="336" y2="110" stroke="#2b3a4a" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="560" y1="110" x2="636" y2="110" stroke="#2b3a4a" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- decision -->
+  <rect x="600" y="200" width="300" height="70" rx="10" fill="#f3e8d0" stroke="#2b3a4a" stroke-width="2"/>
+  <text x="750" y="230" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="14" font-weight="bold" fill="#1b2733">pending.count &gt;= kind.pointsNeeded ?</text>
+  <text x="750" y="252" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">point=1  line=2  plane=3</text>
+
+  <line x1="750" y1="150" x2="750" y2="196" stroke="#2b3a4a" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- no branch: back to pending -->
+  <text x="880" y="190" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">no</text>
+  <path d="M 900 235 L 900 170 L 795 170" fill="none" stroke="#2b3a4a" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="828" y="300" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="12" fill="#1b2733">wait for next click</text>
+
+  <!-- yes: commit -->
+  <text x="470" y="230" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">yes</text>
+  <rect x="230" y="200" width="270" height="90" rx="10" fill="#dfe8dc" stroke="#2b3a4a" stroke-width="2"/>
+  <text x="365" y="228" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="14" font-weight="bold" fill="#1b2733">Commit a Markup</text>
+  <text x="365" y="250" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">append to markups[], clear pending</text>
+  <text x="365" y="270" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">name/kind/colour + UUID</text>
+
+  <line x1="600" y1="235" x2="504" y2="235" stroke="#2b3a4a" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- two renders -->
+  <rect x="60" y="360" width="320" height="90" rx="10" fill="#e8eef7" stroke="#2b3a4a" stroke-width="2"/>
+  <text x="220" y="388" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="14" font-weight="bold" fill="#1b2733">2D dots on the slice</text>
+  <text x="220" y="410" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">SlicePane.markupDots(...)</text>
+  <text x="220" y="430" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">filled = committed, ring = pending</text>
+
+  <rect x="440" y="360" width="320" height="90" rx="10" fill="#e8eef7" stroke="#2b3a4a" stroke-width="2"/>
+  <text x="600" y="388" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="14" font-weight="bold" fill="#1b2733">3D node in the SceneKit view</text>
+  <text x="600" y="410" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">renders() -> MarkupRender</text>
+  <text x="600" y="430" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">mm(voxel) = voxel x spacing</text>
+
+  <path d="M 300 290 L 300 330 L 220 330 L 220 356" fill="none" stroke="#2b3a4a" stroke-width="2" marker-end="url(#arrow)"/>
+  <path d="M 430 290 L 430 330 L 600 330 L 600 356" fill="none" stroke="#2b3a4a" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="200" y="322" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="12" fill="#1b2733">same voxels, two projections</text>
+
+  <!-- Cmd-Z -->
+  <rect x="60" y="490" width="700" height="52" rx="10" fill="#f3e8d0" stroke="#2b3a4a" stroke-width="2"/>
+  <text x="410" y="513" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="14" font-weight="bold" fill="#1b2733">Cmd-Z on the Markups tab -> MarkupModel.removeLast()</text>
+  <text x="410" y="533" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">drops the last pending point if any, else removes the last committed markup (no redo)</text>
+
+  <line x1="220" y1="450" x2="220" y2="486" stroke="#2b3a4a" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="600" y1="450" x2="600" y2="486" stroke="#2b3a4a" stroke-width="2" marker-end="url(#arrow)"/>
+</svg>

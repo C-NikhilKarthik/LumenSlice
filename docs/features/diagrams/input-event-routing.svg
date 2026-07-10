@@ -1,0 +1,95 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 620">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#2b3a4a"/>
+    </marker>
+  </defs>
+
+  <text x="24" y="34" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="18" font-weight="bold" fill="#1b2733">Input event routing over a slice pane</text>
+  <text x="24" y="56" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">CanvasInputNSView installs five NSEvent local monitors. Each maps to an intent callback and either consumes the event or passes it through.</text>
+
+  <!-- Source -->
+  <rect x="40" y="90" width="230" height="54" rx="8" fill="#e8eef7" stroke="#2b3a4a" stroke-width="1.5"/>
+  <text x="155" y="114" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="14" font-weight="bold" fill="#1b2733">NSEvent stream</text>
+  <text x="155" y="133" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">(window-level, over the pane)</text>
+
+  <!-- Monitor rows -->
+  <!-- scroll -->
+  <rect x="40" y="176" width="250" height="60" rx="8" fill="#dfe8dc" stroke="#2b3a4a" stroke-width="1.5"/>
+  <text x="165" y="200" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" font-weight="bold" fill="#1b2733">.scrollWheel monitor</text>
+  <text x="165" y="221" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">accumulate + threshold</text>
+
+  <rect x="360" y="176" width="230" height="60" rx="8" fill="#f3e8d0" stroke="#2b3a4a" stroke-width="1.5"/>
+  <text x="475" y="200" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" font-weight="bold" fill="#1b2733">onStep(+/-1)</text>
+  <text x="475" y="221" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">step slice on axis</text>
+
+  <rect x="700" y="176" width="270" height="60" rx="8" fill="#e8eef7" stroke="#2b3a4a" stroke-width="1.5"/>
+  <text x="835" y="205" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" font-weight="bold" fill="#1b2733">CONSUMED (returns nil)</text>
+
+  <!-- move -->
+  <rect x="40" y="248" width="250" height="60" rx="8" fill="#dfe8dc" stroke="#2b3a4a" stroke-width="1.5"/>
+  <text x="165" y="272" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" font-weight="bold" fill="#1b2733">.mouseMoved / .leftMouseDragged</text>
+  <text x="165" y="293" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">(Shift + move = cross-ref)</text>
+
+  <rect x="360" y="248" width="230" height="60" rx="8" fill="#f3e8d0" stroke="#2b3a4a" stroke-width="1.5"/>
+  <text x="475" y="272" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" font-weight="bold" fill="#1b2733">onMove(p) / onShiftLocate(p)</text>
+  <text x="475" y="293" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">brush cursor / linked jump</text>
+
+  <rect x="700" y="248" width="270" height="60" rx="8" fill="#dfe8dc" stroke="#2b3a4a" stroke-width="1.5"/>
+  <text x="835" y="277" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" font-weight="bold" fill="#1b2733">PASSED THROUGH (returns event)</text>
+
+  <!-- right -->
+  <rect x="40" y="320" width="250" height="60" rx="8" fill="#dfe8dc" stroke="#2b3a4a" stroke-width="1.5"/>
+  <text x="165" y="344" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" font-weight="bold" fill="#1b2733">.rightMouse down/dragged/up</text>
+  <text x="165" y="365" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">handleRightMouse</text>
+
+  <rect x="360" y="320" width="230" height="60" rx="8" fill="#f3e8d0" stroke="#2b3a4a" stroke-width="1.5"/>
+  <text x="475" y="344" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" font-weight="bold" fill="#1b2733">onZoomBegin(p) / onZoom(dy)</text>
+  <text x="475" y="365" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">set anchor, magnify</text>
+
+  <rect x="700" y="320" width="270" height="60" rx="8" fill="#e8eef7" stroke="#2b3a4a" stroke-width="1.5"/>
+  <text x="835" y="345" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" font-weight="bold" fill="#1b2733">CONSUMED</text>
+  <text x="835" y="365" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">(also suppresses context menu)</text>
+
+  <!-- flags -->
+  <rect x="40" y="392" width="250" height="60" rx="8" fill="#dfe8dc" stroke="#2b3a4a" stroke-width="1.5"/>
+  <text x="165" y="416" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" font-weight="bold" fill="#1b2733">.flagsChanged monitor</text>
+  <text x="165" y="437" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">Shift pressed / released</text>
+
+  <rect x="360" y="392" width="230" height="60" rx="8" fill="#f3e8d0" stroke="#2b3a4a" stroke-width="1.5"/>
+  <text x="475" y="416" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" font-weight="bold" fill="#1b2733">onShiftChange(bool)</text>
+  <text x="475" y="437" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">toggle crosshair mode</text>
+
+  <rect x="700" y="392" width="270" height="60" rx="8" fill="#dfe8dc" stroke="#2b3a4a" stroke-width="1.5"/>
+  <text x="835" y="426" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" font-weight="bold" fill="#1b2733">PASSED THROUGH</text>
+
+  <!-- other -->
+  <rect x="40" y="464" width="250" height="60" rx="8" fill="#dfe8dc" stroke="#2b3a4a" stroke-width="1.5"/>
+  <text x="165" y="488" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" font-weight="bold" fill="#1b2733">.otherMouse down/dragged/up</text>
+  <text x="165" y="509" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">handleMiddleMouse</text>
+
+  <rect x="360" y="464" width="230" height="60" rx="8" fill="#f3e8d0" stroke="#2b3a4a" stroke-width="1.5"/>
+  <text x="475" y="488" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" font-weight="bold" fill="#1b2733">onPan(delta)</text>
+  <text x="475" y="509" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">slide zoomed image (clamped)</text>
+
+  <rect x="700" y="464" width="270" height="60" rx="8" fill="#e8eef7" stroke="#2b3a4a" stroke-width="1.5"/>
+  <text x="835" y="498" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" font-weight="bold" fill="#1b2733">CONSUMED</text>
+
+  <!-- arrows source to monitors -->
+  <line x1="155" y1="144" x2="155" y2="174" stroke="#2b3a4a" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <!-- monitor -> callback -->
+  <line x1="290" y1="206" x2="358" y2="206" stroke="#2b3a4a" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="290" y1="278" x2="358" y2="278" stroke="#2b3a4a" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="290" y1="350" x2="358" y2="350" stroke="#2b3a4a" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="290" y1="422" x2="358" y2="422" stroke="#2b3a4a" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="290" y1="494" x2="358" y2="494" stroke="#2b3a4a" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <!-- callback -> disposition -->
+  <line x1="590" y1="206" x2="698" y2="206" stroke="#2b3a4a" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="590" y1="278" x2="698" y2="278" stroke="#2b3a4a" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="590" y1="350" x2="698" y2="350" stroke="#2b3a4a" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="590" y1="422" x2="698" y2="422" stroke="#2b3a4a" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="590" y1="494" x2="698" y2="494" stroke="#2b3a4a" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <text x="500" y="558" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">Pointer motion, taps, and left-drags are passed through so the SwiftUI gestures underneath (locate, window/level, paint, markup) still fire.</text>
+  <text x="500" y="580" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">hitTest returns nil, so the NSView is transparent to clicks: only the monitors observe it, and only zoom / pan / scroll are consumed.</text>
+</svg>

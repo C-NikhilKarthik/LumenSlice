@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 560">
+  <defs>
+    <marker id="arrow2" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 z" fill="#2b3a4a"/>
+    </marker>
+  </defs>
+
+  <text x="450" y="30" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="18" font-weight="bold" fill="#1b2733">Undo as Command / Memento over RLE mask snapshots</text>
+
+  <!-- The two deques -->
+  <text x="150" y="72" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="15" font-weight="bold" fill="#1b2733">past_  (undo side)</text>
+  <text x="150" y="90" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="12" fill="#1b2733">newest at top, kDepth = 10 max</text>
+
+  <rect x="60" y="104" width="180" height="40" rx="5" fill="#e8eef7" stroke="#2b3a4a" stroke-width="1.5"/>
+  <text x="150" y="129" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">snapshot n-1 (RLE)</text>
+  <rect x="60" y="152" width="180" height="40" rx="5" fill="#e8eef7" stroke="#2b3a4a" stroke-width="1.5"/>
+  <text x="150" y="177" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">snapshot n-2 (RLE)</text>
+  <rect x="60" y="200" width="180" height="40" rx="5" fill="#e8eef7" stroke="#2b3a4a" stroke-width="1.5"/>
+  <text x="150" y="225" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">... (oldest dropped)</text>
+
+  <text x="750" y="72" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="15" font-weight="bold" fill="#1b2733">future_  (redo side)</text>
+  <text x="750" y="90" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="12" fill="#1b2733">filled by undo, cleared by any new edit</text>
+
+  <rect x="660" y="104" width="180" height="40" rx="5" fill="#f3e8d0" stroke="#2b3a4a" stroke-width="1.5"/>
+  <text x="750" y="129" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">undone snapshot (RLE)</text>
+  <rect x="660" y="152" width="180" height="40" rx="5" fill="#f3e8d0" stroke="#2b3a4a" stroke-width="1.5"/>
+  <text x="750" y="177" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">...</text>
+
+  <!-- Live mask in the middle -->
+  <rect x="360" y="130" width="180" height="80" rx="6" fill="#dfe8dc" stroke="#2b3a4a" stroke-width="2"/>
+  <text x="450" y="160" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="15" font-weight="bold" fill="#1b2733">live LabelVolume</text>
+  <text x="450" y="182" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">mask_ (raw bytes)</text>
+  <text x="450" y="200" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="12" fill="#1b2733">what edits mutate</text>
+
+  <!-- capture: mask -> past_ -->
+  <line x1="360" y1="150" x2="248" y2="128" stroke="#2b3a4a" stroke-width="1.8" marker-end="url(#arrow2)"/>
+  <text x="300" y="112" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="12" fill="#1b2733">push_undo():</text>
+  <text x="300" y="126" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="12" fill="#1b2733">capture(mask) encodes + pushes</text>
+
+  <!-- undo: past_ -> mask, and mask -> future_ -->
+  <line x1="248" y1="176" x2="360" y2="190" stroke="#2b3a4a" stroke-width="1.8" marker-end="url(#arrow2)"/>
+  <text x="304" y="205" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="12" fill="#1b2733">undo(): pop past_ -> mask</text>
+
+  <line x1="540" y1="176" x2="660" y2="130" stroke="#2b3a4a" stroke-width="1.8" marker-end="url(#arrow2)"/>
+  <text x="600" y="200" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="12" fill="#1b2733">old mask -> future_</text>
+
+  <!-- redo: future_ -> mask -->
+  <line x1="660" y1="118" x2="540" y2="145" stroke="#2b3a4a" stroke-width="1.8" stroke-dasharray="6 4" marker-end="url(#arrow2)"/>
+  <text x="600" y="112" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="12" fill="#1b2733">redo(): pop future_ -> mask</text>
+
+  <!-- Timeline of an edit -->
+  <rect x="60" y="300" width="780" height="210" rx="6" fill="#e8eef7" stroke="#2b3a4a" stroke-width="1.5"/>
+  <text x="80" y="326" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="14" font-weight="bold" fill="#1b2733">Lifecycle of one edit (the Swift side picks the boundaries)</text>
+
+  <g font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">
+    <text x="80" y="356">1.  Before mutating, the model calls push_undo() -> capture(mask_): the mask is</text>
+    <text x="104" y="374">run-length encoded and pushed onto past_; future_ is cleared (redo invalidated).</text>
+    <text x="80" y="400">2.  The effect runs and mutates mask_ in place (paint stroke, threshold, grow, ...).</text>
+    <text x="80" y="426">3.  undo(): the top of past_ is decoded back into mask_, and the pre-undo mask</text>
+    <text x="104" y="444">is encoded onto future_ so redo can replay it.</text>
+    <text x="80" y="470">4.  redo(): the top of future_ is decoded into mask_, moving it back onto past_.</text>
+    <text x="80" y="496">Why RLE: a 78 MB mask that is mostly background compresses to a few KB, so 10 deep steps stay cheap.</text>
+  </g>
+</svg>

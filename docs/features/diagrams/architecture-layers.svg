@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 560" font-family="-apple-system, Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0,1 L9,5 L0,9 z" fill="#2b3a4a"/>
+    </marker>
+  </defs>
+
+  <text x="410" y="34" text-anchor="middle" font-size="20" font-weight="bold" fill="#1b2733">LumenSlice: three layers, one downward dependency</text>
+  <text x="410" y="56" text-anchor="middle" font-size="13" fill="#1b2733">Each layer knows only the one below it. The C bridge is the only place Swift and C++ meet.</text>
+
+  <!-- Layer 1: SwiftUI app -->
+  <rect x="70" y="80" width="680" height="120" rx="8" fill="#e8eef7" stroke="#2b3a4a" stroke-width="2"/>
+  <text x="90" y="106" font-size="16" font-weight="bold" fill="#1b2733">SwiftUI app  (app/)</text>
+  <text x="90" y="126" font-size="13" fill="#1b2733">What the user sees. MVVM ObservableObjects drive the shared handle.</text>
+  <rect x="90" y="140" width="200" height="46" rx="5" fill="#ffffff" stroke="#2b3a4a" stroke-width="1"/>
+  <text x="190" y="160" text-anchor="middle" font-size="13" fill="#1b2733">VolumeModel</text>
+  <text x="190" y="177" text-anchor="middle" font-size="12" fill="#1b2733">handle: OpaquePointer?</text>
+  <rect x="305" y="140" width="200" height="46" rx="5" fill="#ffffff" stroke="#2b3a4a" stroke-width="1"/>
+  <text x="405" y="160" text-anchor="middle" font-size="13" fill="#1b2733">SegmentationModel</text>
+  <text x="405" y="177" text-anchor="middle" font-size="12" fill="#1b2733">tools, brush, overlays</text>
+  <rect x="520" y="140" width="210" height="46" rx="5" fill="#ffffff" stroke="#2b3a4a" stroke-width="1"/>
+  <text x="625" y="160" text-anchor="middle" font-size="13" fill="#1b2733">MeshModel / MarkupModel</text>
+  <text x="625" y="177" text-anchor="middle" font-size="12" fill="#1b2733">3D surfaces, fiducials</text>
+
+  <!-- Arrow down -->
+  <line x1="410" y1="200" x2="410" y2="238" stroke="#2b3a4a" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="424" y="223" font-size="13" fill="#1b2733">calls C functions</text>
+
+  <!-- extern "C" boundary band -->
+  <rect x="70" y="242" width="680" height="150" rx="8" fill="#f3e8d0" stroke="#2b3a4a" stroke-width="2"/>
+  <text x="90" y="268" font-size="16" font-weight="bold" fill="#1b2733">C bridge  (src/bridge/)  -  the language seam</text>
+  <text x="90" y="288" font-size="13" fill="#1b2733">Pure C, wrapped in extern "C". No C++ type crosses this line.</text>
+
+  <rect x="90" y="302" width="300" height="76" rx="5" fill="#ffffff" stroke="#2b3a4a" stroke-width="1.5" stroke-dasharray="6 4"/>
+  <text x="240" y="322" text-anchor="middle" font-size="13" font-weight="bold" fill="#1b2733">extern "C" { ... }</text>
+  <text x="240" y="341" text-anchor="middle" font-size="12" fill="#1b2733">typedef struct LumenVolume LumenVolume;</text>
+  <text x="240" y="358" text-anchor="middle" font-size="12" fill="#1b2733">lumen_load_folder, lumen_extract_slice,</text>
+  <text x="240" y="373" text-anchor="middle" font-size="12" fill="#1b2733">lumen_seg_paint, lumen_mesh_generate ...</text>
+
+  <rect x="410" y="302" width="320" height="76" rx="5" fill="#ffffff" stroke="#2b3a4a" stroke-width="1"/>
+  <text x="570" y="322" text-anchor="middle" font-size="13" font-weight="bold" fill="#1b2733">opaque LumenVolume*  (private handle)</text>
+  <text x="570" y="341" text-anchor="middle" font-size="12" fill="#1b2733">lumen_handle.hpp: Volume + scratch buffers</text>
+  <text x="570" y="358" text-anchor="middle" font-size="12" fill="#1b2733">+ SegmentEditor + Mesh + snapshot</text>
+  <text x="570" y="373" text-anchor="middle" font-size="12" fill="#1b2733">public header: include/lumen_bridge.h</text>
+
+  <!-- Arrow down -->
+  <line x1="410" y1="392" x2="410" y2="430" stroke="#2b3a4a" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="424" y="415" font-size="13" fill="#1b2733">calls C++</text>
+
+  <!-- Layer 3: C++ core -->
+  <rect x="70" y="434" width="680" height="106" rx="8" fill="#dfe8dc" stroke="#2b3a4a" stroke-width="2"/>
+  <text x="90" y="460" font-size="16" font-weight="bold" fill="#1b2733">C++ core  -  pixels and numbers, no UI</text>
+  <text x="90" y="480" font-size="13" fill="#1b2733">src/core, src/io, src/geometry, src/visualization, src/segmentation</text>
+  <rect x="90" y="492" width="150" height="38" rx="5" fill="#ffffff" stroke="#2b3a4a" stroke-width="1"/>
+  <text x="165" y="510" text-anchor="middle" font-size="12" fill="#1b2733">Volume (flat HU</text>
+  <text x="165" y="524" text-anchor="middle" font-size="12" fill="#1b2733">float[])</text>
+  <rect x="252" y="492" width="150" height="38" rx="5" fill="#ffffff" stroke="#2b3a4a" stroke-width="1"/>
+  <text x="327" y="510" text-anchor="middle" font-size="12" fill="#1b2733">plane_map,</text>
+  <text x="327" y="524" text-anchor="middle" font-size="12" fill="#1b2733">ExtractSlice</text>
+  <rect x="414" y="492" width="150" height="38" rx="5" fill="#ffffff" stroke="#2b3a4a" stroke-width="1"/>
+  <text x="489" y="510" text-anchor="middle" font-size="12" fill="#1b2733">SegmentEditor,</text>
+  <text x="489" y="524" text-anchor="middle" font-size="12" fill="#1b2733">LabelVolume</text>
+  <rect x="576" y="492" width="154" height="38" rx="5" fill="#ffffff" stroke="#2b3a4a" stroke-width="1"/>
+  <text x="653" y="510" text-anchor="middle" font-size="12" fill="#1b2733">marching cubes,</text>
+  <text x="653" y="524" text-anchor="middle" font-size="12" fill="#1b2733">STL export</text>
+</svg>
