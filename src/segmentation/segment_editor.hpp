@@ -83,6 +83,8 @@ public:
     void threshold(float low_hu, float high_hu);
     long region_grow(int x, int y, int z, float tolerance);
     long paint(Axis axis, int slice_index, int cx, int cy, int radius, bool add);
+    // Level tracing: select the iso-level (>= clicked HU) region on one slice.
+    long level_trace(Axis axis, int slice_index, int cx, int cy);
     void clear_active();
     long keep_largest();
     long remove_small(long min_voxels);

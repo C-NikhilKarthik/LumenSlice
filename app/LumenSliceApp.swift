@@ -33,6 +33,9 @@ struct LumenSliceApp: App {
     @StateObject private var segmentation: SegmentationModel
     @StateObject private var mesh: MeshModel
     @StateObject private var markup: MarkupModel
+    // The active workspace tab lives here so the global Undo command can route to
+    // the right model (markup points on the Markups tab, mask edits elsewhere).
+    @State private var selectedTab: WorkspaceTab = .visualize
 
     init() {
         // The segmentation + mesh models drive the same C++ volume handle the
@@ -62,7 +65,7 @@ struct LumenSliceApp: App {
 
     var body: some Scene {
         WindowGroup {
-            AppShell()
+            AppShell(selectedTab: $selectedTab)
                 .environmentObject(model)
                 .environmentObject(segmentation)
                 .environmentObject(mesh)
@@ -78,5 +81,30 @@ struct LumenSliceApp: App {
         }
         .windowStyle(.titleBar)
         .windowToolbarStyle(.unified)
+        .commands {
+            // System-wide undo/redo, routed by the active tab. On the Markups tab
+            // Cmd-Z drops the last placed markup point (or the last committed markup);
+            // everywhere else it drives the segmentation RLE snapshot stack the
+            // sidebar buttons use, so every mask edit (threshold, grow, paint, erase,
+            // refine, grow-from-seeds, scissor, clear) is reversible from the
+            // keyboard. Menu items gray out when there is nothing to undo/redo. The
+            // App observes its models + selectedTab, so these rebuild as state
+            // changes. (Markups has no redo.)
+            CommandGroup(replacing: .undoRedo) {
+                Button("Undo") {
+                    if selectedTab == .markups { markup.removeLast() }
+                    else { segmentation.undo() }
+                }
+                .keyboardShortcut("z", modifiers: .command)
+                .disabled(selectedTab == .markups
+                          ? !markup.canRemoveLast
+                          : !segmentation.canUndo)
+                Button("Redo") {
+                    if selectedTab != .markups { segmentation.redo() }
+                }
+                .keyboardShortcut("z", modifiers: [.command, .shift])
+                .disabled(selectedTab == .markups || !segmentation.canRedo)
+            }
+        }
     }
 }

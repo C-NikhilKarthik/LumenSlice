@@ -68,4 +68,9 @@ long SmoothEffect::apply(const Volume& /*volume*/, LabelVolume& mask,
     return smooth_label(mask, label, iterations_);
 }
 
+long LevelTraceEffect::apply(const Volume& volume, LabelVolume& mask,
+                             std::uint8_t label) const {
+    return level_trace(volume, axis_, index_, px_, py_, mask, label);
+}
+
 } // namespace lumen

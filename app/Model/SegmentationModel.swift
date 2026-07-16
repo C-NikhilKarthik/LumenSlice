@@ -6,6 +6,7 @@ import LumenCore
 enum SegTool: String, CaseIterable, Identifiable {
     case threshold
     case regionGrow
+    case levelTrace
     case paint
     case erase
 
@@ -14,6 +15,7 @@ enum SegTool: String, CaseIterable, Identifiable {
         switch self {
         case .threshold: return "Threshold"
         case .regionGrow: return "Fill"
+        case .levelTrace: return "Level Trace"
         case .paint: return "Paint"
         case .erase: return "Erase"
         }
@@ -22,12 +24,15 @@ enum SegTool: String, CaseIterable, Identifiable {
         switch self {
         case .threshold: return "slider.horizontal.below.square.filled.and.square"
         case .regionGrow: return "drop.fill"
+        case .levelTrace: return "camera.filters"
         case .paint: return "paintbrush.pointed.fill"
         case .erase: return "eraser.fill"
         }
     }
     // Tools that paint along a drag (vs. a single click / slider).
     var isBrush: Bool { self == .paint || self == .erase }
+    // Tools driven by a single click on a slice (vs. a drag or a slider).
+    var isClickSeed: Bool { self == .regionGrow || self == .levelTrace }
 }
 
 // One row in the segment list. `id` is the C++ label byte (1..255); `name` lives
@@ -147,6 +152,19 @@ final class SegmentationModel: ObservableObject {
                 self.overlayStore.images = [nil, nil, nil]
                 if has {
                     self.reloadSegments()
+                    // Reconcile the threshold window with this scan's HU range so the
+                    // slider and the stored values agree (a previous scan may have left
+                    // an out-of-range window). Guard the live sink so this housekeeping
+                    // never auto-thresholds on load.
+                    let loBound = self.volume.huLo
+                    let hiBound = max(self.volume.huHi, loBound + 1)
+                    let newLo = min(max(self.thresholdLo, loBound), hiBound)
+                    let newHi = min(max(self.thresholdHi, newLo), hiBound)
+                    if newLo != self.thresholdLo || newHi != self.thresholdHi {
+                        self.skipNextThresholdSink = true
+                        self.thresholdLo = newLo
+                        self.thresholdHi = newHi
+                    }
                     if self.isActive { self.refreshAllOverlays() }
                 } else {
                     self.segments = []
@@ -300,6 +318,18 @@ final class SegmentationModel: ObservableObject {
         lumen_seg_push_undo(h)
         thresholdNeedsUndoCapture = true
         let added = lumen_seg_region_grow(h, x, y, z, tolerance)
+        if added > 0 { didMutateMask() } else { refreshUndoState() }
+    }
+
+    // Level trace: one click selects the iso-level (HU >= clicked pixel) region on
+    // the clicked slice. The C++ kernel maps the pixel to a voxel itself, so we pass
+    // slice-pixel coordinates straight through (unlike Fill, which seeds a voxel).
+    func seedLevelTrace(axis: Int, px: Int, py: Int) {
+        guard let h = volume.handle, activeID > 0 else { return }
+        lumen_seg_push_undo(h)
+        thresholdNeedsUndoCapture = true
+        let added = lumen_seg_level_trace(h, Int32(axis), Int32(volume.sliceIndex[axis]),
+                                          Int32(px), Int32(py))
         if added > 0 { didMutateMask() } else { refreshUndoState() }
     }
 

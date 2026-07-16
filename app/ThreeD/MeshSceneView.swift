@@ -18,6 +18,7 @@ struct MeshSceneView: NSViewRepresentable {
     // points, and a marker radius sized to the volume.
     var markups: [MarkupRender] = []
     var pendingPoints: [SCNVector3] = []
+    var pendingColor: NSColor = .white
     var markerRadius: Float = 2
 
     final class Coordinator {
@@ -175,10 +176,12 @@ struct MeshSceneView: NSViewRepresentable {
     private func markupSignature() -> String {
         var s = ""
         for m in markups {
-            s += m.id.uuidString
+            s += "\(m.id.uuidString)#\(m.colorIndex);" // colour so recolours rebuild
             for p in m.points { s += "\(p.x),\(p.y),\(p.z);" }
         }
         s += "|"
+        // Pending colour only matters (and can change) while points are in progress.
+        if !pendingPoints.isEmpty { s += pendingColor.description }
         for p in pendingPoints { s += "\(p.x),\(p.y),\(p.z);" }
         return s
     }
@@ -207,10 +210,11 @@ struct MeshSceneView: NSViewRepresentable {
                 }
             }
         }
-        // In-progress points: dim white spheres so you can see the seed landing.
+        // In-progress points: spheres in the colour the finished markup will take,
+        // slightly translucent so you can see the seed landing.
         for p in pendingPoints {
             nodes.append(Self.sphere(at: p, radius: markerRadius * 0.8,
-                                     color: NSColor.white.withAlphaComponent(0.6)))
+                                     color: pendingColor.withAlphaComponent(0.7)))
         }
         return nodes
     }
@@ -380,6 +384,7 @@ struct MeshCanvas: View {
                               onScissor: performScissor,
                               markups: markup.renders(),
                               pendingPoints: markup.pendingMM(),
+                              pendingColor: markup.pendingColorNS(),
                               markerRadius: markup.markerRadius)
             } else {
                 VStack(spacing: 12) {

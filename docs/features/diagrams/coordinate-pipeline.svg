@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 980 560">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#2b3a4a"/>
+    </marker>
+  </defs>
+
+  <text x="24" y="34" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="18" font-weight="bold" fill="#1b2733">Coordinate pipeline: one fittedRect for both drawing and hit-testing</text>
+  <text x="24" y="56" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">voxel (x,y,z) &lt;-&gt; slice pixel (px,py) via the C++ plane_map &lt;-&gt; pane point via SliceCoordinates.fittedRect</text>
+
+  <!-- Three coordinate space columns -->
+  <rect x="40" y="92" width="200" height="66" rx="8" fill="#e8eef7" stroke="#2b3a4a" stroke-width="1.5"/>
+  <text x="140" y="120" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="14" font-weight="bold" fill="#1b2733">Voxel space</text>
+  <text x="140" y="140" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">focus (x,y,z), markups</text>
+
+  <rect x="390" y="92" width="200" height="66" rx="8" fill="#dfe8dc" stroke="#2b3a4a" stroke-width="1.5"/>
+  <text x="490" y="120" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="14" font-weight="bold" fill="#1b2733">Slice-pixel space</text>
+  <text x="490" y="140" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">(px,py) in the extracted image</text>
+
+  <rect x="740" y="92" width="200" height="66" rx="8" fill="#f3e8d0" stroke="#2b3a4a" stroke-width="1.5"/>
+  <text x="840" y="120" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="14" font-weight="bold" fill="#1b2733">Pane-point space</text>
+  <text x="840" y="140" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">CGPoint in the SlicePane</text>
+
+  <!-- plane_map link -->
+  <line x1="240" y1="125" x2="388" y2="125" stroke="#2b3a4a" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="388" y1="140" x2="242" y2="140" stroke="#2b3a4a" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="314" y="112" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">plane_map (C++)</text>
+  <text x="314" y="168" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">voxel_to_slice_pixel / slice_pixel_to_voxel</text>
+
+  <!-- fittedRect link -->
+  <line x1="590" y1="125" x2="738" y2="125" stroke="#2b3a4a" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="738" y1="140" x2="592" y2="140" stroke="#2b3a4a" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="664" y="168" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">SliceCoordinates.point / .pixel</text>
+
+  <!-- The single fittedRect box, feeding both directions -->
+  <rect x="300" y="230" width="380" height="150" rx="10" fill="#f3e8d0" stroke="#2b3a4a" stroke-width="2"/>
+  <text x="490" y="256" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="15" font-weight="bold" fill="#1b2733">SliceCoordinates.fittedRect</text>
+  <text x="490" y="278" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">the single source of truth</text>
+
+  <rect x="322" y="296" width="150" height="34" rx="6" fill="#e8eef7" stroke="#2b3a4a" stroke-width="1.2"/>
+  <text x="397" y="318" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">1. fit (aspect)</text>
+
+  <rect x="322" y="338" width="150" height="34" rx="6" fill="#e8eef7" stroke="#2b3a4a" stroke-width="1.2"/>
+  <text x="397" y="360" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">3. + pan offset</text>
+
+  <rect x="500" y="296" width="158" height="76" rx="6" fill="#e8eef7" stroke="#2b3a4a" stroke-width="1.2"/>
+  <text x="579" y="326" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">2. zoom about</text>
+  <text x="579" y="344" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">anchor (cursor)</text>
+
+  <!-- fittedRect fed by slice-pixel space -->
+  <line x1="490" y1="158" x2="490" y2="228" stroke="#2b3a4a" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="506" y="200" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">zoom, anchor, pan</text>
+
+  <!-- Draw path -->
+  <rect x="60" y="430" width="330" height="96" rx="10" fill="#dfe8dc" stroke="#2b3a4a" stroke-width="1.5"/>
+  <text x="225" y="456" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="14" font-weight="bold" fill="#1b2733">Draw path (forward)</text>
+  <text x="225" y="478" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">image, mask overlay, crosshair,</text>
+  <text x="225" y="496" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">orientation labels, brush ring, markup dots</text>
+  <text x="225" y="516" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">read rect to place voxels on screen</text>
+
+  <!-- Hit-test path -->
+  <rect x="590" y="430" width="330" height="96" rx="10" fill="#e8eef7" stroke="#2b3a4a" stroke-width="1.5"/>
+  <text x="755" y="456" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="14" font-weight="bold" fill="#1b2733">Hit-test path (inverse)</text>
+  <text x="755" y="478" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">click-to-locate, Shift cross-reference,</text>
+  <text x="755" y="496" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">paint/erase, region-grow, level-trace seed</text>
+  <text x="755" y="516" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">read rect to turn a tap into (px,py)</text>
+
+  <line x1="410" y1="360" x2="240" y2="428" stroke="#2b3a4a" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="570" y1="360" x2="740" y2="428" stroke="#2b3a4a" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <text x="490" y="548" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">Both paths read the same rect, so a zoomed or panned pane still paints and locates the correct voxel.</text>
+</svg>

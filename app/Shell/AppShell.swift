@@ -21,7 +21,8 @@ struct AppShell: View {
     @EnvironmentObject var segmentation: SegmentationModel
     @EnvironmentObject var mesh: MeshModel
     @EnvironmentObject var markup: MarkupModel
-    @State private var selectedTab: WorkspaceTab = .visualize
+    // Owned by the App so the global Undo command can route by active tab.
+    @Binding var selectedTab: WorkspaceTab
     @State private var dropTargeted = false
 
     var body: some View {

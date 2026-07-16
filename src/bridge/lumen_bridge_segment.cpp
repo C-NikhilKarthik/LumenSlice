@@ -107,6 +107,11 @@ long lumen_seg_paint(LumenVolume* v, int axis, int index, int cx, int cy,
                            add != 0);
 }
 
+long lumen_seg_level_trace(LumenVolume* v, int axis, int index, int cx, int cy) {
+    if (v == nullptr) return 0;
+    return v->editor.level_trace(static_cast<lumen::Axis>(axis), index, cx, cy);
+}
+
 void lumen_seg_clear(LumenVolume* v) {
     if (v == nullptr) return;
     v->editor.clear_active();

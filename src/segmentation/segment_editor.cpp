@@ -61,6 +61,10 @@ long SegmentEditor::paint(Axis axis, int slice_index, int cx, int cy, int radius
     return apply(PaintEffect{axis, slice_index, cx, cy, radius, add});
 }
 
+long SegmentEditor::level_trace(Axis axis, int slice_index, int cx, int cy) {
+    return apply(LevelTraceEffect{axis, slice_index, cx, cy});
+}
+
 void SegmentEditor::clear_active() { apply(ClearEffect{}); }
 
 long SegmentEditor::keep_largest() { return apply(KeepLargestEffect{}); }

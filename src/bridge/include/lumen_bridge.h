@@ -106,6 +106,11 @@ long lumen_seg_region_grow(LumenVolume* v, int x, int y, int z, float tol);
 long lumen_seg_paint(LumenVolume* v, int axis, int index, int cx, int cy,
                      int radius, int add);
 
+// Level trace on one slice: from pixel (cx,cy) of `axis`/`index`, add the iso-level
+// (HU >= clicked pixel) 4-connected region to the active segment. Slice-only.
+// Returns the number of voxels newly labelled.
+long lumen_seg_level_trace(LumenVolume* v, int axis, int index, int cx, int cy);
+
 // Clear only the active segment's voxels to background.
 void lumen_seg_clear(LumenVolume* v);
 

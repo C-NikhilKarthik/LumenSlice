@@ -23,9 +23,12 @@ struct SlicePane: View {
 
     // Per-pane zoom: 1 = fit, up to 8x, driven by a right-button drag. `zoomAnchor`
     // is the cursor point where the drag began, so the view magnifies toward what
-    // is under the cursor. Each pane zooms independently (3D-Slicer behavior).
+    // is under the cursor. `pan` slides the zoomed image (middle-button / scroll-
+    // wheel-button drag) and resets to zero when the pane returns to fit. Each pane
+    // transforms independently (3D-Slicer behavior).
     @State private var zoom: CGFloat = 1
     @State private var zoomAnchor: CGPoint = .zero
+    @State private var pan: CGSize = .zero
     private static let maxZoom: CGFloat = 8
 
     var body: some View {
@@ -77,7 +80,8 @@ struct SlicePane: View {
             // The one rect rendering, the crosshair, the brush AND hit-testing all
             // read - zoom flows through it so nothing desyncs when magnified.
             let display = SliceCoordinates.fittedRect(
-                container: container, aspect: aspect, zoom: zoom, anchor: zoomAnchor)
+                container: container, aspect: aspect, zoom: zoom, anchor: zoomAnchor,
+                pan: pan)
             ZStack {
                 RoundedRectangle(cornerRadius: 10)
                     .fill(.black)
@@ -115,7 +119,19 @@ struct SlicePane: View {
                 onZoomBegin: { zoomAnchor = $0 },
                 onZoom: { applyZoom($0) },
                 onShiftLocate: { locate(at: $0, container: container) },
-                onShiftChange: { model.setShiftActive($0) }))
+                onShiftChange: { model.setShiftActive($0) },
+                onPan: { d in
+                    // Clamp so the zoomed image can't be dragged entirely out of the
+                    // pane: the offset is bounded to half the zoomed image size, so
+                    // at least its centre stays reachable. No pan at fit (zoom == 1).
+                    guard zoom > 1,
+                          let base = SliceCoordinates.fittedRect(
+                            container: container, aspect: aspect) else { return }
+                    let maxX = base.width * zoom / 2
+                    let maxY = base.height * zoom / 2
+                    pan.width = min(maxX, max(-maxX, pan.width + d.width))
+                    pan.height = min(maxY, max(-maxY, pan.height + d.height))
+                }))
             .overlay(alignment: .bottomLeading) {
                 Text("W \(Int(model.window))  L \(Int(model.level))")
                     .font(.caption2.monospacedDigit())
@@ -149,7 +165,7 @@ struct SlicePane: View {
     @ViewBuilder private func markupDots(container: CGSize, aspect: CGFloat) -> some View {
         ForEach(markup.markups) { m in
             ForEach(Array(m.voxels.enumerated()), id: \.offset) { _, v in
-                if markup.onCurrentSlice(v, axis: axis),
+                if m.visible, markup.onCurrentSlice(v, axis: axis),
                    let pt = markupPoint(voxel: v, container: container, aspect: aspect) {
                     Circle()
                         .fill(markup.color(m))
@@ -163,9 +179,12 @@ struct SlicePane: View {
         ForEach(Array(markup.pending.enumerated()), id: \.offset) { _, v in
             if markup.onCurrentSlice(v, axis: axis),
                let pt = markupPoint(voxel: v, container: container, aspect: aspect) {
+                // The in-progress point, filled in the colour the finished markup will
+                // take (with a white ring for contrast on any tissue).
                 Circle()
-                    .strokeBorder(.white, lineWidth: 1.5)
+                    .fill(markup.pendingColor)
                     .frame(width: 10, height: 10)
+                    .overlay(Circle().strokeBorder(.white, lineWidth: 1.5))
                     .position(pt)
                     .allowsHitTesting(false)
             }
@@ -178,7 +197,8 @@ struct SlicePane: View {
               let c = model.slicePixel(onAxis: axis, voxel: v) else { return nil }
         return SliceCoordinates.point(forPixel: c.px, c.py, container: container,
                                       imageWidth: img.width, imageHeight: img.height,
-                                      aspect: aspect, zoom: zoom, anchor: zoomAnchor)
+                                      aspect: aspect, zoom: zoom, anchor: zoomAnchor,
+                                      pan: pan)
     }
 
     fileprivate func placeMarkup(at point: CGPoint, container: CGSize) {
@@ -192,7 +212,8 @@ struct SlicePane: View {
               let c = model.crosshairPixel(onAxis: axis) else { return nil }
         return SliceCoordinates.point(forPixel: c.px, c.py, container: container,
                                       imageWidth: img.width, imageHeight: img.height,
-                                      aspect: aspect, zoom: zoom, anchor: zoomAnchor)
+                                      aspect: aspect, zoom: zoom, anchor: zoomAnchor,
+                                      pan: pan)
     }
 
     // Right-drag vertical delta (window coords, up positive) -> magnification. The
@@ -202,6 +223,7 @@ struct SlicePane: View {
     private func applyZoom(_ dy: CGFloat) {
         let factor = CGFloat(exp(Double(dy) * 0.01))
         zoom = min(Self.maxZoom, max(1, zoom * factor))
+        if zoom == 1 { pan = .zero } // back to fit: recenter, no stale offset
     }
 
     // MARK: - Interaction helpers (called from SliceInteraction)
@@ -211,7 +233,8 @@ struct SlicePane: View {
         return SliceCoordinates.pixel(
             forTap: point, container: container,
             imageWidth: img.width, imageHeight: img.height,
-            aspect: model.physicalAspect(axis), zoom: zoom, anchor: zoomAnchor)
+            aspect: model.physicalAspect(axis), zoom: zoom, anchor: zoomAnchor,
+            pan: pan)
     }
 
     fileprivate func locate(at point: CGPoint, container: CGSize) {
@@ -239,6 +262,10 @@ struct SlicePane: View {
         } else if seg.tool == .regionGrow {
             if let (px, py) = pixel(at: point, container: container) {
                 seg.seedRegionGrow(axis: axis, px: px, py: py)
+            }
+        } else if seg.tool == .levelTrace {
+            if let (px, py) = pixel(at: point, container: container) {
+                seg.seedLevelTrace(axis: axis, px: px, py: py)
             }
         }
     }

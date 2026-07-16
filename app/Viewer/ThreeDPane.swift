@@ -96,6 +96,7 @@ struct ThreeDPane: View {
                               onScissor: performScissor,
                               markups: markup.renders(),
                               pendingPoints: markup.pendingMM(),
+                              pendingColor: markup.pendingColorNS(),
                               markerRadius: markup.markerRadius)
                     .clipShape(RoundedRectangle(cornerRadius: 10))
                     .overlay(alignment: .top) {

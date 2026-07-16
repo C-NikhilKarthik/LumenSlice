@@ -7,13 +7,15 @@ import AppKit
 //   - live pointer position           -> the paint brush cursor (onMove)
 //   - right-button drag               -> zoom (onZoomBegin sets the anchor,
 //                                         onZoom feeds vertical drag deltas)
+//   - middle-button (scroll-wheel) drag -> pan (onPan feeds view-coord drag deltas)
 //   - Shift held + hover              -> cross-reference (onShiftLocate recenters,
 //                                         onShiftChange toggles the crosshair)
 // SwiftUI has no scroll-wheel or right-drag gesture and its hover tracking is
 // unreliable under an overlapping NSView, so this wraps an NSView with local event
 // monitors. The view is transparent to clicks (hitTest returns nil), so
 // tap-to-locate, window/level drag, and paint drags still reach SwiftUI underneath;
-// only the right-drag (zoom) is consumed, which also suppresses the context menu.
+// only the right-drag (zoom) and middle-drag (pan) are consumed. The right-drag also
+// suppresses the context menu.
 struct CanvasInputCatcher: NSViewRepresentable {
     let onStep: (Int) -> Void              // signed number of slices to move
     var onMove: ((CGPoint?) -> Void)?      // pointer in view coords, nil when outside
@@ -21,6 +23,7 @@ struct CanvasInputCatcher: NSViewRepresentable {
     var onZoom: ((CGFloat) -> Void)?       // right-drag dy: up (+) = zoom in
     var onShiftLocate: ((CGPoint) -> Void)? // Shift+move point over the pane
     var onShiftChange: ((Bool) -> Void)?   // Shift key pressed/released
+    var onPan: ((CGSize) -> Void)?         // middle-button drag delta (view coords)
 
     func makeNSView(context: Context) -> CanvasInputNSView {
         let view = CanvasInputNSView()
@@ -39,6 +42,7 @@ struct CanvasInputCatcher: NSViewRepresentable {
         view.onZoom = onZoom
         view.onShiftLocate = onShiftLocate
         view.onShiftChange = onShiftChange
+        view.onPan = onPan
     }
 
     static func dismantleNSView(_ view: CanvasInputNSView, coordinator: ()) {
@@ -53,16 +57,21 @@ final class CanvasInputNSView: NSView {
     var onZoom: ((CGFloat) -> Void)?
     var onShiftLocate: ((CGPoint) -> Void)?
     var onShiftChange: ((Bool) -> Void)?
+    var onPan: ((CGSize) -> Void)?
     private var scrollMonitor: Any?
     private var moveMonitor: Any?
     private var zoomMonitor: Any?
     private var flagsMonitor: Any?
+    private var panMonitor: Any?
     private var accumulated: CGFloat = 0
     private let threshold: CGFloat = 8
     // A right-drag that began inside this pane keeps zooming even if the cursor
     // wanders out, so the gesture doesn't break at the pane edge.
     private var isZooming = false
     private var lastZoomY: CGFloat = 0
+    // A middle-drag that began inside this pane keeps panning past the edge too.
+    private var isPanning = false
+    private var lastPanPoint: CGPoint = .zero
 
     // Flip so our coordinate origin is top-left, matching SwiftUI's overlay space:
     // a point reported here lines up with where the brush ring is drawn.
@@ -116,6 +125,14 @@ final class CanvasInputNSView: NSView {
                 return event
             }
         }
+        if panMonitor == nil {
+            panMonitor = NSEvent.addLocalMonitorForEvents(
+                matching: [.otherMouseDown, .otherMouseDragged, .otherMouseUp]) {
+                [weak self] event in
+                guard let self, let w = self.window, event.window == w else { return event }
+                return self.handleMiddleMouse(event)
+            }
+        }
     }
 
     // Right-drag = zoom. Down inside the pane sets the anchor and starts the
@@ -145,6 +162,32 @@ final class CanvasInputNSView: NSView {
         }
     }
 
+    // Middle-drag = pan. Down inside the pane starts the gesture; each drag reports
+    // the view-coord delta (this view is flipped, so the delta is already in the
+    // top-left overlay space the image is drawn in). Consumed so it never reaches
+    // SwiftUI as a stray click.
+    private func handleMiddleMouse(_ event: NSEvent) -> NSEvent? {
+        let p = convert(event.locationInWindow, from: nil)
+        switch event.type {
+        case .otherMouseDown:
+            guard bounds.contains(p) else { return event }
+            isPanning = true
+            lastPanPoint = p
+            return nil
+        case .otherMouseDragged:
+            guard isPanning else { return event }
+            onPan?(CGSize(width: p.x - lastPanPoint.x, height: p.y - lastPanPoint.y))
+            lastPanPoint = p
+            return nil
+        case .otherMouseUp:
+            guard isPanning else { return event }
+            isPanning = false
+            return nil
+        default:
+            return event
+        }
+    }
+
     private func handleScroll(_ event: NSEvent) {
         // Precise (trackpad) deltas are small + continuous; line (mouse wheel)
         // deltas are coarse. Scale lines up so one notch ~= one slice.
@@ -161,10 +204,12 @@ final class CanvasInputNSView: NSView {
         if let moveMonitor { NSEvent.removeMonitor(moveMonitor) }
         if let zoomMonitor { NSEvent.removeMonitor(zoomMonitor) }
         if let flagsMonitor { NSEvent.removeMonitor(flagsMonitor) }
+        if let panMonitor { NSEvent.removeMonitor(panMonitor) }
         scrollMonitor = nil
         moveMonitor = nil
         zoomMonitor = nil
         flagsMonitor = nil
+        panMonitor = nil
     }
 
     deinit { teardown() }

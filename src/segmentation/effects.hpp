@@ -145,4 +145,18 @@ private:
     int iterations_;
 };
 
+// Level trace: on one slice, flood the iso-level (>= clicked HU) region into the
+// active label. A slice-only "select a whole bright structure with one click" tool.
+class LevelTraceEffect final : public SegmentationEffect {
+public:
+    LevelTraceEffect(Axis axis, int slice_index, int px, int py)
+        : axis_(axis), index_(slice_index), px_(px), py_(py) {}
+    [[nodiscard]] long apply(const Volume& volume, LabelVolume& mask,
+                             std::uint8_t label) const override;
+
+private:
+    Axis axis_;
+    int index_, px_, py_;
+};
+
 } // namespace lumen

@@ -1,0 +1,87 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 980 560">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#2b3a4a"/>
+    </marker>
+  </defs>
+
+  <text x="24" y="34" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="18" font-weight="bold" fill="#1b2733">Mesh pipeline: one segment label to a colored SceneKit node and a binary STL file</text>
+
+  <!-- Row 1: per-segment surfacing chain -->
+
+  <!-- LabelVolume -->
+  <rect x="24" y="70" width="180" height="96" rx="8" fill="#e8eef7" stroke="#2b3a4a" stroke-width="1.5"/>
+  <text x="114" y="98" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="14" font-weight="bold" fill="#1b2733">LabelVolume mask</text>
+  <text x="114" y="120" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">one byte per voxel,</text>
+  <text x="114" y="138" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">segment id per voxel</text>
+  <text x="114" y="156" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">(whole scan)</text>
+
+  <!-- Snapshot crop -->
+  <rect x="256" y="70" width="196" height="96" rx="8" fill="#dfe8dc" stroke="#2b3a4a" stroke-width="1.5"/>
+  <text x="354" y="94" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="14" font-weight="bold" fill="#1b2733">Snapshot (bbox crop)</text>
+  <text x="354" y="115" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">keep id == label, to 0/1,</text>
+  <text x="354" y="133" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">cropped to labelled box</text>
+  <text x="354" y="151" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">+ 1-voxel zero margin</text>
+
+  <!-- Marching cubes -->
+  <rect x="504" y="70" width="196" height="96" rx="8" fill="#f3e8d0" stroke="#2b3a4a" stroke-width="1.5"/>
+  <text x="602" y="94" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="14" font-weight="bold" fill="#1b2733">Marching cubes</text>
+  <text x="602" y="115" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">iso 0.5 on the field,</text>
+  <text x="602" y="133" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">smoothing + downsample,</text>
+  <text x="602" y="151" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">welded, mm vertices</text>
+
+  <!-- Triangle mesh -->
+  <rect x="752" y="70" width="204" height="96" rx="8" fill="#e8eef7" stroke="#2b3a4a" stroke-width="1.5"/>
+  <text x="854" y="94" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="14" font-weight="bold" fill="#1b2733">Triangle mesh (Mesh)</text>
+  <text x="854" y="115" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">vertices, normals,</text>
+  <text x="854" y="133" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">indices; vertices shifted</text>
+  <text x="854" y="151" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">back by crop origin</text>
+
+  <!-- Row 1 arrows -->
+  <line x1="204" y1="118" x2="252" y2="118" stroke="#2b3a4a" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="452" y1="118" x2="500" y2="118" stroke="#2b3a4a" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="700" y1="118" x2="748" y2="118" stroke="#2b3a4a" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- stage labels above arrows -->
+  <text x="228" y="60" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">snapshot</text>
+  <text x="476" y="60" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">generate</text>
+
+  <!-- bridge note -->
+  <text x="354" y="196" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">main thread</text>
+  <text x="602" y="196" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">background thread</text>
+
+  <!-- Two consumers of the mesh -->
+
+  <!-- SceneKit node -->
+  <rect x="600" y="280" width="356" height="120" rx="8" fill="#dfe8dc" stroke="#2b3a4a" stroke-width="1.5"/>
+  <text x="778" y="308" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="14" font-weight="bold" fill="#1b2733">SceneKit node (per segment)</text>
+  <text x="778" y="332" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">MeshBuilder copies buffers into an SCNGeometry,</text>
+  <text x="778" y="352" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">tinted with the segment colour, physically-based</text>
+  <text x="778" y="372" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">material. Shown in the 3D tab and the quad pane.</text>
+  <text x="778" y="392" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">One node per visible segment.</text>
+
+  <!-- Binary STL -->
+  <rect x="600" y="428" width="356" height="104" rx="8" fill="#f3e8d0" stroke="#2b3a4a" stroke-width="1.5"/>
+  <text x="778" y="456" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="14" font-weight="bold" fill="#1b2733">Binary STL file</text>
+  <text x="778" y="480" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">write_binary_stl: 80-byte header, uint32 count,</text>
+  <text x="778" y="500" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">then per-triangle facet normal + 3 vertices (mm).</text>
+  <text x="778" y="520" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">Export re-marches the union of every segment.</text>
+
+  <!-- arrows from Triangle mesh down to the two consumers -->
+  <path d="M854,166 L854,240 L778,240 L778,276" fill="none" stroke="#2b3a4a" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <path d="M854,166 L854,414 L900,414 L900,424" fill="none" stroke="#2b3a4a" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="690" y="234" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">on screen</text>
+  <text x="924" y="410" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">on export</text>
+
+  <!-- loop note: sequential per segment -->
+  <rect x="24" y="300" width="440" height="140" rx="8" fill="#e8eef7" stroke="#2b3a4a" stroke-width="1.5"/>
+  <text x="244" y="328" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="14" font-weight="bold" fill="#1b2733">MeshModel.generate loop</text>
+  <text x="244" y="352" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">For each visible, non-empty segment, in order:</text>
+  <text x="244" y="374" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">snapshot (main) then march (background) then</text>
+  <text x="244" y="394" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">read the buffers into a coloured node (main).</text>
+  <text x="244" y="416" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">Sequential: all segments share one C++ buffer.</text>
+
+  <line x1="464" y1="118" x2="464" y2="118" stroke="#2b3a4a" stroke-width="0"/>
+  <path d="M244,300 L244,210 L602,210 L602,168" fill="none" stroke="#2b3a4a" stroke-width="1.2" stroke-dasharray="5 4"/>
+  <text x="424" y="252" text-anchor="middle" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13" fill="#1b2733">drives</text>
+</svg>

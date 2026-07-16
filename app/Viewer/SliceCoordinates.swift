@@ -24,7 +24,8 @@ enum SliceCoordinates {
     // Returns nil if the box is empty.
     static func fittedRect(container: CGSize, aspect: CGFloat,
                            padding: CGFloat = 8,
-                           zoom: CGFloat = 1, anchor: CGPoint = .zero) -> CGRect? {
+                           zoom: CGFloat = 1, anchor: CGPoint = .zero,
+                           pan: CGSize = .zero) -> CGRect? {
         guard aspect > 0 else { return nil }
         let availW = container.width - 2 * padding
         let availH = container.height - 2 * padding
@@ -41,7 +42,10 @@ enum SliceCoordinates {
         let base = CGRect(x: padding + (availW - fittedW) / 2,
                           y: padding + (availH - fittedH) / 2,
                           width: fittedW, height: fittedH)
-        return zoom == 1 ? base : zoomed(base, scale: zoom, anchor: anchor)
+        let scaled = zoom == 1 ? base : zoomed(base, scale: zoom, anchor: anchor)
+        // `pan` slides the (zoomed) image so an off-centre detail can be brought into
+        // view; it is zero at fit. Applied last, after zoom, so it is a pure offset.
+        return pan == .zero ? scaled : scaled.offsetBy(dx: pan.width, dy: pan.height)
     }
 
     // Scale `base` by `scale` about `anchor`: the anchor point maps to itself, so
@@ -59,11 +63,12 @@ enum SliceCoordinates {
                       imageHeight: Int,
                       aspect: CGFloat,
                       padding: CGFloat = 8,
-                      zoom: CGFloat = 1, anchor: CGPoint = .zero) -> (x: Int, y: Int)? {
+                      zoom: CGFloat = 1, anchor: CGPoint = .zero,
+                      pan: CGSize = .zero) -> (x: Int, y: Int)? {
         guard imageWidth > 0, imageHeight > 0,
               let rect = fittedRect(container: container, aspect: aspect,
                                     padding: padding, zoom: zoom,
-                                    anchor: anchor) else { return nil }
+                                    anchor: anchor, pan: pan) else { return nil }
         let u = (tap.x - rect.minX) / rect.width
         let v = (tap.y - rect.minY) / rect.height
         guard u >= 0, u <= 1, v >= 0, v <= 1 else { return nil }
@@ -80,11 +85,12 @@ enum SliceCoordinates {
                       imageHeight: Int,
                       aspect: CGFloat,
                       padding: CGFloat = 8,
-                      zoom: CGFloat = 1, anchor: CGPoint = .zero) -> CGPoint? {
+                      zoom: CGFloat = 1, anchor: CGPoint = .zero,
+                      pan: CGSize = .zero) -> CGPoint? {
         guard imageWidth > 0, imageHeight > 0,
               let rect = fittedRect(container: container, aspect: aspect,
                                     padding: padding, zoom: zoom,
-                                    anchor: anchor) else { return nil }
+                                    anchor: anchor, pan: pan) else { return nil }
         let u = (CGFloat(px) + 0.5) / CGFloat(imageWidth)
         let v = (CGFloat(py) + 0.5) / CGFloat(imageHeight)
         return CGPoint(x: rect.minX + u * rect.width,

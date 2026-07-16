@@ -19,6 +19,7 @@ struct MarkupControls: View {
             } else {
                 infoSection
                 typeSection
+                colorSection
                 placeSection
                 listSection
             }
@@ -45,6 +46,17 @@ struct MarkupControls: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
+        }
+    }
+
+    private var colorSection: some View {
+        Section("Colour") {
+            MarkupPalette(selected: markup.nextColorIndex) { markup.pickNextColor($0) }
+            Text("New markups use this colour (the points you drop show it live) and "
+                 + "keep using it until you pick another. Recolour an existing markup "
+                 + "from the list below.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -95,20 +107,44 @@ struct MarkupControls: View {
     }
 }
 
-// One markup row: coloured kind icon, editable name, kind label, delete. Name edits
-// commit on Return / focus loss (mirrors the segment list's behaviour).
+// One markup row: a visibility toggle, a colour swatch (tap to recolour), an
+// editable name, the kind, and delete. Name edits commit on Return / focus loss
+// (mirrors the segment list's behaviour).
 private struct MarkupRow: View {
     let m: MarkupModel.Markup
     let markup: MarkupModel
 
     @State private var editingName = ""
+    @State private var pickingColor = false
     @FocusState private var focused: Bool
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: m.kind.icon)
-                .foregroundStyle(markup.color(m))
-                .frame(width: 16)
+            Button {
+                markup.setVisible(m.id, !m.visible)
+            } label: {
+                Image(systemName: m.visible ? "eye" : "eye.slash")
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.borderless)
+            .help(m.visible ? "Hide" : "Show")
+
+            Button {
+                pickingColor = true
+            } label: {
+                Image(systemName: m.kind.icon)
+                    .foregroundStyle(markup.color(m))
+                    .frame(width: 16)
+            }
+            .buttonStyle(.borderless)
+            .popover(isPresented: $pickingColor, arrowEdge: .bottom) {
+                MarkupPalette(selected: m.colorIndex) {
+                    markup.setColorIndex(m.id, $0)
+                    pickingColor = false
+                }
+                .padding(12)
+            }
+
             TextField("Name", text: $editingName)
                 .textFieldStyle(.plain)
                 .focused($focused)
@@ -126,11 +162,32 @@ private struct MarkupRow: View {
             .buttonStyle(.borderless)
         }
         .padding(.vertical, 2)
+        .opacity(m.visible ? 1 : 0.5)
         .onAppear { editingName = m.name }
         .onChange(of: m.name) { n in if !focused { editingName = n } }
     }
 
     @MainActor private func commit() {
         if editingName != m.name { markup.rename(m.id, to: editingName) }
+    }
+}
+
+// A row of the eight markup palette swatches; taps report the chosen index. Used
+// both for the next-markup colour and to recolour an existing markup in a popover.
+private struct MarkupPalette: View {
+    let selected: Int
+    let onPick: (Int) -> Void
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ForEach(Array(MarkupModel.palette.enumerated()), id: \.offset) { i, color in
+                Circle()
+                    .fill(color)
+                    .frame(width: 18, height: 18)
+                    .overlay(Circle().strokeBorder(.primary.opacity(0.15), lineWidth: 1))
+                    .overlay(Circle().strokeBorder(.white, lineWidth: selected == i ? 2 : 0))
+                    .onTapGesture { onPick(i) }
+            }
+        }
     }
 }

@@ -108,4 +108,58 @@ long paint_disk(const Volume& vol, Axis axis, int index, int cx, int cy,
     return changed;
 }
 
+long level_trace(const Volume& vol, Axis axis, int index, int cx, int cy,
+                 LabelVolume& mask, std::uint8_t label) {
+    if (!vol.valid() || !mask.valid() || label == 0) return 0;
+
+    const SliceDims dims = slice_dims(vol, axis);
+    if (cx < 0 || cy < 0 || cx >= dims.width || cy >= dims.height) return 0;
+
+    const VoxelCoord seed = plane_to_voxel(vol, axis, index, cx, cy);
+    if (!mask.in_bounds(seed.x, seed.y, seed.z)) return 0;
+    const std::uint8_t seed_owner = mask.at(seed.x, seed.y, seed.z);
+    if (seed_owner != 0 && seed_owner != label) return 0; // owned by another segment
+    const float level = vol.voxel_buffer[vol.index(seed.x, seed.y, seed.z)];
+
+    // A 2D visited grid over the slice bounds the flood at slice area; each pixel
+    // maps through plane_map so the coronal/sagittal flip is honoured.
+    std::vector<std::uint8_t> visited(
+        static_cast<std::size_t>(dims.width) * static_cast<std::size_t>(dims.height),
+        0);
+    const auto vidx = [&](int px, int py) {
+        return static_cast<std::size_t>(py) * static_cast<std::size_t>(dims.width) +
+               static_cast<std::size_t>(px);
+    };
+
+    std::vector<std::array<int, 2>> stack;
+    long changed = 0;
+    const auto try_push = [&](int px, int py) {
+        if (px < 0 || py < 0 || px >= dims.width || py >= dims.height) return;
+        if (visited[vidx(px, py)]) return;
+        visited[vidx(px, py)] = 1;
+        const VoxelCoord c = plane_to_voxel(vol, axis, index, px, py);
+        if (!mask.in_bounds(c.x, c.y, c.z)) return;
+        if (vol.voxel_buffer[vol.index(c.x, c.y, c.z)] < level) return; // below level
+        const std::uint8_t cur = mask.at(c.x, c.y, c.z);
+        if (cur != 0 && cur != label) return; // barrier: another segment's voxel
+        stack.push_back({px, py});
+    };
+
+    try_push(cx, cy);
+    constexpr std::array<std::array<int, 2>, 4> d4 = {{
+        {{1, 0}}, {{-1, 0}}, {{0, 1}}, {{0, -1}},
+    }};
+    while (!stack.empty()) {
+        const std::array<int, 2> p = stack.back();
+        stack.pop_back();
+        const VoxelCoord c = plane_to_voxel(vol, axis, index, p[0], p[1]);
+        if (mask.at(c.x, c.y, c.z) != label) {
+            mask.set(c.x, c.y, c.z, label);
+            ++changed;
+        }
+        for (const auto& d : d4) try_push(p[0] + d[0], p[1] + d[1]);
+    }
+    return changed;
+}
+
 } // namespace lumen
