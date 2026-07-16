@@ -152,6 +152,19 @@ final class SegmentationModel: ObservableObject {
                 self.overlayStore.images = [nil, nil, nil]
                 if has {
                     self.reloadSegments()
+                    // Reconcile the threshold window with this scan's HU range so the
+                    // slider and the stored values agree (a previous scan may have left
+                    // an out-of-range window). Guard the live sink so this housekeeping
+                    // never auto-thresholds on load.
+                    let loBound = self.volume.huLo
+                    let hiBound = max(self.volume.huHi, loBound + 1)
+                    let newLo = min(max(self.thresholdLo, loBound), hiBound)
+                    let newHi = min(max(self.thresholdHi, newLo), hiBound)
+                    if newLo != self.thresholdLo || newHi != self.thresholdHi {
+                        self.skipNextThresholdSink = true
+                        self.thresholdLo = newLo
+                        self.thresholdHi = newHi
+                    }
                     if self.isActive { self.refreshAllOverlays() }
                 } else {
                     self.segments = []
