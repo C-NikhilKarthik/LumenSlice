@@ -193,6 +193,11 @@ void lumen_mesh_snapshot(LumenVolume* v);
 // per-segment surface. Main-thread only.
 void lumen_mesh_snapshot_label(LumenVolume* v, int id);
 
+// Snapshot the union of the segments in `ids` (length `count`), for exporting a
+// chosen subset of segments as one fused surface. `ids` are label bytes in 1..255
+// (the segment id space); values outside that range are ignored. Main-thread only.
+void lumen_mesh_snapshot_labels(LumenVolume* v, const int* ids, int count);
+
 // March the snapshotted mask into a surface. `smooth_iters` >= 0 softens voxel
 // steps; `downsample` >= 1 coarsens the grid to cap triangles. Returns the
 // triangle count. Safe to run on a background thread (touches only the snapshot

@@ -99,6 +99,19 @@ void lumen_mesh_snapshot_label(LumenVolume* v, int id) {
     crop_snapshot(v, [label](std::uint8_t x) { return x == label; });
 }
 
+void lumen_mesh_snapshot_labels(LumenVolume* v, const int* ids, int count) {
+    if (v == nullptr || !v->editor.mask().valid() || ids == nullptr || count <= 0)
+        return;
+    bool keep[256] = {false};
+    for (int i = 0; i < count; ++i) {
+        const int id = ids[i];
+        if (id > 0 && id < 256) keep[id] = true;
+    }
+    // Fuse the selected segments into one snapshot (their union), so the export is a
+    // single surface over exactly the chosen segments.
+    crop_snapshot(v, [&keep](std::uint8_t x) { return x != 0 && keep[x]; });
+}
+
 int lumen_mesh_generate(LumenVolume* v, int smooth_iters, int downsample) {
     if (v == nullptr || v->mesh_snapshot.empty()) return 0;
     const int tris = lumen::marching_cubes(
