@@ -1,5 +1,4 @@
 import SwiftUI
-import SceneKit
 
 // The 3D surface pane that lives in the top-right of the slice workspace quad,
 // alongside the three orthographic planes. It wraps the same SceneKit viewport the
@@ -77,31 +76,15 @@ struct ThreeDPane: View {
         return mesh.triangleCount > 0 ? "Update 3D" : "Generate 3D"
     }
 
-    // Cut the mask by the finished lasso, then rebuild the surface so the cut shows.
-    private func performScissor(mvp: [Float], vpW: Int, vpH: Int, polygon: [Float]) {
-        if seg.scissorCut(mvp: mvp, viewportWidth: vpW, viewportHeight: vpH,
-                          polygon: polygon) {
-            mesh.generate()
-        }
-    }
-
     private var sceneArea: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 10)
                 .fill(.black)
             if !mesh.geometries.isEmpty || !markup.markups.isEmpty
                 || !markup.pending.isEmpty {
-                MeshSceneView(geometries: mesh.geometries,
-                              scissorActive: mesh.scissorActive,
-                              onScissor: performScissor,
-                              markups: markup.renders(),
-                              pendingPoints: markup.pendingMM(),
-                              pendingColor: markup.pendingColorNS(),
-                              markerRadius: markup.markerRadius)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                    .overlay(alignment: .top) {
-                        if mesh.scissorActive { ScissorBanner() }
-                    }
+                // Shared viewport (surface + control bar); the export button is hidden
+                // here since STL export lives on the Export tab.
+                Mesh3DViewport(cornerRadius: 10, toolbarScale: 0.9)
             } else {
                 VStack(spacing: 10) {
                     Image(systemName: "cube.transparent")

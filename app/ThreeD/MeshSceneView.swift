@@ -20,6 +20,8 @@ struct MeshSceneView: NSViewRepresentable {
     var pendingPoints: [SCNVector3] = []
     var pendingColor: NSColor = .white
     var markerRadius: Float = 2
+    // Optional camera controller for the toolbar (reset / zoom / views / snapshot).
+    var controller: Scene3DController? = nil
 
     final class Coordinator {
         // Identity of the geometry set we last built nodes for, so orbit/zoom (which
@@ -27,6 +29,11 @@ struct MeshSceneView: NSViewRepresentable {
         var rendered: [ObjectIdentifier] = []
         // Signature of the markups we last built, so orbit doesn't rebuild them.
         var markupSig = ""
+        // Whether we've framed the camera to the surface. We frame ONCE, on the first
+        // non-empty build, and never again on regenerate (a scissor cut / smoothing
+        // change rebuilds the geometry but must NOT yank the camera the user posed).
+        // The toolbar "Reset view" re-frames on demand. Reset when the surface clears.
+        var hasFramed = false
         // Whether we've framed the camera to markups (only matters when there is no
         // mesh to frame to). Reset when markups go empty.
         var framedMarkups = false
@@ -111,6 +118,7 @@ struct MeshSceneView: NSViewRepresentable {
         }
         view.addSubview(overlay)
         context.coordinator.overlay = overlay
+        controller?.attach(view)
         return view
     }
 
@@ -128,7 +136,9 @@ struct MeshSceneView: NSViewRepresentable {
             root.childNodes
                 .filter { $0.name == "mesh" || $0.name == "gnomon" }
                 .forEach { $0.removeFromParentNode() }
-            if !geometries.isEmpty {
+            if geometries.isEmpty {
+                coord.hasFramed = false // next non-empty build frames again
+            } else {
                 let meshNodes = geometries.map { geo -> SCNNode in
                     let node = SCNNode(geometry: geo)
                     node.name = "mesh"
@@ -142,8 +152,17 @@ struct MeshSceneView: NSViewRepresentable {
                 let gnomon = Self.makeGnomon(length: CGFloat(max(extent, 1)) * 0.18)
                 gnomon.position = minB
                 root.addChildNode(gnomon)
-                DispatchQueue.main.async {
-                    view.defaultCameraController.frameNodes(meshNodes)
+                // Frame the camera AND re-centre the orbit pivot on the model ONLY on
+                // the first build (not on every regenerate), so orbiting spins the
+                // anatomy in place and a later scissor cut doesn't snap the view back.
+                if !coord.hasFramed {
+                    coord.hasFramed = true
+                    let centre = SCNVector3((minB.x + maxB.x) / 2, (minB.y + maxB.y) / 2,
+                                            (minB.z + maxB.z) / 2)
+                    DispatchQueue.main.async {
+                        view.defaultCameraController.frameNodes(meshNodes)
+                        view.defaultCameraController.target = centre
+                    }
                 }
             }
         }
@@ -364,83 +383,5 @@ final class LassoOverlayView: NSView {
         NSColor.systemYellow.setStroke()
         path.lineWidth = 1.5
         path.stroke()
-    }
-}
-
-// The central canvas for the 3D and Export tabs: the mesh viewport, or an empty /
-// generating placeholder.
-struct MeshCanvas: View {
-    @EnvironmentObject var mesh: MeshModel
-    @EnvironmentObject var seg: SegmentationModel
-    @EnvironmentObject var markup: MarkupModel
-
-    var body: some View {
-        ZStack {
-            Color.black
-            if !mesh.geometries.isEmpty || !markup.markups.isEmpty
-                || !markup.pending.isEmpty {
-                MeshSceneView(geometries: mesh.geometries,
-                              scissorActive: mesh.scissorActive,
-                              onScissor: performScissor,
-                              markups: markup.renders(),
-                              pendingPoints: markup.pendingMM(),
-                              pendingColor: markup.pendingColorNS(),
-                              markerRadius: markup.markerRadius)
-            } else {
-                VStack(spacing: 12) {
-                    Image(systemName: "cube.transparent")
-                        .font(.system(size: 52, weight: .thin))
-                        .foregroundStyle(.secondary)
-                    Text(mesh.isGenerating ? "Generating surface…" : "No 3D surface yet")
-                        .font(.title3.weight(.medium))
-                    if !mesh.isGenerating {
-                        Text("Segment a structure, then press Generate in the 3D tab.")
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-            if mesh.isGenerating {
-                ProgressView()
-                    .controlSize(.large)
-                    .padding(.top, 120)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .overlay(alignment: .top) {
-            if mesh.scissorActive {
-                ScissorBanner()
-            }
-        }
-        .overlay(alignment: .bottomTrailing) {
-            if mesh.triangleCount > 0 {
-                Text("\(mesh.triangleCount.formatted()) tris")
-                    .font(.caption2.monospacedDigit())
-                    .padding(.horizontal, 7).padding(.vertical, 3)
-                    .background(.black.opacity(0.5), in: Capsule())
-                    .foregroundStyle(.white.opacity(0.9))
-                    .padding(12)
-            }
-        }
-    }
-
-    // Cut the mask by the finished lasso, then rebuild the surface so the cut shows.
-    private func performScissor(mvp: [Float], vpW: Int, vpH: Int, polygon: [Float]) {
-        if seg.scissorCut(mvp: mvp, viewportWidth: vpW, viewportHeight: vpH,
-                          polygon: polygon) {
-            mesh.generate()
-        }
-    }
-}
-
-// The hint shown while scissor mode is on, so it's obvious the drag now cuts.
-struct ScissorBanner: View {
-    var body: some View {
-        Label("Scissor: draw a loop over the surface to erase inside it",
-              systemImage: "scissors")
-            .font(.caption)
-            .padding(.horizontal, 10).padding(.vertical, 5)
-            .background(.yellow.opacity(0.85), in: Capsule())
-            .foregroundStyle(.black)
-            .padding(10)
     }
 }

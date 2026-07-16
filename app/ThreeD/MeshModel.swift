@@ -116,14 +116,59 @@ final class MeshModel: ObservableObject {
         vertexCount = built.reduce(0) { $0 + $1.vertices }
     }
 
-    // Export the union of all segments as one binary STL (regenerates the combined
-    // surface into the buffer; the on-screen per-segment geometries are unaffected).
-    // Refuses to run while a background generate is in flight — both write the one
-    // shared C++ mesh buffer, so overlapping them would tear the STL.
-    func exportSTL(to url: URL) -> Bool {
-        guard let h = volume.handle, !isGenerating else { return false }
-        lumen_mesh_snapshot(h) // every labelled voxel
-        _ = lumen_mesh_generate(h, Int32(max(0, smoothing)), Int32(max(1, downsample)))
+    // Export the given segment ids as one fused binary STL (their union). Returns
+    // false if the selection produces no surface. Pins the handle so a concurrent
+    // volume load can't free it mid-export; MUST stay synchronous (no await) so the
+    // pin + !isGenerating gate keep it from tearing the one shared C++ mesh buffer
+    // (the on-screen geometries are separate copies, so they are unaffected).
+    @discardableResult
+    func exportSTL(to url: URL, ids: [Int]) -> Bool {
+        guard !isGenerating, !ids.isEmpty, let h = volume.pinHandle() else { return false }
+        defer { volume.releaseHandle() }
+        let ids32 = ids.map { Int32($0) }
+        ids32.withUnsafeBufferPointer { buf in
+            lumen_mesh_snapshot_labels(h, buf.baseAddress, Int32(buf.count))
+        }
+        let tris = lumen_mesh_generate(h, Int32(max(0, smoothing)), Int32(max(1, downsample)))
+        guard tris > 0 else { return false } // nothing to write
         return lumen_mesh_write_stl(h, url.path) == 0
+    }
+
+    // Export each selected segment as its own STL in `directory`. Returns (written,
+    // requested) so the caller can report skips. Segments that yield no surface
+    // (empty, or edited away between listing and export) are skipped rather than
+    // written as an empty / stale-buffer file. Same pin + gate; stays synchronous.
+    func exportSTLPerSegment(into directory: URL,
+                             segments: [SegmentRow]) -> (written: Int, requested: Int) {
+        guard !isGenerating, !segments.isEmpty, let h = volume.pinHandle() else {
+            return (0, segments.count)
+        }
+        defer { volume.releaseHandle() }
+        var written = 0
+        var used = Set<String>()
+        for row in segments {
+            lumen_mesh_snapshot_label(h, Int32(row.id))
+            let tris = lumen_mesh_generate(h, Int32(max(0, smoothing)),
+                                           Int32(max(1, downsample)))
+            guard tris > 0 else { continue }
+            let url = directory.appendingPathComponent(Self.stlFileName(for: row, used: &used))
+            if lumen_mesh_write_stl(h, url.path) == 0 { written += 1 }
+        }
+        return (written, segments.count)
+    }
+
+    // A filesystem-safe, collision-free "<id>-<name>.stl". The id prefix keeps two
+    // segments with the same free-text name distinct; a counter breaks any residual
+    // collision so no file silently clobbers another.
+    private static func stlFileName(for row: SegmentRow, used: inout Set<String>) -> String {
+        var base = row.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        for ch in ["/", ":", "\\"] { base = base.replacingOccurrences(of: ch, with: "-") }
+        if base.isEmpty { base = "segment" }
+        let stem = "\(row.id)-\(base)"
+        var candidate = stem
+        var n = 2
+        while used.contains(candidate.lowercased()) { candidate = "\(stem)-\(n)"; n += 1 }
+        used.insert(candidate.lowercased())
+        return "\(candidate).stl"
     }
 }
