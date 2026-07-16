@@ -44,6 +44,7 @@ final class MarkupModel: ObservableObject {
         var voxels: [SIMD3<Int>] // defining points, voxel coordinates
         var colorIndex: Int
         var name: String
+        var visible: Bool = true
     }
 
     private let volume: VolumeModel
@@ -51,24 +52,43 @@ final class MarkupModel: ObservableObject {
 
     @Published var placing = false
     @Published var kind: Kind = .point
+    // The palette index the NEXT placed markup will use. Read-only from outside; the
+    // UI changes it via pickNextColor(_:) so we can tell a deliberate pick apart from
+    // the automatic advance. The placement dots show this colour live (pendingColor).
+    @Published private(set) var nextColorIndex = 0
     @Published private(set) var markups: [Markup] = []
     @Published private(set) var pending: [SIMD3<Int>] = [] // in-progress points
     private var counter = 1
-    private var nextColor = 0
+    // Cycle to a fresh colour after each placement (distinct colours by default). A
+    // deliberate colour pick turns this off so the chosen colour STICKS for a run of
+    // markups until the user picks again.
+    private var autoAdvanceColor = true
 
     // Distinct, bright marker colours (independent of the segment palette).
     static let palette: [Color] = [
         .yellow, .cyan, .green, .orange, .pink, .purple, .mint, .red,
     ]
 
+    // Palette is indexed with a EUCLIDEAN modulo so a stray negative index can never
+    // trap on palette[-1] (Swift's % keeps the sign).
+    static func paletteColor(_ index: Int) -> Color { palette[wrap(index)] }
+    private static func wrap(_ i: Int) -> Int {
+        let n = palette.count
+        return ((i % n) + n) % n
+    }
+
     init(volume: VolumeModel) {
         self.volume = volume
-        // A fresh volume invalidates all markups (their voxel coords no longer map).
+        // A fresh volume invalidates all markups (their voxel coords no longer map)
+        // and restarts the colour cycle + numbering.
         volume.$hasVolume
             .sink { [weak self] _ in
                 self?.markups = []
                 self?.pending = []
                 self?.placing = false
+                self?.nextColorIndex = 0
+                self?.counter = 1
+                self?.autoAdvanceColor = true
             }
             .store(in: &cancellables)
     }
@@ -79,13 +99,25 @@ final class MarkupModel: ObservableObject {
         guard placing else { return }
         pending.append(voxel)
         if pending.count >= kind.pointsNeeded {
-            markups.append(Markup(kind: kind, voxels: pending, colorIndex: nextColor,
+            markups.append(Markup(kind: kind, voxels: pending, colorIndex: nextColorIndex,
                                   name: "\(kind.title) \(counter)"))
             counter += 1
-            nextColor += 1
+            if autoAdvanceColor {
+                nextColorIndex = (nextColorIndex + 1) % Self.palette.count
+            }
             pending = []
         }
     }
+
+    // Deliberately choose the colour for upcoming markups; it sticks until re-picked.
+    func pickNextColor(_ index: Int) {
+        nextColorIndex = Self.wrap(index)
+        autoAdvanceColor = false
+    }
+
+    // The colour the in-progress (pending) markup will take, so the placement dots
+    // can be drawn filled in that colour instead of a neutral outline.
+    var pendingColor: Color { Self.paletteColor(nextColorIndex) }
 
     // Discard a half-placed line/plane.
     func cancelPending() { pending = [] }
@@ -108,7 +140,17 @@ final class MarkupModel: ObservableObject {
         markups[i].name = name.isEmpty ? "\(markups[i].kind.title)" : name
     }
 
-    func color(_ m: Markup) -> Color { Self.palette[m.colorIndex % Self.palette.count] }
+    // Recolour an existing markup (palette index), or toggle whether it is drawn.
+    func setColorIndex(_ id: UUID, _ index: Int) {
+        guard let i = markups.firstIndex(where: { $0.id == id }) else { return }
+        markups[i].colorIndex = Self.wrap(index)
+    }
+    func setVisible(_ id: UUID, _ visible: Bool) {
+        guard let i = markups.firstIndex(where: { $0.id == id }) else { return }
+        markups[i].visible = visible
+    }
+
+    func color(_ m: Markup) -> Color { Self.paletteColor(m.colorIndex) }
 
     // MARK: - Geometry helpers
 
@@ -128,14 +170,18 @@ final class MarkupModel: ObservableObject {
     }
 
     // The renderable form the 3D view consumes: points already in mm + an NSColor.
+    // Hidden markups are omitted so the visibility toggle applies in 3D too.
     func renders() -> [MarkupRender] {
-        markups.map { m in
+        markups.filter { $0.visible }.map { m in
             MarkupRender(id: m.id, kind: m.kind, points: m.voxels.map { mm($0) },
-                         color: NSColor(color(m)))
+                         color: NSColor(color(m)), colorIndex: m.colorIndex)
         }
     }
 
     func pendingMM() -> [SCNVector3] { pending.map { mm($0) } }
+
+    // NSColor form of `pendingColor`, for the 3D view's in-progress spheres.
+    func pendingColorNS() -> NSColor { NSColor(pendingColor) }
 
     // Whether a voxel lies on the currently displayed slice of `axis` (so the slice
     // overlay only dots points that are actually on screen).
@@ -145,11 +191,14 @@ final class MarkupModel: ObservableObject {
     }
 }
 
-// A markup flattened for SceneKit: mm points + colour. Not Equatable on purpose —
+// A markup flattened for SceneKit: mm points + colour. Not Equatable on purpose:
 // the 3D view diffs markups by a cheap signature, not by comparing SCNVector3s.
+// `colorIndex` is the stable palette slot, used as the diff key (cheaper + more
+// reliable than stringifying the NSColor).
 struct MarkupRender {
     let id: UUID
     let kind: MarkupModel.Kind
     let points: [SCNVector3]
     let color: NSColor
+    let colorIndex: Int
 }

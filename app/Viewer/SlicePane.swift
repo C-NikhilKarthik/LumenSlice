@@ -165,7 +165,7 @@ struct SlicePane: View {
     @ViewBuilder private func markupDots(container: CGSize, aspect: CGFloat) -> some View {
         ForEach(markup.markups) { m in
             ForEach(Array(m.voxels.enumerated()), id: \.offset) { _, v in
-                if markup.onCurrentSlice(v, axis: axis),
+                if m.visible, markup.onCurrentSlice(v, axis: axis),
                    let pt = markupPoint(voxel: v, container: container, aspect: aspect) {
                     Circle()
                         .fill(markup.color(m))
@@ -179,9 +179,12 @@ struct SlicePane: View {
         ForEach(Array(markup.pending.enumerated()), id: \.offset) { _, v in
             if markup.onCurrentSlice(v, axis: axis),
                let pt = markupPoint(voxel: v, container: container, aspect: aspect) {
+                // The in-progress point, filled in the colour the finished markup will
+                // take (with a white ring for contrast on any tissue).
                 Circle()
-                    .strokeBorder(.white, lineWidth: 1.5)
+                    .fill(markup.pendingColor)
                     .frame(width: 10, height: 10)
+                    .overlay(Circle().strokeBorder(.white, lineWidth: 1.5))
                     .position(pt)
                     .allowsHitTesting(false)
             }
