@@ -14,6 +14,10 @@ jobs:
     runs-on: windows-2022
     env:
       VCPKG_DEFAULT_TRIPLET: x64-windows
+      # The runner does not expose the GHA cache runtime variables to vcpkg's
+      # binary caching backend. Disable that optional cache; the build remains
+      # fully reproducible from the pinned vcpkg baseline.
+      VCPKG_BINARY_SOURCES: clear
     steps:
       - uses: actions/checkout@v4
         with:
@@ -25,16 +29,16 @@ jobs:
           vcpkgGitCommitId: cd124b84feb0c02a24a2d90981e8358fdee0e077
           vcpkgJsonGlob: '${{ github.workspace }}/vcpkg.json'
       - name: Configure
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
       - name: Build Windows executable
         run: cmake --build build --config Release
       - name: Assemble Windows package
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist-windows/resources | Out-Null
-          Copy-Item build/LumenSlice.exe dist-windows/LumenSlice.exe
-          Copy-Item vcpkg/installed/x64-windows/bin/*.dll dist-windows/ -ErrorAction SilentlyContinue
-          $dictionary = Get-ChildItem -Path vcpkg/installed -Filter dicom.dic -Recurse | Select-Object -First 1
+          Copy-Item build/Release/LumenSlice.exe dist-windows/LumenSlice.exe
+          Copy-Item build/vcpkg_installed/x64-windows/bin/*.dll dist-windows/ -ErrorAction SilentlyContinue
+          $dictionary = Get-ChildItem -Path build/vcpkg_installed -Filter dicom.dic -Recurse | Select-Object -First 1
           if (-not $dictionary) { throw "DCMTK dicom.dic was not installed" }
           Copy-Item $dictionary.FullName dist-windows/resources/dicom.dic
           Compress-Archive -Path dist-windows/* -DestinationPath LumenSlice-windows-x64.zip -Force
