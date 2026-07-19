@@ -22,6 +22,7 @@ jobs:
         uses: lukka/run-vcpkg@v11
         with:
           vcpkgDirectory: '${{ github.workspace }}/vcpkg'
+          vcpkgGitCommitId: cd124b84feb0c02a24a2d90981e8358fdee0e077
           vcpkgJsonGlob: '${{ github.workspace }}/vcpkg.json'
       - name: Configure
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
