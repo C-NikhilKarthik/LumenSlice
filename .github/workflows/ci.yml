@@ -5,7 +5,7 @@ name: CI
 # rolling "latest" GitHub Release: the previous release + assets are deleted and
 # recreated so only the newest .dmg is ever available.
 #
-# The runner MUST be Apple Silicon (macos-14+ is arm64): Package.swift links
+# The macOS runner MUST be Apple Silicon (macos-14+ is arm64): Package.swift links
 # DCMTK from /opt/homebrew and the app ships arm64-only.
 
 on:

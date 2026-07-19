@@ -53,8 +53,9 @@ brew install dcmtk
 ```
 
 > The future Windows/Linux cross-platform targets will use the C++/CMake/Ninja
-> toolchain described in [`docs/timelines.md`](docs/timelines.md); only the macOS
-> SwiftUI shell is built today.
+> toolchain described in [`docs/timelines.md`](docs/timelines.md). Windows now
+> has a native Win32 shell that reuses the same C++ core; the richer SwiftUI
+> shell remains the macOS front-end.
 
 ### 2. Build & Run (Phase 1 — macOS, SwiftUI shell)
 
@@ -94,6 +95,22 @@ cp /tmp/t1/example-dicom-structural-master/dicoms/*.dcm testdata/t1_mri/   # mkd
 swift run LumenSlice testdata/t1_mri        # open in the app
 swift run SliceShot testdata/t1_mri out.png # or render the 3 centre slices to a PNG
 ```
+
+### Windows build
+
+The Windows build uses CMake, Ninja, and DCMTK from vcpkg. On a Windows machine
+with Visual Studio and vcpkg installed:
+
+```powershell
+vcpkg install --triplet x64-windows
+cmake -S . -B build -G Ninja `
+  -DCMAKE_BUILD_TYPE=Release `
+  -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+cmake --build build --config Release
+```
+
+The executable is `build/LumenSlice.exe`. The Windows CI workflow produces a
+zip containing it and the DCMTK dictionary beside `resources/dicom.dic`.
 
 `SliceShot` renders the axial/coronal/sagittal centre slices through the same
 bridge + window/level + CGImage path as the app — handy for a quick headless
