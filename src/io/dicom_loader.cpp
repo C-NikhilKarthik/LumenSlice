@@ -77,7 +77,15 @@ bool ParseSlice(const fs::path& path, Slice& out) {
     // pixels. Anything we still can't decode (e.g. a codec not registered) is
     // skipped rather than read as garbage.
     DcmXfer xfer(ds->getOriginalXfer());
+    // usesEncapsulatedFormat() is the modern spelling (DCMTK >= 3.6.9, e.g. the
+    // 3.7.0 Homebrew keg on macOS). vcpkg pins 3.6.8 for the Windows build, where
+    // that method does not exist yet and isEncapsulated() is the equivalent (it is
+    // only deprecated, not removed, in the newer releases).
+#if defined(PACKAGE_VERSION_NUMBER) && PACKAGE_VERSION_NUMBER >= 369
     if (xfer.usesEncapsulatedFormat()) {
+#else
+    if (xfer.isEncapsulated()) {
+#endif
         if (ds->chooseRepresentation(EXS_LittleEndianExplicit, nullptr).bad() ||
             !ds->canWriteXfer(EXS_LittleEndianExplicit)) {
             return false;

@@ -17,23 +17,32 @@ jobs:
       # (DCMTK is the expensive one) since CI only ships a Release build.
       VCPKG_DEFAULT_TRIPLET: x64-windows-rel
       VCPKG_OVERLAY_TRIPLETS: '${{ github.workspace }}/triplets'
+      # vcpkg's binary cache lives OUTSIDE the vcpkg checkout: run-vcpkg resets
+      # that checkout, which would wipe a cache stored inside it and force a full
+      # DCMTK rebuild every run. This dir is the files-provider cache (readwrite
+      # by default) and is what actions/cache persists between runs.
+      VCPKG_DEFAULT_BINARY_CACHE: '${{ github.workspace }}/vcpkg_cache'
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
 
       # Persist vcpkg's built packages across runs. The first run pays the full
-      # DCMTK build cost (~8 min with the release-only triplet); later runs whose
-      # vcpkg.json + baseline are unchanged restore the prebuilt archives and skip
-      # the compile entirely. The key is invalidated when dependencies or the
-      # pinned baseline change.
+      # DCMTK build cost (~10 min with the release-only triplet); later runs whose
+      # vcpkg.json + triplet + baseline are unchanged restore the prebuilt archives
+      # and skip the compile entirely. Only the app's own C++ then recompiles.
       - name: Cache vcpkg binary packages
         uses: actions/cache@v4
         with:
-          path: ${{ github.workspace }}/vcpkg/archives
+          path: ${{ github.workspace }}/vcpkg_cache
           key: vcpkg-x64-windows-rel-${{ hashFiles('vcpkg.json', 'triplets/x64-windows-rel.cmake') }}-cd124b84
           restore-keys: |
             vcpkg-x64-windows-rel-
+
+      # vcpkg requires VCPKG_DEFAULT_BINARY_CACHE to point at an existing dir.
+      - name: Ensure vcpkg cache dir exists
+        shell: pwsh
+        run: New-Item -ItemType Directory -Force -Path "${{ github.workspace }}/vcpkg_cache" | Out-Null
 
       - name: Install CMake and DCMTK
         uses: lukka/run-vcpkg@v11
@@ -43,10 +52,6 @@ jobs:
           vcpkgJsonGlob: '${{ github.workspace }}/vcpkg.json'
 
       - name: Configure
-        env:
-          # Write/read the binary cache to a repo-local dir so actions/cache above
-          # can persist it (the default per-user dir is outside the cached path).
-          VCPKG_BINARY_SOURCES: 'clear;files,${{ github.workspace }}/vcpkg/archives,readwrite'
         run: >
           cmake -S . -B build -G "Visual Studio 17 2022" -A x64
           -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
