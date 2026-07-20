@@ -13,35 +13,60 @@ jobs:
   build-test-package:
     runs-on: windows-2022
     env:
-      VCPKG_DEFAULT_TRIPLET: x64-windows
-      # The runner does not expose the GHA cache runtime variables to vcpkg's
-      # binary caching backend. Disable that optional cache; the build remains
-      # fully reproducible from the pinned vcpkg baseline.
-      VCPKG_BINARY_SOURCES: clear
+      # Release-only overlay triplet: skips the debug half of every dependency
+      # (DCMTK is the expensive one) since CI only ships a Release build.
+      VCPKG_DEFAULT_TRIPLET: x64-windows-rel
+      VCPKG_OVERLAY_TRIPLETS: '${{ github.workspace }}/triplets'
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+
+      # Persist vcpkg's built packages across runs. The first run pays the full
+      # DCMTK build cost (~8 min with the release-only triplet); later runs whose
+      # vcpkg.json + baseline are unchanged restore the prebuilt archives and skip
+      # the compile entirely. The key is invalidated when dependencies or the
+      # pinned baseline change.
+      - name: Cache vcpkg binary packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/vcpkg/archives
+          key: vcpkg-x64-windows-rel-${{ hashFiles('vcpkg.json', 'triplets/x64-windows-rel.cmake') }}-cd124b84
+          restore-keys: |
+            vcpkg-x64-windows-rel-
+
       - name: Install CMake and DCMTK
         uses: lukka/run-vcpkg@v11
         with:
           vcpkgDirectory: '${{ github.workspace }}/vcpkg'
           vcpkgGitCommitId: cd124b84feb0c02a24a2d90981e8358fdee0e077
           vcpkgJsonGlob: '${{ github.workspace }}/vcpkg.json'
+
       - name: Configure
-        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
+        env:
+          # Write/read the binary cache to a repo-local dir so actions/cache above
+          # can persist it (the default per-user dir is outside the cached path).
+          VCPKG_BINARY_SOURCES: 'clear;files,${{ github.workspace }}/vcpkg/archives,readwrite'
+        run: >
+          cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+          -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
+          -DVCPKG_TARGET_TRIPLET=x64-windows-rel
+          -DVCPKG_OVERLAY_TRIPLETS=${{ github.workspace }}/triplets
+
       - name: Build Windows executable
-        run: cmake --build build --config Release
+        run: cmake --build build --config Release --parallel
+
       - name: Assemble Windows package
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist-windows/resources | Out-Null
           Copy-Item build/Release/LumenSlice.exe dist-windows/LumenSlice.exe
-          Copy-Item build/vcpkg_installed/x64-windows/bin/*.dll dist-windows/ -ErrorAction SilentlyContinue
+          Copy-Item build/vcpkg_installed/x64-windows-rel/bin/*.dll dist-windows/ -ErrorAction SilentlyContinue
           $dictionary = Get-ChildItem -Path build/vcpkg_installed -Filter dicom.dic -Recurse | Select-Object -First 1
           if (-not $dictionary) { throw "DCMTK dicom.dic was not installed" }
           Copy-Item $dictionary.FullName dist-windows/resources/dicom.dic
           Compress-Archive -Path dist-windows/* -DestinationPath LumenSlice-windows-x64.zip -Force
+
       - name: Upload Windows package
         uses: actions/upload-artifact@v4
         with:
