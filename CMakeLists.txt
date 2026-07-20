@@ -5,6 +5,13 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# MSVC reports __cplusplus as 199711L regardless of /std unless this flag is set.
+# DCMTK's osconfig.h keys its C++11 feature check off __cplusplus, so without it
+# the headers wrongly conclude the compiler lacks C++11 and #error out.
+if(MSVC)
+    add_compile_options(/Zc:__cplusplus)
+endif()
+
 # The Windows front-end deliberately links the same bridge/core sources used by
 # the Swift app. DCMTK is supplied by vcpkg in CI (and can also be installed
 # system-wide by setting DCMTK_ROOT).
