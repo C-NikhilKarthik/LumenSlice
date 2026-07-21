@@ -47,7 +47,7 @@ endif()
 if(WIN32)
     add_executable(LumenSlice WIN32 windows/LumenSliceWin.cpp)
     target_link_libraries(LumenSlice PRIVATE LumenCore comctl32 shell32 ole32)
-    target_compile_definitions(LumenSlice PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN)
+    target_compile_definitions(LumenSlice PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 
     # Keep the DICOM dictionary beside the executable in packaged builds.
     add_custom_command(TARGET LumenSlice POST_BUILD
