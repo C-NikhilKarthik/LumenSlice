@@ -96,21 +96,62 @@ swift run LumenSlice testdata/t1_mri        # open in the app
 swift run SliceShot testdata/t1_mri out.png # or render the 3 centre slices to a PNG
 ```
 
-### Windows build
+### Windows build (Qt 6 GUI)
 
-The Windows build uses CMake, Ninja, and DCMTK from vcpkg. On a Windows machine
-with Visual Studio and vcpkg installed:
+The Windows front-end is a native **Qt 6 Widgets** application (`gui/win/`) at
+feature parity with the macOS SwiftUI app: an icon rail (Visualize / Segment / 3D
+/ Export), the tri-axis slice board (Axial / Coronal / Sagittal) with wheel-scroll,
+window/level drag, crosshair linking and a colored mask overlay, the full
+multi-segment editing suite (threshold, region-grow, level-trace, paint/erase,
+refine, grow-from-seeds, undo/redo), a `QOpenGLWidget` 3D mesh viewer, and STL/PNG
+export. It reuses the same UI-agnostic C++ core through the pure-C
+[`lumen_bridge.h`](src/bridge/include/lumen_bridge.h) — nothing under `src/` is
+Windows-specific. It replaces the earlier minimal Win32 shell
+(`windows/LumenSliceWin.cpp`), which stays in the tree for reference but is no
+longer built.
+
+**Dependencies:** CMake + Ninja + MSVC, **DCMTK/zlib from vcpkg**, and **Qt 6 as
+prebuilt binaries** (Widgets / OpenGLWidgets / Concurrent, all in `qtbase`).
+Building Qt from vcpkg source is impractical, so Qt is installed prebuilt — with
+[`aqtinstall`](https://github.com/miurahr/aqtinstall) locally and
+[`install-qt-action`](https://github.com/jurplel/install-qt-action) in CI.
 
 ```powershell
-vcpkg install --triplet x64-windows
+# 1. DCMTK + zlib (release-only overlay triplet halves the DCMTK build)
+vcpkg install --triplet x64-windows-rel --overlay-triplets=triplets
+
+# 2. Prebuilt Qt 6 (once)
+pip install aqtinstall
+python -m aqt install-qt windows desktop 6.8.1 win64_msvc2022_64 --outputdir C:\Qt
+
+# 3. Configure + build (from a Developer prompt so cl.exe/CMake/Ninja are on PATH)
 cmake -S . -B build -G Ninja `
   -DCMAKE_BUILD_TYPE=Release `
-  -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+  -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
+  -DVCPKG_TARGET_TRIPLET=x64-windows-rel `
+  -DVCPKG_MANIFEST_MODE=OFF `
+  -DCMAKE_PREFIX_PATH="C:/Qt/6.8.1/msvc2022_64"
 cmake --build build --config Release
+
+# 4. Bundle the Qt runtime beside the exe, then run
+& C:\Qt\6.8.1\msvc2022_64\bin\windeployqt.exe --release build\LumenSlice.exe
+build\LumenSlice.exe                 # or: build\LumenSlice.exe path\to\dicom_folder
 ```
 
-The executable is `build/LumenSlice.exe`. The Windows CI workflow produces a
-zip containing it and the DCMTK dictionary beside `resources/dicom.dic`.
+The executable is `build\LumenSlice.exe`. The Windows CI workflow
+([`.github/workflows/windows.yml`](.github/workflows/windows.yml)) installs Qt with
+`install-qt-action`, builds, runs `windeployqt`, and produces a zip containing the
+exe, the Qt + DCMTK runtime, and the DICOM dictionary at `resources/dicom.dic`.
+
+**Deferred / notes.** *Markups* are out of scope for v1: they have no
+`lumen_bridge.h` functions (they live entirely in the macOS Swift layer), and the
+UI/data isolation rule forbids adding core code for them from the UI side. The 3D
+*scissor* lasso (`lumen_seg_scissor_cut`) is likewise deferred — the bridge
+supports it, but wiring the screen-space MVP + lasso capture in the OpenGL viewer
+is follow-up work. If segment *names* should persist in the core (they are
+currently a Windows-UI-only convenience), the smallest bridge additions would be
+`void lumen_seg_set_name(LumenVolume*, int id, const char* utf8)` and
+`int lumen_seg_get_name(const LumenVolume*, int id, char* out, int out_cap)`.
 
 `SliceShot` renders the axial/coronal/sagittal centre slices through the same
 bridge + window/level + CGImage path as the app — handy for a quick headless

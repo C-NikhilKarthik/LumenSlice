@@ -47,6 +47,19 @@ jobs:
           vcpkgGitCommitId: cd124b84feb0c02a24a2d90981e8358fdee0e077
           vcpkgJsonGlob: '${{ github.workspace }}/vcpkg.json'
 
+      # Prebuilt Qt 6 (Widgets / OpenGLWidgets / Concurrent all ship in qtbase).
+      # Building qtbase from vcpkg source is impractical, so the Windows GUI uses
+      # the official prebuilt binaries here and via aqtinstall locally. Sets
+      # QT_ROOT_DIR and puts Qt on PATH so find_package(Qt6) resolves.
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.1'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          cache: true
+
       - name: Configure
         env:
           # run-vcpkg auto-enables the GHA binary source (x-gha), which needs
@@ -61,6 +74,7 @@ jobs:
           -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
           -DVCPKG_TARGET_TRIPLET=x64-windows-rel
           -DVCPKG_OVERLAY_TRIPLETS=${{ github.workspace }}/triplets
+          -DCMAKE_PREFIX_PATH=${{ env.QT_ROOT_DIR }}
 
       - name: Build Windows executable
         run: cmake --build build --config Release --parallel
@@ -71,6 +85,8 @@ jobs:
           New-Item -ItemType Directory -Force -Path dist-windows/resources | Out-Null
           Copy-Item build/Release/LumenSlice.exe dist-windows/LumenSlice.exe
           Copy-Item build/vcpkg_installed/x64-windows-rel/bin/*.dll dist-windows/ -ErrorAction SilentlyContinue
+          # Bundle the Qt runtime (DLLs + platform/style plugins) beside the exe.
+          & "$env:QT_ROOT_DIR/bin/windeployqt.exe" --release --no-translations --no-compiler-runtime dist-windows/LumenSlice.exe
           $dictionary = Get-ChildItem -Path build/vcpkg_installed -Filter dicom.dic -Recurse | Select-Object -First 1
           if (-not $dictionary) { throw "DCMTK dicom.dic was not installed" }
           Copy-Item $dictionary.FullName dist-windows/resources/dicom.dic

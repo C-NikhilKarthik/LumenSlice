@@ -1,8 +1,10 @@
 # Build output
 build/
+build-*/
 out/
 dist/
 cmake-build-*/
+*.log
 
 # Python virtualenv (used by CI to generate the test phantom)
 .venv/

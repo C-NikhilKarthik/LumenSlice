@@ -45,8 +45,27 @@ if(WIN32)
 endif()
 
 if(WIN32)
-    add_executable(LumenSlice WIN32 windows/LumenSliceWin.cpp)
-    target_link_libraries(LumenSlice PRIVATE LumenCore comctl32 shell32 ole32)
+    # Windows front-end: a Qt 6 Widgets GUI (gui/win) over the shared C++ core
+    # (LumenCore), at feature parity with the macOS SwiftUI app. It replaces the
+    # earlier minimal Win32 shell (windows/LumenSliceWin.cpp), which is kept in the
+    # tree for reference but no longer built.
+    #
+    # Qt is consumed as PREBUILT binaries (aqtinstall locally, install-qt-action in
+    # CI) rather than from vcpkg — building qtbase from source is impractical. Point
+    # CMake at the Qt install with, e.g.:
+    #   -DCMAKE_PREFIX_PATH="C:/Qt/6.8.1/msvc2022_64"
+    set(CMAKE_AUTOMOC ON)
+    find_package(Qt6 REQUIRED COMPONENTS Widgets OpenGLWidgets Concurrent)
+
+    add_executable(LumenSlice WIN32
+        gui/win/main.cpp
+        gui/win/MainWindow.cpp
+        gui/win/SliceView.cpp
+        gui/win/MeshView.cpp)
+    target_link_libraries(LumenSlice PRIVATE
+        LumenCore
+        Qt6::Widgets Qt6::OpenGLWidgets Qt6::Concurrent
+        comctl32 shell32 ole32)
     target_compile_definitions(LumenSlice PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 
     # Keep the DICOM dictionary beside the executable in packaged builds.
