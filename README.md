@@ -99,16 +99,31 @@ swift run SliceShot testdata/t1_mri out.png # or render the 3 centre slices to a
 ### Windows build (Qt 6 GUI)
 
 The Windows front-end is a native **Qt 6 Widgets** application (`gui/win/`) at
-feature parity with the macOS SwiftUI app: an icon rail (Visualize / Segment / 3D
-/ Export), the tri-axis slice board (Axial / Coronal / Sagittal) with wheel-scroll,
-window/level drag, crosshair linking and a colored mask overlay, the full
-multi-segment editing suite (threshold, region-grow, level-trace, paint/erase,
-refine, grow-from-seeds, undo/redo), a `QOpenGLWidget` 3D mesh viewer, and STL/PNG
-export. It reuses the same UI-agnostic C++ core through the pure-C
-[`lumen_bridge.h`](src/bridge/include/lumen_bridge.h) — nothing under `src/` is
-Windows-specific. It replaces the earlier minimal Win32 shell
-(`windows/LumenSliceWin.cpp`), which stays in the tree for reference but is no
-longer built.
+feature parity with the macOS SwiftUI app. An icon rail selects Visualize /
+Segment / 3D / Export / Markups; the canvas is a **2×2 quad** (Axial / Coronal /
+Sagittal / 3D), each pane double-click-maximizable. Highlights:
+
+- **Visualize** — tri-axis slices with wheel/slider scroll, physical-aspect
+  rendering, click-to-locate crosshair linking (per-plane colours: axial red,
+  coronal green, sagittal yellow), orientation labels (R/L/A/P/S/I), window/level
+  on a modifier drag or fields/sliders/presets, and parsed patient/study metadata.
+- **Segment** — multi-segment list, a **live dual-thumb threshold** slider,
+  region-grow, level-trace, paint/erase (with a brush-ring cursor), refine,
+  grow-from-seeds, undo/redo, and a colored mask overlay.
+- **3D** — **per-segment colored** marching-cubes surfaces, a Slicer-style camera
+  toolbar (reset / zoom / standard anatomical views / PNG snapshot) with an R/A/S
+  gnomon, and a freehand **scissor lasso** cut.
+- **Export** — per-segment or fused STL (via `lumen_mesh_snapshot_labels`) and
+  slice PNG.
+- **Markups** — Point / Line / Plane fiducials placed on the slices and drawn in
+  both the 2D panes and the 3D view (client-side; no bridge code).
+
+Folder loading runs off the UI thread. Everything talks to the same UI-agnostic
+C++ core through the pure-C
+[`lumen_bridge.h`](src/bridge/include/lumen_bridge.h) — the only core change is the
+`lumen_mesh_snapshot_labels` helper for fused STL export. It replaces the earlier
+minimal Win32 shell (`windows/LumenSliceWin.cpp`), which stays in the tree for
+reference but is no longer built.
 
 **Dependencies:** CMake + Ninja + MSVC, **DCMTK/zlib from vcpkg**, and **Qt 6 as
 prebuilt binaries** (Widgets / OpenGLWidgets / Concurrent, all in `qtbase`).
@@ -143,13 +158,11 @@ The executable is `build\LumenSlice.exe`. The Windows CI workflow
 `install-qt-action`, builds, runs `windeployqt`, and produces a zip containing the
 exe, the Qt + DCMTK runtime, and the DICOM dictionary at `resources/dicom.dic`.
 
-**Deferred / notes.** *Markups* are out of scope for v1: they have no
-`lumen_bridge.h` functions (they live entirely in the macOS Swift layer), and the
-UI/data isolation rule forbids adding core code for them from the UI side. The 3D
-*scissor* lasso (`lumen_seg_scissor_cut`) is likewise deferred — the bridge
-supports it, but wiring the screen-space MVP + lasso capture in the OpenGL viewer
-is follow-up work. If segment *names* should persist in the core (they are
-currently a Windows-UI-only convenience), the smallest bridge additions would be
+**Notes.** *Markups* live entirely in the Windows UI layer (`MarkupModel`) — the
+core has no markup concept, so no bridge code was added for them. The single core
+change across the whole front-end is `lumen_mesh_snapshot_labels` (fused STL
+export). Segment and markup *names* are a Windows-UI-only convenience; if names
+should persist in the core, the smallest bridge additions would be
 `void lumen_seg_set_name(LumenVolume*, int id, const char* utf8)` and
 `int lumen_seg_get_name(const LumenVolume*, int id, char* out, int out_cap)`.
 
