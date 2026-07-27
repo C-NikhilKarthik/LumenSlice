@@ -61,6 +61,16 @@ QGroupBox* section(const QString& title) {
     v->setSpacing(6);
     return box;
 }
+
+// Install `page` into a control-panel scroll area. Word-wraps every label and
+// forbids the horizontal scrollbar so a long line can never widen the page and
+// shift the content sideways under the icon rail.
+void finishPanel(QScrollArea* scroll, QWidget* page) {
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    const QList<QLabel*> labels = page->findChildren<QLabel*>();
+    for (QLabel* l : labels) l->setWordWrap(true);
+    scroll->setWidget(page);
+}
 QVBoxLayout* body(QGroupBox* box) {
     return qobject_cast<QVBoxLayout*>(box->layout());
 }
@@ -246,7 +256,7 @@ QWidget* MainWindow::buildVisualizePanel() {
     v->addWidget(ovBox);
 
     v->addStretch();
-    scroll->setWidget(page);
+    finishPanel(scroll, page);
     return scroll;
 }
 
@@ -444,7 +454,7 @@ QWidget* MainWindow::buildSegmentPanel() {
     v->addWidget(editBox);
 
     v->addStretch();
-    scroll->setWidget(page);
+    finishPanel(scroll, page);
     return scroll;
 }
 
@@ -492,7 +502,7 @@ QWidget* MainWindow::buildThreeDPanel() {
     v->addWidget(meshBox);
 
     v->addStretch();
-    scroll->setWidget(page);
+    finishPanel(scroll, page);
     return scroll;
 }
 
@@ -523,7 +533,7 @@ QWidget* MainWindow::buildExportPanel() {
     v->addWidget(exportMsgLabel_);
 
     v->addStretch();
-    scroll->setWidget(page);
+    finishPanel(scroll, page);
     return scroll;
 }
 
