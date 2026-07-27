@@ -1,5 +1,6 @@
 #include "MainWindow.h"
 
+#include <QApplication>
 #include <QButtonGroup>
 #include <QCheckBox>
 #include <QColor>
@@ -73,6 +74,14 @@ void finishPanel(QScrollArea* scroll, QWidget* page) {
 }
 QVBoxLayout* body(QGroupBox* box) {
     return qobject_cast<QVBoxLayout*>(box->layout());
+}
+
+// Make a segment name safe to use as a filename stem.
+QString sanitizeFilename(const QString& name) {
+    QString out;
+    for (const QChar c : name)
+        out += (c.isLetterOrNumber() || c == '-' || c == '_') ? c : QChar('_');
+    return out.isEmpty() ? QStringLiteral("segment") : out;
 }
 }  // namespace
 
@@ -516,7 +525,32 @@ QWidget* MainWindow::buildExportPanel() {
     auto* v = new QVBoxLayout(page);
     v->setSpacing(10);
 
-    auto* meshBox = section("3D mesh");
+    auto* meshBox = section("3D mesh (STL)");
+    body(meshBox)->addWidget(new QLabel("Choose which segments to export:"));
+
+    exportSegContainer_ = new QWidget;
+    exportSegLayout_ = new QVBoxLayout(exportSegContainer_);
+    exportSegLayout_->setContentsMargins(0, 0, 0, 0);
+    exportSegLayout_->setSpacing(2);
+    body(meshBox)->addWidget(exportSegContainer_);
+
+    auto* allNone = new QHBoxLayout;
+    auto* allBtn = new QPushButton("All");
+    auto* noneBtn = new QPushButton("None");
+    connect(allBtn, &QPushButton::clicked, this, [this] {
+        for (auto* c : exportSegChecks_) c->setChecked(true);
+    });
+    connect(noneBtn, &QPushButton::clicked, this, [this] {
+        for (auto* c : exportSegChecks_) c->setChecked(false);
+    });
+    allNone->addWidget(allBtn);
+    allNone->addWidget(noneBtn);
+    body(meshBox)->addLayout(allNone);
+
+    oneFilePerSegCheck_ = new QCheckBox("One file per segment");
+    oneFilePerSegCheck_->setChecked(true);
+    body(meshBox)->addWidget(oneFilePerSegCheck_);
+
     exportStlBtn_ = new QPushButton("Export STL…");
     connect(exportStlBtn_, &QPushButton::clicked, this, &MainWindow::exportStl);
     body(meshBox)->addWidget(exportStlBtn_);
@@ -634,6 +668,7 @@ void MainWindow::selectTab(int tab) {
     // Segment tab enables canvas tool interactions; others keep left-drag = W/L.
     st_.segmentInteractive = (tab == 1);
     central_->setCurrentIndex(tab == 2 ? 1 : 0);
+    if (tab == 3) rebuildExportSegmentList();  // reflect current segments/names
     refreshCanvas();
 }
 
@@ -897,20 +932,65 @@ void MainWindow::finishMeshGeneration() {
                                 .arg(verts));
     LumenVolume* v = st_.volume;
     generateBtn_->setEnabled(v && lumen_seg_count(v) > 0);
-    exportStlBtn_->setEnabled(tris > 0);
+    exportStlBtn_->setEnabled(v && lumen_seg_count(v) > 0);
 }
 
 void MainWindow::exportStl() {
     LumenVolume* v = st_.volume;
-    if (!v || lumen_mesh_index_count(v) == 0) return;
-    const QString path = QFileDialog::getSaveFileName(
-        this, "Export STL", QDir::homePath() + "/LumenSlice.stl",
-        "STL mesh (*.stl)");
-    if (path.isEmpty()) return;
-    const int rc = lumen_mesh_write_stl(v, path.toUtf8().constData());
-    exportMsgLabel_->setText(rc == 0
-                                 ? QString("Saved %1").arg(QFileInfo(path).fileName())
-                                 : "STL export failed.");
+    if (!v) return;
+
+    // The checked segments that actually carry voxels.
+    std::vector<long> hist(256, 0);
+    lumen_seg_label_histogram(v, hist.data());
+    std::vector<int> ids;
+    for (auto it = exportSegChecks_.constBegin(); it != exportSegChecks_.constEnd();
+         ++it) {
+        if (it.value()->isChecked() && hist[it.key()] > 0) ids.push_back(it.key());
+    }
+    if (ids.empty()) {
+        exportMsgLabel_->setText("Select at least one non-empty segment to export.");
+        return;
+    }
+
+    const int smooth = smoothingSpin_->value();
+    const int down = resolutionCombo_->currentData().toInt();
+
+    if (oneFilePerSegCheck_->isChecked()) {
+        // One STL per segment into a chosen directory.
+        const QString dir = QFileDialog::getExistingDirectory(
+            this, "Export one STL per segment to folder", QDir::homePath());
+        if (dir.isEmpty()) return;
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        int written = 0;
+        for (int id : ids) {
+            lumen_mesh_snapshot_label(v, id);   // UI thread (export is synchronous)
+            if (lumen_mesh_generate(v, smooth, down) <= 0) continue;
+            const QString name = sanitizeFilename(
+                segNames_.value(id, QString("Segment %1").arg(id)));
+            const QString path = QString("%1/%2.stl").arg(dir, name);
+            if (lumen_mesh_write_stl(v, path.toUtf8().constData()) == 0) ++written;
+        }
+        QApplication::restoreOverrideCursor();
+        exportMsgLabel_->setText(
+            QString("Wrote %1 STL file(s) to %2").arg(written).arg(dir));
+    } else {
+        // Fuse the chosen segments into a single STL (union via the bridge).
+        const QString path = QFileDialog::getSaveFileName(
+            this, "Export fused STL", QDir::homePath() + "/LumenSlice.stl",
+            "STL mesh (*.stl)");
+        if (path.isEmpty()) return;
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        lumen_mesh_snapshot_labels(v, ids.data(), int(ids.size()));
+        const int tris = lumen_mesh_generate(v, smooth, down);
+        const int rc =
+            tris > 0 ? lumen_mesh_write_stl(v, path.toUtf8().constData()) : -1;
+        QApplication::restoreOverrideCursor();
+        exportMsgLabel_->setText(
+            rc == 0 ? QString("Saved %1 (%2 segments fused)")
+                          .arg(QFileInfo(path).fileName())
+                          .arg(ids.size())
+                    : "STL export failed.");
+    }
 }
 
 void MainWindow::exportPng() {
@@ -1126,7 +1206,34 @@ void MainWindow::updateSegmentCounts() {
     if (generateBtn_)
         generateBtn_->setEnabled(total > 0 && !generating_);
     if (exportStlBtn_)
-        exportStlBtn_->setEnabled(lumen_mesh_index_count(v) > 0);
+        exportStlBtn_->setEnabled(total > 0);  // export generates its own meshes
+}
+
+void MainWindow::rebuildExportSegmentList() {
+    if (!exportSegLayout_) return;
+    QLayoutItem* item = nullptr;
+    while ((item = exportSegLayout_->takeAt(0)) != nullptr) {
+        if (item->widget()) item->widget()->deleteLater();
+        delete item;
+    }
+    exportSegChecks_.clear();
+
+    LumenVolume* v = st_.volume;
+    if (!v) return;
+    std::vector<long> hist(256, 0);
+    lumen_seg_label_histogram(v, hist.data());
+    const int count = lumen_seg_segment_count(v);
+    for (int i = 0; i < count; ++i) {
+        const int id = lumen_seg_segment_id_at(v, i);
+        auto* c = new QCheckBox(QString("%1  (%2 voxels)")
+                                    .arg(segNames_.value(
+                                        id, QString("Segment %1").arg(id)))
+                                    .arg(hist[id]));
+        c->setChecked(hist[id] > 0);
+        c->setEnabled(hist[id] > 0);
+        exportSegChecks_[id] = c;
+        exportSegLayout_->addWidget(c);
+    }
 }
 
 void MainWindow::updateUndoRedo() {

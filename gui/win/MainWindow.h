@@ -94,6 +94,7 @@ private:
     void refreshSliders();
     void refreshVolumeInfo();
     void rebuildSegmentList();
+    void rebuildExportSegmentList();
     void updateSegmentCounts();
     void updateUndoRedo();
     void updateWlControls();
@@ -156,6 +157,10 @@ private:
     QLabel* meshInfoLabel_ = nullptr;
 
     // Export controls.
+    QWidget* exportSegContainer_ = nullptr;
+    QVBoxLayout* exportSegLayout_ = nullptr;
+    QHash<int, QCheckBox*> exportSegChecks_;
+    QCheckBox* oneFilePerSegCheck_ = nullptr;
     QPushButton* exportStlBtn_ = nullptr;
     QPushButton* exportPngBtn_ = nullptr;
     QLabel* exportMsgLabel_ = nullptr;
