@@ -8,8 +8,10 @@
 #include <QHash>
 #include <QMainWindow>
 #include <QString>
+#include <vector>
 
 #include "BridgeVolume.h"
+#include "MeshView.h"
 #include "ViewState.h"
 
 class QCheckBox;
@@ -27,7 +29,6 @@ class QWidget;
 namespace lumenwin {
 
 class SliceView;
-class MeshView;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -80,6 +81,11 @@ private:
     QWidget* buildThreeDPanel();
     QWidget* buildExportPanel();
     QWidget* buildSliceBoard();
+
+    // Sequential per-segment colored mesh generation (one snapshot_label ->
+    // generate -> readback per visible non-empty segment, worker off the UI thread).
+    void startNextMeshSegment();
+    void finishMeshGeneration();
 
     // Refresh helpers.
     void loadPath(const QString& path);
@@ -154,9 +160,12 @@ private:
     QPushButton* exportPngBtn_ = nullptr;
     QLabel* exportMsgLabel_ = nullptr;
 
-    // Mesh generation (off-thread).
+    // Mesh generation (off-thread, per-segment colored surfaces).
     QFutureWatcher<int> meshWatcher_;
     bool generating_ = false;
+    std::vector<int> pendingSegIds_;
+    int pendingSegIndex_ = 0;
+    std::vector<MeshView::MeshPiece> meshPieces_;
 };
 
 }  // namespace lumenwin

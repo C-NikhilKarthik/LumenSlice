@@ -32,6 +32,7 @@ out vec4 fragColor;
 uniform vec3 uColor;
 void main() {
     vec3 n = normalize(vNormalView);
+    if (!gl_FrontFacing) n = -n;
     // Head-light: light travels with the camera.
     vec3 l = normalize(-vPosView);
     float diff = max(dot(n, l), 0.0);
@@ -81,39 +82,51 @@ void MeshView::initializeGL() {
     if (pendingUpload_) uploadPending();
 }
 
-void MeshView::setMesh(LumenVolume* v) {
+void MeshView::setMeshes(std::vector<MeshPiece> pieces) {
     pendingInterleaved_.clear();
     pendingIndices_.clear();
+    pendingRanges_.clear();
 
-    if (v) {
-        const int vcount = lumen_mesh_vertex_count(v);
-        const int icount = lumen_mesh_index_count(v);
-        const float* verts = lumen_mesh_vertices(v);
-        const float* norms = lumen_mesh_normals(v);
-        const unsigned int* idx = lumen_mesh_indices(v);
-        if (vcount > 0 && icount > 0 && verts && idx) {
-            pendingInterleaved_.resize(size_t(vcount) * 6);
-            float lo[3] = {1e30f, 1e30f, 1e30f};
-            float hi[3] = {-1e30f, -1e30f, -1e30f};
-            for (int i = 0; i < vcount; ++i) {
-                float* dst = &pendingInterleaved_[size_t(i) * 6];
-                for (int k = 0; k < 3; ++k) {
-                    const float c = verts[size_t(i) * 3 + k];
-                    dst[k] = c;
-                    lo[k] = std::min(lo[k], c);
-                    hi[k] = std::max(hi[k], c);
-                }
-                for (int k = 0; k < 3; ++k)
-                    dst[3 + k] = norms ? norms[size_t(i) * 3 + k] : 0.0f;
+    float lo[3] = {1e30f, 1e30f, 1e30f};
+    float hi[3] = {-1e30f, -1e30f, -1e30f};
+    bool any = false;
+    unsigned int vertBase = 0;
+
+    for (const MeshPiece& piece : pieces) {
+        const int vcount = int(piece.interleaved.size() / 6);
+        if (vcount == 0 || piece.indices.empty()) continue;
+        any = true;
+
+        const size_t idxStart = pendingIndices_.size();
+        pendingInterleaved_.insert(pendingInterleaved_.end(),
+                                   piece.interleaved.begin(),
+                                   piece.interleaved.end());
+        for (int i = 0; i < vcount; ++i) {
+            for (int k = 0; k < 3; ++k) {
+                const float c = piece.interleaved[size_t(i) * 6 + k];
+                lo[k] = std::min(lo[k], c);
+                hi[k] = std::max(hi[k], c);
             }
-            for (int k = 0; k < 3; ++k) center_[k] = 0.5f * (lo[k] + hi[k]);
-            radius_ = 0.0f;
-            for (int k = 0; k < 3; ++k)
-                radius_ = std::max(radius_, 0.5f * (hi[k] - lo[k]));
-            if (radius_ <= 0.0f) radius_ = 1.0f;
-
-            pendingIndices_.assign(idx, idx + icount);
         }
+        for (unsigned int idx : piece.indices)
+            pendingIndices_.push_back(idx + vertBase);
+
+        DrawRange r;
+        r.count = int(piece.indices.size());
+        r.byteOffset = idxStart * sizeof(unsigned int);
+        r.color[0] = piece.color[0];
+        r.color[1] = piece.color[1];
+        r.color[2] = piece.color[2];
+        pendingRanges_.push_back(r);
+        vertBase += unsigned(vcount);
+    }
+
+    if (any) {
+        for (int k = 0; k < 3; ++k) center_[k] = 0.5f * (lo[k] + hi[k]);
+        radius_ = 0.0f;
+        for (int k = 0; k < 3; ++k)
+            radius_ = std::max(radius_, 0.5f * (hi[k] - lo[k]));
+        if (radius_ <= 0.0f) radius_ = 1.0f;
     }
 
     pendingUpload_ = true;
@@ -127,7 +140,8 @@ void MeshView::setMesh(LumenVolume* v) {
 
 void MeshView::uploadPending() {
     pendingUpload_ = false;
-    indexCount_ = int(pendingIndices_.size());
+    ranges_ = pendingRanges_;
+    totalIndices_ = int(pendingIndices_.size());
 
     vao_.bind();
     vbo_.bind();
@@ -153,7 +167,7 @@ void MeshView::resizeGL(int w, int h) { glViewport(0, 0, w, h); }
 void MeshView::paintGL() {
     if (pendingUpload_) uploadPending();
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    if (indexCount_ == 0) return;
+    if (totalIndices_ == 0) return;
 
     const float aspect = height() > 0 ? float(width()) / float(height()) : 1.0f;
     QMatrix4x4 proj;
@@ -173,9 +187,13 @@ void MeshView::paintGL() {
     program_.bind();
     program_.setUniformValue("uMvp", mvp);
     program_.setUniformValue("uModelView", modelView);
-    program_.setUniformValue("uColor", QVector3D(0.85f, 0.83f, 0.80f));
     vao_.bind();
-    glDrawElements(GL_TRIANGLES, indexCount_, GL_UNSIGNED_INT, nullptr);
+    for (const DrawRange& r : ranges_) {
+        program_.setUniformValue(
+            "uColor", QVector3D(r.color[0], r.color[1], r.color[2]));
+        glDrawElements(GL_TRIANGLES, r.count, GL_UNSIGNED_INT,
+                       reinterpret_cast<void*>(r.byteOffset));
+    }
     vao_.release();
     program_.release();
 }

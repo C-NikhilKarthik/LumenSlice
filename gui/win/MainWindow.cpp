@@ -614,7 +614,7 @@ void MainWindow::loadPath(const QString& path) {
 
     setStatus(QString::fromStdString(status));
     refreshAll();
-    meshView_->setMesh(nullptr);
+    meshView_->clearMeshes();
     meshInfoLabel_->setText("No surface yet.");
 }
 
@@ -800,28 +800,92 @@ void MainWindow::redo() {
 void MainWindow::generateMesh() {
     LumenVolume* v = st_.volume;
     if (!v || generating_) return;
-    if (lumen_seg_count(v) == 0) return;
-    lumen_mesh_snapshot(v);  // main thread: copy the live mask
+
+    // Collect the visible, non-empty segments — one colored surface each.
+    std::vector<long> hist(256, 0);
+    lumen_seg_label_histogram(v, hist.data());
+    pendingSegIds_.clear();
+    const int count = lumen_seg_segment_count(v);
+    for (int i = 0; i < count; ++i) {
+        const int id = lumen_seg_segment_id_at(v, i);
+        if (lumen_seg_get_visible(v, id) && hist[id] > 0) pendingSegIds_.push_back(id);
+    }
+    if (pendingSegIds_.empty()) {
+        meshView_->clearMeshes();
+        meshInfoLabel_->setText("No visible, non-empty segments to surface.");
+        return;
+    }
+
     generating_ = true;
     generateBtn_->setEnabled(false);
     generateBtn_->setText("Generating…");
     exportStlBtn_->setEnabled(false);
+    meshPieces_.clear();
+    pendingSegIndex_ = 0;
+    startNextMeshSegment();
+}
+
+void MainWindow::startNextMeshSegment() {
+    LumenVolume* v = st_.volume;
+    if (!v || pendingSegIndex_ >= int(pendingSegIds_.size())) {
+        finishMeshGeneration();
+        return;
+    }
+    const int id = pendingSegIds_[pendingSegIndex_];
+    lumen_mesh_snapshot_label(v, id);  // UI thread: copy just this segment's mask
     const int smooth = smoothingSpin_->value();
     const int down = resolutionCombo_->currentData().toInt();
-    // Marching cubes on a background thread (touches only the snapshot + mesh).
+    // Marching cubes on a worker thread (touches only the snapshot + mesh).
     meshWatcher_.setFuture(QtConcurrent::run(
         [v, smooth, down] { return lumen_mesh_generate(v, smooth, down); }));
 }
 
 void MainWindow::onMeshReady() {
+    // Back on the UI thread: read this segment's mesh, tint it, keep going.
+    LumenVolume* v = st_.volume;
+    if (v && pendingSegIndex_ < int(pendingSegIds_.size())) {
+        const int id = pendingSegIds_[pendingSegIndex_];
+        const int vcount = lumen_mesh_vertex_count(v);
+        const int icount = lumen_mesh_index_count(v);
+        const float* verts = lumen_mesh_vertices(v);
+        const float* norms = lumen_mesh_normals(v);
+        const unsigned int* idx = lumen_mesh_indices(v);
+        if (vcount > 0 && icount > 0 && verts && idx) {
+            MeshView::MeshPiece piece;
+            piece.interleaved.resize(size_t(vcount) * 6);
+            for (int i = 0; i < vcount; ++i) {
+                float* dst = &piece.interleaved[size_t(i) * 6];
+                for (int k = 0; k < 3; ++k) dst[k] = verts[size_t(i) * 3 + k];
+                for (int k = 0; k < 3; ++k)
+                    dst[3 + k] = norms ? norms[size_t(i) * 3 + k] : 0.0f;
+            }
+            piece.indices.assign(idx, idx + icount);
+            int r = 200, g = 200, b = 200;
+            lumen_seg_get_color(v, id, &r, &g, &b);
+            piece.color[0] = r / 255.0f;
+            piece.color[1] = g / 255.0f;
+            piece.color[2] = b / 255.0f;
+            meshPieces_.push_back(std::move(piece));
+        }
+    }
+    ++pendingSegIndex_;
+    startNextMeshSegment();
+}
+
+void MainWindow::finishMeshGeneration() {
     generating_ = false;
     generateBtn_->setText("Generate / Update 3D");
+    long tris = 0, verts = 0;
+    for (const auto& p : meshPieces_) {
+        tris += long(p.indices.size() / 3);
+        verts += long(p.interleaved.size() / 6);
+    }
+    meshView_->setMeshes(meshPieces_);
+    meshInfoLabel_->setText(QString("Surfaces: %1\nTriangles: %2\nVertices: %3")
+                                .arg(meshPieces_.size())
+                                .arg(tris)
+                                .arg(verts));
     LumenVolume* v = st_.volume;
-    const int tris = meshWatcher_.result();
-    const int verts = v ? lumen_mesh_vertex_count(v) : 0;
-    meshView_->setMesh(v);
-    meshInfoLabel_->setText(
-        QString("Triangles: %1\nVertices: %2").arg(tris).arg(verts));
     generateBtn_->setEnabled(v && lumen_seg_count(v) > 0);
     exportStlBtn_->setEnabled(tris > 0);
 }
