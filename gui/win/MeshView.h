@@ -66,6 +66,7 @@ public:
 signals:
     // A lasso was closed (>= 3 points); points are in widget pixels (y-down).
     void scissorFinished(const QList<QPointF>& poly);
+    void doubleClicked();  // toggle pane maximize
 
 public slots:
     void resetView();                    // reframe to bounds + default orientation
@@ -81,6 +82,7 @@ protected:
     void mousePressEvent(QMouseEvent*) override;
     void mouseMoveEvent(QMouseEvent*) override;
     void mouseReleaseEvent(QMouseEvent*) override;
+    void mouseDoubleClickEvent(QMouseEvent*) override;
     void wheelEvent(QWheelEvent*) override;
 
 private:

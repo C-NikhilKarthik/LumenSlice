@@ -61,7 +61,8 @@ if(WIN32)
         gui/win/main.cpp
         gui/win/MainWindow.cpp
         gui/win/SliceView.cpp
-        gui/win/MeshView.cpp)
+        gui/win/MeshView.cpp
+        gui/win/RangeSlider.h)  # header-only Q_OBJECT: list it so AUTOMOC mocs it
     target_link_libraries(LumenSlice PRIVATE
         LumenCore
         Qt6::Widgets Qt6::OpenGLWidgets Qt6::Concurrent

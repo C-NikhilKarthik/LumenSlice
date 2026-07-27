@@ -458,6 +458,8 @@ void MeshView::mouseReleaseEvent(QMouseEvent* e) {
     }
 }
 
+void MeshView::mouseDoubleClickEvent(QMouseEvent*) { emit doubleClicked(); }
+
 void MeshView::wheelEvent(QWheelEvent* e) {
     zoomBy(e->angleDelta().y() > 0 ? 0.9f : 1.1f);
 }

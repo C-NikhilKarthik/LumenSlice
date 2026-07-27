@@ -14,6 +14,7 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
+#include <QGridLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -34,6 +35,7 @@
 #include <QStatusBar>
 #include <QStringList>
 #include <QTableWidget>
+#include <QTimer>
 #include <QToolButton>
 #include <QUrl>
 #include <QVBoxLayout>
@@ -42,6 +44,7 @@
 #include <vector>
 
 #include "MeshView.h"
+#include "RangeSlider.h"
 #include "SliceView.h"
 
 namespace lumenwin {
@@ -116,12 +119,9 @@ MainWindow::MainWindow() {
     panels_->addWidget(buildMarkupPanel());
     rootLayout->addWidget(panels_);
 
-    central_ = new QStackedWidget;
-    central_->addWidget(buildSliceBoard());
     meshView_ = new MeshView;
     meshView_->setMarkupModel(&markups_);
-    central_->addWidget(meshView_);
-    rootLayout->addWidget(central_, 1);
+    rootLayout->addWidget(buildQuad(), 1);
 
     auto* rootWidget = new QWidget;
     rootWidget->setLayout(rootLayout);
@@ -129,6 +129,8 @@ MainWindow::MainWindow() {
 
     connect(&meshWatcher_, &QFutureWatcher<int>::finished, this,
             &MainWindow::onMeshReady);
+    connect(&loadWatcher_, &QFutureWatcher<LoadResult>::finished, this,
+            &MainWindow::onLoadReady);
     connect(meshView_, &MeshView::scissorFinished, this,
             &MainWindow::onScissorFinished);
 
@@ -267,6 +269,13 @@ QWidget* MainWindow::buildVisualizePanel() {
         refreshCanvas();
     });
     body(ovBox)->addWidget(crosshairCheck_);
+    auto* orientCheck = new QCheckBox("Orientation labels (R/L/A/P/S/I)");
+    orientCheck->setChecked(st_.showOrientationLabels);
+    connect(orientCheck, &QCheckBox::toggled, this, [this](bool on) {
+        st_.showOrientationLabels = on;
+        refreshCanvas();
+    });
+    body(ovBox)->addWidget(orientCheck);
     v->addWidget(ovBox);
 
     v->addStretch();
@@ -313,38 +322,53 @@ QWidget* MainWindow::buildSegmentPanel() {
     {
         auto* w = new QWidget;
         auto* f = new QVBoxLayout(w);
-        f->addWidget(new QLabel("Label every voxel in this HU window into the "
-                                "active segment."));
-        threshLoSpin_ = new QDoubleSpinBox;
-        threshLoSpin_->setRange(-4000, 4000);
-        threshLoSpin_->setDecimals(0);
-        threshLoSpin_->setValue(300);
-        threshHiSpin_ = new QDoubleSpinBox;
-        threshHiSpin_->setRange(-4000, 4000);
-        threshHiSpin_->setDecimals(0);
-        threshHiSpin_->setValue(3000);
-        auto* row = new QHBoxLayout;
-        row->addWidget(new QLabel("Low"));
-        row->addWidget(threshLoSpin_);
-        row->addWidget(new QLabel("High"));
-        row->addWidget(threshHiSpin_);
-        f->addLayout(row);
+        f->addWidget(new QLabel("Drag the handles to label every voxel in this HU "
+                                "window into the active segment (applies live)."));
+        threshLabel_ = new QLabel("Low 300  —  High 3000 HU");
+        f->addWidget(threshLabel_);
+        threshSlider_ = new RangeSlider;
+        threshSlider_->setBounds(-1000, 3000);
+        threshSlider_->setValues(300, 3000);
+        f->addWidget(threshSlider_);
+        // Live, debounced threshold; one undo snapshot per drag.
+        threshTimer_ = new QTimer(this);
+        threshTimer_->setSingleShot(true);
+        threshTimer_->setInterval(120);
+        connect(threshTimer_, &QTimer::timeout, this, &MainWindow::applyThreshold);
+        connect(threshSlider_, &RangeSlider::editingStarted, this, [this] {
+            LumenVolume* v = st_.volume;
+            if (v && lumen_seg_active(v) != 0) {
+                lumen_seg_push_undo(v);
+                updateUndoRedo();
+            }
+        });
+        connect(threshSlider_, &RangeSlider::rangeChanged, this,
+                [this](double lo, double hi) {
+                    threshLabel_->setText(QString("Low %1  —  High %2 HU")
+                                              .arg(qRound(lo))
+                                              .arg(qRound(hi)));
+                    threshTimer_->start();  // debounce, then applyThreshold()
+                });
         auto* presets = new QHBoxLayout;
-        struct T { const char* n; float lo, hi; };
+        struct T { const char* n; double lo, hi; };
         for (T t : {T{"Bone", 300, 3000}, T{"Soft", 40, 80},
                     T{"Lung", -900, -400}}) {
             auto* b = new QPushButton(t.n);
             connect(b, &QPushButton::clicked, this, [this, t] {
-                threshLoSpin_->setValue(t.lo);
-                threshHiSpin_->setValue(t.hi);
+                threshSlider_->setValues(t.lo, t.hi);
+                threshLabel_->setText(QString("Low %1  —  High %2 HU")
+                                          .arg(qRound(t.lo))
+                                          .arg(qRound(t.hi)));
+                LumenVolume* v = st_.volume;
+                if (v && lumen_seg_active(v) != 0) {
+                    lumen_seg_push_undo(v);
+                    updateUndoRedo();
+                }
+                applyThreshold();
             });
             presets->addWidget(b);
         }
         f->addLayout(presets);
-        auto* applyBtn = new QPushButton("Apply threshold");
-        connect(applyBtn, &QPushButton::clicked, this,
-                &MainWindow::applyThreshold);
-        f->addWidget(applyBtn);
         auto* otsuBtn = new QPushButton("Otsu auto-threshold");
         connect(otsuBtn, &QPushButton::clicked, this, &MainWindow::applyOtsu);
         f->addWidget(otsuBtn);
@@ -792,17 +816,22 @@ void MainWindow::onMarkupPointPicked(int x, int y, int z) {
 }
 
 // ---------------------------------------------------------------------------
-// Slice board (3 panes + sliders)
+// Canvas quad: Axial / Coronal / Sagittal / 3D, each double-click-maximizable
 // ---------------------------------------------------------------------------
-QWidget* MainWindow::buildSliceBoard() {
+QWidget* MainWindow::buildQuad() {
     auto* board = new QWidget;
-    auto* h = new QHBoxLayout(board);
-    h->setContentsMargins(6, 6, 6, 6);
-    h->setSpacing(6);
+    quadLayout_ = new QGridLayout(board);
+    quadLayout_->setContentsMargins(6, 6, 6, 6);
+    quadLayout_->setSpacing(6);
     const int axes[3] = {LUMEN_AXIS_AXIAL, LUMEN_AXIS_CORONAL,
                          LUMEN_AXIS_SAGITTAL};
+    const int cellPos[4][2] = {{0, 0}, {0, 1}, {1, 0}, {1, 1}};
+
     for (int i = 0; i < 3; ++i) {
-        auto* col = new QVBoxLayout;
+        auto* cell = new QWidget;
+        auto* col = new QVBoxLayout(cell);
+        col->setContentsMargins(0, 0, 0, 0);
+        col->setSpacing(2);
         panes_[i] = new SliceView(axes[i], &st_);
         connect(panes_[i], &SliceView::sliceScrolled, this,
                 &MainWindow::onSliceScrolled);
@@ -820,15 +849,52 @@ QWidget* MainWindow::buildSliceBoard() {
                 &MainWindow::onMarkupPointPicked);
         connect(panes_[i], &SliceView::strokeBegan, this,
                 &MainWindow::onStrokeBegan);
+        connect(panes_[i], &SliceView::doubleClicked, this,
+                [this, i] { toggleMaximize(i); });
         col->addWidget(panes_[i], 1);
         sliders_[i] = new QSlider(Qt::Horizontal);
         const int axis = axes[i];
         connect(sliders_[i], &QSlider::valueChanged, this,
                 [this, axis](int val) { onSliceScrolled(axis, val); });
         col->addWidget(sliders_[i]);
-        h->addLayout(col, 1);
+        quadCells_[i] = cell;
+        quadLayout_->addWidget(cell, cellPos[i][0], cellPos[i][1]);
     }
+    // Fourth cell: the 3D view.
+    quadCells_[3] = meshView_;
+    connect(meshView_, &MeshView::doubleClicked, this,
+            [this] { toggleMaximize(3); });
+    quadLayout_->addWidget(meshView_, cellPos[3][0], cellPos[3][1]);
+
+    quadLayout_->setRowStretch(0, 1);
+    quadLayout_->setRowStretch(1, 1);
+    quadLayout_->setColumnStretch(0, 1);
+    quadLayout_->setColumnStretch(1, 1);
     return board;
+}
+
+// Double-click maximizes a cell (hides the other three); double-click again
+// restores the 2x2 grid.
+void MainWindow::toggleMaximize(int cell) {
+    maximized_ = (maximized_ == cell) ? -1 : cell;
+    for (int i = 0; i < 4; ++i)
+        if (quadCells_[i])
+            quadCells_[i]->setVisible(maximized_ == -1 || maximized_ == i);
+
+    // Collapse the empty row/column so the maximized cell fills the canvas.
+    const int pos[4][2] = {{0, 0}, {0, 1}, {1, 0}, {1, 1}};
+    if (maximized_ == -1) {
+        quadLayout_->setRowStretch(0, 1);
+        quadLayout_->setRowStretch(1, 1);
+        quadLayout_->setColumnStretch(0, 1);
+        quadLayout_->setColumnStretch(1, 1);
+    } else {
+        const int r = pos[maximized_][0], c = pos[maximized_][1];
+        quadLayout_->setRowStretch(0, r == 0 ? 1 : 0);
+        quadLayout_->setRowStretch(1, r == 1 ? 1 : 0);
+        quadLayout_->setColumnStretch(0, c == 0 ? 1 : 0);
+        quadLayout_->setColumnStretch(1, c == 1 ? 1 : 0);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -841,16 +907,31 @@ void MainWindow::openFolder() {
 }
 
 void MainWindow::loadPath(const QString& path) {
-    std::string status;
-    if (!vol_.load(path.toStdString(), status)) {
-        setStatus(QString("Could not load: %1")
-                      .arg(QString::fromStdString(status)));
-        QMessageBox::warning(this, "LumenSlice",
-                             QString::fromStdString(status).isEmpty()
-                                 ? "Could not load the DICOM folder."
-                                 : QString::fromStdString(status));
+    if (loading_) return;
+    loading_ = true;
+    setStatus(QString("Loading %1 …").arg(path));
+    // Ingestion (recursive crawl + decode) runs off the UI thread so a large
+    // series never freezes the window; the volume is adopted back on the UI thread.
+    loadWatcher_.setFuture(QtConcurrent::run([path]() -> LoadResult {
+        char msg[512] = {0};
+        LumenVolume* v =
+            lumen_load_folder(path.toUtf8().constData(), msg, sizeof(msg));
+        return LoadResult{v, QString::fromUtf8(msg)};
+    }));
+}
+
+void MainWindow::onLoadReady() {
+    loading_ = false;
+    const LoadResult r = loadWatcher_.result();
+    if (!r.volume) {
+        setStatus(QString("Could not load: %1").arg(r.message));
+        QMessageBox::warning(
+            this, "LumenSlice",
+            r.message.isEmpty() ? "Could not load the DICOM folder." : r.message);
         return;
     }
+    vol_.adopt(r.volume);
+    const std::string status = r.message.toStdString();
     st_.volume = vol_.get();
     LumenVolume* v = st_.volume;
 
@@ -895,7 +976,6 @@ void MainWindow::selectTab(int tab) {
     panels_->setCurrentIndex(tab);
     // Segment tab enables canvas tool interactions; others keep left-drag = W/L.
     st_.segmentInteractive = (tab == 1);
-    central_->setCurrentIndex(tab == 2 ? 1 : 0);
     // Markup placement is only active on the Markups tab with the toggle on.
     st_.markupPlacing = (tab == 4) && markups_.placing();
     if (tab == 3) rebuildExportSegmentList();  // reflect current segments/names
@@ -983,24 +1063,28 @@ void MainWindow::addSegment() {
 }
 
 void MainWindow::applyThreshold() {
+    // Fills the active segment from the slider's HU window. No undo snapshot here:
+    // the live drag snapshots once on editingStarted, and presets/Otsu snapshot
+    // before calling this.
     LumenVolume* v = st_.volume;
-    if (!v || lumen_seg_active(v) == 0) return;
-    lumen_seg_push_undo(v);
-    lumen_seg_threshold(v, float(threshLoSpin_->value()),
-                        float(threshHiSpin_->value()));
-    updateUndoRedo();
+    if (!v || lumen_seg_active(v) == 0 || !threshSlider_) return;
+    lumen_seg_threshold(v, float(threshSlider_->lowValue()),
+                        float(threshSlider_->highValue()));
     refreshCanvas();
     updateSegmentCounts();
 }
 
 void MainWindow::applyOtsu() {
     LumenVolume* v = st_.volume;
-    if (!v) return;
+    if (!v || lumen_seg_active(v) == 0) return;
     const float t = lumen_seg_otsu(v);
     float lo = 0, hi = 0;
     lumen_hu_range(v, &lo, &hi);
-    threshLoSpin_->setValue(t);
-    threshHiSpin_->setValue(hi);
+    threshSlider_->setValues(t, hi);
+    threshLabel_->setText(
+        QString("Low %1  —  High %2 HU").arg(qRound(t)).arg(qRound(hi)));
+    lumen_seg_push_undo(v);
+    updateUndoRedo();
     applyThreshold();
 }
 
@@ -1327,6 +1411,7 @@ void MainWindow::refreshVolumeInfo() {
     float lo = 0, hi = 0;
     lumen_hu_range(v, &lo, &hi);
     huLabel_->setText(QString("%1 … %2").arg(lo, 0, 'f', 0).arg(hi, 0, 'f', 0));
+    if (threshSlider_) threshSlider_->setBounds(lo, hi);
 
     // Curated patient/study summary from the meta JSON.
     QStringList lines;

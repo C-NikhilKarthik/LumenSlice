@@ -39,6 +39,13 @@ public:
         }
     }
 
+    // Take ownership of a handle produced elsewhere (e.g. a worker thread's
+    // lumen_load_folder), replacing any current volume.
+    void adopt(LumenVolume* v) {
+        reset();
+        volume_ = v;
+    }
+
     bool valid() const { return volume_ != nullptr; }
     LumenVolume* get() const { return volume_; }
 

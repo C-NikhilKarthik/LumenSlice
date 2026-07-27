@@ -38,7 +38,7 @@ void planeSpacing(int axis, float sx, float sy, float sz, float* ax, float* ay) 
 
 SliceView::SliceView(int axis, ViewState* state, QWidget* parent)
     : QWidget(parent), axis_(axis), st_(state) {
-    setMouseTracking(false);
+    setMouseTracking(true);  // for the brush-ring cursor preview
     setMinimumSize(160, 160);
     setAttribute(Qt::WA_OpaquePaintEvent, true);
     setFocusPolicy(Qt::StrongFocus);
@@ -135,7 +135,8 @@ void SliceView::paintEvent(QPaintEvent*) {
         }
     }
 
-    // Crosshair / slice-intersection lines at the shared focus voxel.
+    // Crosshair / slice-intersection lines at the shared focus voxel. Each plane
+    // has its own colour: axial red, coronal green, sagittal yellow.
     if (st_->showCrosshair) {
         int cx = 0, cy = 0;
         lumen_voxel_to_slice_pixel(v, axis_, st_->focus[0], st_->focus[1],
@@ -143,12 +144,49 @@ void SliceView::paintEvent(QPaintEvent*) {
         if (cx >= 0 && cx < w && cy >= 0 && cy < h) {
             const double lx = target.left() + (cx + 0.5) / w * target.width();
             const double ly = target.top() + (cy + 0.5) / h * target.height();
-            painter.setPen(QPen(QColor(90, 200, 255, 180), 1));
+            QColor ch = axis_ == LUMEN_AXIS_AXIAL
+                            ? QColor(235, 80, 80)
+                            : (axis_ == LUMEN_AXIS_CORONAL ? QColor(90, 210, 100)
+                                                           : QColor(240, 210, 60));
+            ch.setAlpha(190);
+            painter.setPen(QPen(ch, 1));
             painter.drawLine(QPointF(target.left(), ly),
                              QPointF(target.right(), ly));
             painter.drawLine(QPointF(lx, target.top()),
                              QPointF(lx, target.bottom()));
         }
+    }
+
+    // Anatomical orientation labels at the four edges (approximate radiological
+    // convention per plane).
+    if (st_->showOrientationLabels) {
+        const char* lbl[4];  // left, right, top, bottom
+        if (axis_ == LUMEN_AXIS_AXIAL) {
+            lbl[0] = "R"; lbl[1] = "L"; lbl[2] = "A"; lbl[3] = "P";
+        } else if (axis_ == LUMEN_AXIS_CORONAL) {
+            lbl[0] = "R"; lbl[1] = "L"; lbl[2] = "S"; lbl[3] = "I";
+        } else {
+            lbl[0] = "A"; lbl[1] = "P"; lbl[2] = "S"; lbl[3] = "I";
+        }
+        painter.setPen(QColor(150, 200, 230, 200));
+        const int cyv = target.center().y();
+        const int cxv = target.center().x();
+        painter.drawText(target.left() + 3, cyv + 5, lbl[0]);
+        painter.drawText(target.right() - 12, cyv + 5, lbl[1]);
+        painter.drawText(cxv - 4, target.top() + 14, lbl[2]);
+        painter.drawText(cxv - 4, target.bottom() - 5, lbl[3]);
+    }
+
+    // Brush-ring cursor preview while a paint/erase tool is active.
+    if (st_->segmentInteractive && hovering_ &&
+        (st_->tool == Tool::Paint || st_->tool == Tool::Erase)) {
+        const double scale = double(target.width()) / w;  // px -> display
+        const double rr = std::max(2.0, st_->brushRadius * scale);
+        painter.setPen(QPen(st_->tool == Tool::Erase ? QColor(255, 120, 120)
+                                                     : QColor(120, 220, 255),
+                            1, Qt::DashLine));
+        painter.setBrush(Qt::NoBrush);
+        painter.drawEllipse(QPointF(hoverPos_), rr, rr);
     }
 
     // Markup dots for defining points that lie on this slice (+ pending points).
@@ -225,8 +263,9 @@ void SliceView::mousePressEvent(QMouseEvent* e) {
         return;
     }
 
-    // Right-drag is always window/level.
-    if (e->button() == Qt::RightButton) {
+    // Window/level is on a modifier drag: right-button, or Shift+left.
+    if (e->button() == Qt::RightButton ||
+        (e->button() == Qt::LeftButton && (e->modifiers() & Qt::ShiftModifier))) {
         drag_ = Drag::WindowLevel;
         return;
     }
@@ -258,12 +297,24 @@ void SliceView::mousePressEvent(QMouseEvent* e) {
         }
     }
 
-    // Default: left-drag adjusts window/level (the primary W/L control).
-    drag_ = Drag::WindowLevel;
+    // Default: a plain left-click locates — set the shared focus and link panes.
+    if (inside) {
+        int x = 0, y = 0, z = 0;
+        lumen_slice_pixel_to_voxel(v, axis_, index, pxx, pyy, &x, &y, &z);
+        emit focusPicked(x, y, z);
+    }
 }
 
 void SliceView::mouseMoveEvent(QMouseEvent* e) {
-    if (drag_ == Drag::None) return;
+    // Track hover for the brush-ring cursor preview.
+    hoverPos_ = e->pos();
+    hovering_ = true;
+    if (drag_ == Drag::None) {
+        if (st_->segmentInteractive &&
+            (st_->tool == Tool::Paint || st_->tool == Tool::Erase))
+            update();  // redraw the ring at the new position
+        return;
+    }
     LumenVolume* v = st_->volume;
     if (!v) return;
 
@@ -286,5 +337,12 @@ void SliceView::mouseMoveEvent(QMouseEvent* e) {
 }
 
 void SliceView::mouseReleaseEvent(QMouseEvent*) { drag_ = Drag::None; }
+
+void SliceView::mouseDoubleClickEvent(QMouseEvent*) { emit doubleClicked(); }
+
+void SliceView::leaveEvent(QEvent*) {
+    hovering_ = false;
+    update();
+}
 
 }  // namespace lumenwin

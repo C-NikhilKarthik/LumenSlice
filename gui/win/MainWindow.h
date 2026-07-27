@@ -15,22 +15,31 @@
 #include "BridgeVolume.h"
 #include "MarkupModel.h"
 #include "MeshView.h"
+#include "RangeSlider.h"
 #include "ViewState.h"
 
 class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
+class QGridLayout;
 class QLabel;
 class QListWidget;
 class QPushButton;
 class QSlider;
 class QSpinBox;
 class QStackedWidget;
+class QTimer;
 class QToolButton;
 class QVBoxLayout;
 class QWidget;
 
 namespace lumenwin {
+
+// Result of an off-thread DICOM folder load.
+struct LoadResult {
+    LumenVolume* volume = nullptr;
+    QString message;
+};
 
 class SliceView;
 
@@ -48,6 +57,7 @@ protected:
 
 private slots:
     void openFolder();
+    void onLoadReady();
     void selectTab(int tab);
 
     // Canvas intents.
@@ -89,7 +99,8 @@ private:
     QWidget* buildThreeDPanel();
     QWidget* buildExportPanel();
     QWidget* buildMarkupPanel();
-    QWidget* buildSliceBoard();
+    QWidget* buildQuad();
+    void toggleMaximize(int cell);
     void rebuildMarkupList();
     void updateMarkupPaletteSelection();
     void updateMarkupPending();
@@ -119,8 +130,11 @@ private:
     ViewState st_;
     QString metaJson_;
 
-    // Canvas.
-    QStackedWidget* central_ = nullptr;
+    // Canvas: a 2x2 quad (Axial / Coronal / Sagittal / 3D), each cell
+    // double-click-maximizable.
+    QGridLayout* quadLayout_ = nullptr;
+    QWidget* quadCells_[4] = {nullptr, nullptr, nullptr, nullptr};
+    int maximized_ = -1;
     SliceView* panes_[3] = {nullptr, nullptr, nullptr};
     QSlider* sliders_[3] = {nullptr, nullptr, nullptr};
     MeshView* meshView_ = nullptr;
@@ -148,8 +162,9 @@ private:
     QHash<int, QString> segNames_;
     QComboBox* toolCombo_ = nullptr;
     QStackedWidget* toolDetail_ = nullptr;
-    QDoubleSpinBox* threshLoSpin_ = nullptr;
-    QDoubleSpinBox* threshHiSpin_ = nullptr;
+    RangeSlider* threshSlider_ = nullptr;
+    QLabel* threshLabel_ = nullptr;
+    QTimer* threshTimer_ = nullptr;
     QSlider* toleranceSlider_ = nullptr;
     QLabel* toleranceLabel_ = nullptr;
     QSlider* brushSlider_ = nullptr;
@@ -190,6 +205,10 @@ private:
     QPushButton* markupCancelBtn_ = nullptr;
     QWidget* markupListContainer_ = nullptr;
     QVBoxLayout* markupListLayout_ = nullptr;
+
+    // Off-thread folder load.
+    QFutureWatcher<LoadResult> loadWatcher_;
+    bool loading_ = false;
 
     // Mesh generation (off-thread, per-segment colored surfaces).
     QFutureWatcher<int> meshWatcher_;
