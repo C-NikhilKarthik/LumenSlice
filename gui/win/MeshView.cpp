@@ -17,6 +17,8 @@
 #include <algorithm>
 #include <cmath>
 
+#include "MarkupModel.h"
+
 namespace lumenwin {
 
 namespace {
@@ -329,7 +331,56 @@ void MeshView::paintGL() {
         QPolygonF poly(lasso_);
         painter.drawPolygon(poly);
     }
+    drawMarkups(painter);
     painter.end();
+}
+
+// Project an mm point through the last frame's proj*view to widget pixels.
+bool MeshView::project(const QVector3D& mm, QPointF* out) const {
+    const QVector4D clip = lastMvp_ * QVector4D(mm, 1.0f);
+    if (clip.w() <= 0.0001f) return false;  // behind the camera
+    const float ndcX = clip.x() / clip.w();
+    const float ndcY = clip.y() / clip.w();
+    out->setX((ndcX * 0.5f + 0.5f) * width());
+    out->setY((1.0f - (ndcY * 0.5f + 0.5f)) * height());
+    return true;
+}
+
+void MeshView::drawMarkups(QPainter& p) {
+    if (!markups_) return;
+    auto dot = [&](const QPointF& s, const QColor& c, double r) {
+        p.setPen(QPen(c.darker(140), 1.5));
+        p.setBrush(c);
+        p.drawEllipse(s, r, r);
+    };
+    for (const auto& m : markups_->markups()) {
+        if (!m.visible) continue;
+        const QColor col = markups_->color(m);
+        std::vector<QPointF> pts;
+        bool ok = true;
+        for (const auto& v : m.voxels) {
+            QPointF s;
+            if (!project(markups_->mm(v), &s)) { ok = false; break; }
+            pts.push_back(s);
+        }
+        if (!ok) continue;
+        if (pts.size() == 3) {  // plane -> filled triangle
+            QPolygonF tri({pts[0], pts[1], pts[2]});
+            p.setPen(QPen(col, 2));
+            p.setBrush(QColor(col.red(), col.green(), col.blue(), 60));
+            p.drawPolygon(tri);
+        } else if (pts.size() == 2) {  // line -> segment
+            p.setPen(QPen(col, 2));
+            p.drawLine(pts[0], pts[1]);
+        }
+        for (const QPointF& s : pts) dot(s, col, 4.5);
+    }
+    // In-progress (pending) points.
+    const QColor pc = markups_->pendingColor();
+    for (const auto& v : markups_->pending()) {
+        QPointF s;
+        if (project(markups_->mm(v), &s)) dot(s, pc, 4.0);
+    }
 }
 
 void MeshView::drawGnomon(QPainter& p) {

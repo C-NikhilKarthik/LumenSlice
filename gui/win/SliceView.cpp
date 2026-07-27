@@ -6,6 +6,8 @@
 #include <QWheelEvent>
 #include <algorithm>
 
+#include "MarkupModel.h"
+
 namespace lumenwin {
 
 namespace {
@@ -149,6 +151,31 @@ void SliceView::paintEvent(QPaintEvent*) {
         }
     }
 
+    // Markup dots for defining points that lie on this slice (+ pending points).
+    if (st_->markups) {
+        painter.setRenderHint(QPainter::Antialiasing, true);
+        auto drawDot = [&](const std::array<int, 3>& vp, const QColor& col,
+                           bool filled) {
+            int px = 0, py = 0;
+            lumen_voxel_to_slice_pixel(v, axis_, vp[0], vp[1], vp[2], &px, &py);
+            if (px < 0 || px >= w || py < 0 || py >= h) return;
+            const double dx = target.left() + (px + 0.5) / w * target.width();
+            const double dy = target.top() + (py + 0.5) / h * target.height();
+            painter.setPen(QPen(col, 2));
+            painter.setBrush(filled ? QBrush(col) : Qt::NoBrush);
+            painter.drawEllipse(QPointF(dx, dy), 4.5, 4.5);
+        };
+        for (const auto& m : st_->markups->markups()) {
+            if (!m.visible) continue;
+            const QColor col = st_->markups->color(m);
+            for (const auto& vp : m.voxels)
+                if (MarkupModel::onSlice(vp, axis_, index)) drawDot(vp, col, true);
+        }
+        const QColor pc = st_->markups->pendingColor();
+        for (const auto& vp : st_->markups->pending())
+            if (MarkupModel::onSlice(vp, axis_, index)) drawDot(vp, pc, false);
+    }
+
     // Slice counter, bottom-right.
     const int count = lumen_slice_count(v, axis_);
     painter.setPen(QColor(150, 156, 168));
@@ -187,6 +214,14 @@ void SliceView::mousePressEvent(QMouseEvent* e) {
         int x = 0, y = 0, z = 0;
         lumen_slice_pixel_to_voxel(v, axis_, index, pxx, pyy, &x, &y, &z);
         emit focusPicked(x, y, z);
+        return;
+    }
+
+    // Markup placement: a plain left-click drops a defining point.
+    if (st_->markupPlacing && e->button() == Qt::LeftButton && inside) {
+        int x = 0, y = 0, z = 0;
+        lumen_slice_pixel_to_voxel(v, axis_, index, pxx, pyy, &x, &y, &z);
+        emit markupPointPicked(x, y, z);
         return;
     }
 

@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "BridgeVolume.h"
+#include "MarkupModel.h"
 #include "MeshView.h"
 #include "ViewState.h"
 
@@ -25,6 +26,7 @@ class QPushButton;
 class QSlider;
 class QSpinBox;
 class QStackedWidget;
+class QToolButton;
 class QVBoxLayout;
 class QWidget;
 
@@ -76,6 +78,9 @@ private slots:
     void exportStl();
     void exportPng();
 
+    // Markups.
+    void onMarkupPointPicked(int x, int y, int z);
+
 private:
     // UI construction.
     QWidget* buildTabRail();
@@ -83,7 +88,12 @@ private:
     QWidget* buildSegmentPanel();
     QWidget* buildThreeDPanel();
     QWidget* buildExportPanel();
+    QWidget* buildMarkupPanel();
     QWidget* buildSliceBoard();
+    void rebuildMarkupList();
+    void updateMarkupPaletteSelection();
+    void updateMarkupPending();
+    void refreshMarkups();
 
     // Sequential per-segment colored mesh generation (one snapshot_label ->
     // generate -> readback per visible non-empty segment, worker off the UI thread).
@@ -170,6 +180,16 @@ private:
     QPushButton* exportStlBtn_ = nullptr;
     QPushButton* exportPngBtn_ = nullptr;
     QLabel* exportMsgLabel_ = nullptr;
+
+    // Markups (client-side).
+    MarkupModel markups_;
+    QComboBox* markupKindCombo_ = nullptr;
+    QList<QToolButton*> markupPaletteBtns_;
+    QCheckBox* markupPlaceCheck_ = nullptr;
+    QLabel* markupPendingLabel_ = nullptr;
+    QPushButton* markupCancelBtn_ = nullptr;
+    QWidget* markupListContainer_ = nullptr;
+    QVBoxLayout* markupListLayout_ = nullptr;
 
     // Mesh generation (off-thread, per-segment colored surfaces).
     QFutureWatcher<int> meshWatcher_;

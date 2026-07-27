@@ -35,6 +35,7 @@ signals:
     void paintStroke(int axis, int index, int cx, int cy, int radius, bool add);
     void floodClicked(int x, int y, int z);       // region-grow seed (voxel space)
     void levelTraceClicked(int axis, int index, int cx, int cy);
+    void markupPointPicked(int x, int y, int z);   // markup placement (voxel space)
     // A stroke/gesture that mutated the mask ended — good point to snapshot undo.
     void strokeBegan();
 

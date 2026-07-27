@@ -108,15 +108,18 @@ MainWindow::MainWindow() {
 
     panels_ = new QStackedWidget;
     panels_->setFixedWidth(kPanelWidth);
+    st_.markups = &markups_;
     panels_->addWidget(buildVisualizePanel());
     panels_->addWidget(buildSegmentPanel());
     panels_->addWidget(buildThreeDPanel());
     panels_->addWidget(buildExportPanel());
+    panels_->addWidget(buildMarkupPanel());
     rootLayout->addWidget(panels_);
 
     central_ = new QStackedWidget;
     central_->addWidget(buildSliceBoard());
     meshView_ = new MeshView;
+    meshView_->setMarkupModel(&markups_);
     central_->addWidget(meshView_);
     rootLayout->addWidget(central_, 1);
 
@@ -145,9 +148,9 @@ QWidget* MainWindow::buildTabRail() {
     v->setContentsMargins(8, 12, 8, 12);
     v->setSpacing(8);
 
-    const char* labels[] = {"View", "Seg", "3D", "Save"};
+    const char* labels[] = {"View", "Seg", "3D", "Save", "Mark"};
     auto* group = new QButtonGroup(this);
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < 5; ++i) {
         auto* b = new QToolButton;
         b->setText(labels[i]);
         b->setCheckable(true);
@@ -591,6 +594,204 @@ QWidget* MainWindow::buildExportPanel() {
 }
 
 // ---------------------------------------------------------------------------
+// Markups panel
+// ---------------------------------------------------------------------------
+QWidget* MainWindow::buildMarkupPanel() {
+    auto* scroll = new QScrollArea;
+    scroll->setWidgetResizable(true);
+    auto* page = new QWidget;
+    auto* v = new QVBoxLayout(page);
+    v->setSpacing(10);
+
+    v->addWidget(new QLabel(
+        "Drop points on any slice; they show in the 3D view. Point = 1 click, "
+        "Line = 2, Plane = 3 (a triangle)."));
+
+    auto* typeBox = section("Type");
+    markupKindCombo_ = new QComboBox;
+    markupKindCombo_->addItem("Point", int(MarkupModel::Kind::Point));
+    markupKindCombo_->addItem("Line", int(MarkupModel::Kind::Line));
+    markupKindCombo_->addItem("Plane", int(MarkupModel::Kind::Plane));
+    connect(markupKindCombo_, &QComboBox::currentIndexChanged, this, [this](int) {
+        markups_.setKind(MarkupModel::Kind(markupKindCombo_->currentData().toInt()));
+        markups_.cancelPending();
+        updateMarkupPending();
+        refreshMarkups();
+    });
+    body(typeBox)->addWidget(markupKindCombo_);
+    v->addWidget(typeBox);
+
+    auto* colorBox = section("Colour");
+    auto* palRow = new QHBoxLayout;
+    palRow->setSpacing(4);
+    for (int i = 0; i < int(MarkupModel::palette().size()); ++i) {
+        auto* b = new QToolButton;
+        b->setFixedSize(20, 20);
+        b->setToolTip(QString("Colour %1").arg(i + 1));
+        connect(b, &QToolButton::clicked, this, [this, i] {
+            markups_.pickNextColor(i);
+            updateMarkupPaletteSelection();
+            refreshMarkups();
+        });
+        markupPaletteBtns_.append(b);
+        palRow->addWidget(b);
+    }
+    palRow->addStretch();
+    body(colorBox)->addLayout(palRow);
+    body(colorBox)->addWidget(
+        new QLabel("New markups use this colour until you pick another."));
+    v->addWidget(colorBox);
+
+    auto* placeBox = section("Place");
+    markupPlaceCheck_ = new QCheckBox("Place markups (click slices)");
+    connect(markupPlaceCheck_, &QCheckBox::toggled, this, [this](bool on) {
+        markups_.setPlacing(on);
+        st_.markupPlacing = on && currentTab_ == 4;
+        if (!on) markups_.cancelPending();
+        updateMarkupPending();
+        refreshMarkups();
+    });
+    body(placeBox)->addWidget(markupPlaceCheck_);
+    auto* pendRow = new QHBoxLayout;
+    markupPendingLabel_ = new QLabel;
+    markupCancelBtn_ = new QPushButton("Cancel point");
+    connect(markupCancelBtn_, &QPushButton::clicked, this, [this] {
+        markups_.cancelPending();
+        updateMarkupPending();
+        refreshMarkups();
+    });
+    pendRow->addWidget(markupPendingLabel_, 1);
+    pendRow->addWidget(markupCancelBtn_);
+    body(placeBox)->addLayout(pendRow);
+    v->addWidget(placeBox);
+
+    auto* listBox = section("Markups");
+    markupListContainer_ = new QWidget;
+    markupListLayout_ = new QVBoxLayout(markupListContainer_);
+    markupListLayout_->setContentsMargins(0, 0, 0, 0);
+    markupListLayout_->setSpacing(3);
+    body(listBox)->addWidget(markupListContainer_);
+    auto* clearBtn = new QPushButton("Clear all");
+    connect(clearBtn, &QPushButton::clicked, this, [this] {
+        markups_.removeAll();
+        rebuildMarkupList();
+        updateMarkupPending();
+        refreshMarkups();
+    });
+    body(listBox)->addWidget(clearBtn);
+    v->addWidget(listBox);
+
+    v->addStretch();
+    finishPanel(scroll, page);
+    updateMarkupPaletteSelection();
+    updateMarkupPending();
+    return scroll;
+}
+
+void MainWindow::updateMarkupPaletteSelection() {
+    for (int i = 0; i < markupPaletteBtns_.size(); ++i) {
+        const QColor c = MarkupModel::paletteColor(i);
+        const bool sel = (i == markups_.nextColorIndex());
+        markupPaletteBtns_[i]->setStyleSheet(
+            QString("QToolButton{background:rgb(%1,%2,%3);border:%4;border-radius:4px;}")
+                .arg(c.red()).arg(c.green()).arg(c.blue())
+                .arg(sel ? "2px solid white" : "1px solid #555"));
+    }
+}
+
+void MainWindow::updateMarkupPending() {
+    if (!markupPendingLabel_) return;
+    const int have = int(markups_.pending().size());
+    const int need = MarkupModel::pointsNeeded(markups_.kind());
+    markupPendingLabel_->setText(
+        have > 0 ? QString("%1/%2 points placed…").arg(have).arg(need)
+                 : (markups_.placing() ? "Click a slice to drop a point."
+                                       : "Turn on, then click the slices."));
+    markupCancelBtn_->setVisible(have > 0);
+}
+
+void MainWindow::refreshMarkups() {
+    refreshCanvas();
+    if (meshView_) meshView_->update();
+}
+
+void MainWindow::rebuildMarkupList() {
+    if (!markupListLayout_) return;
+    QLayoutItem* item = nullptr;
+    while ((item = markupListLayout_->takeAt(0)) != nullptr) {
+        if (item->widget()) item->widget()->deleteLater();
+        delete item;
+    }
+    for (const auto& m : markups_.markups()) {
+        const int id = m.id;
+        auto* row = new QWidget;
+        auto* h = new QHBoxLayout(row);
+        h->setContentsMargins(2, 1, 2, 1);
+        h->setSpacing(4);
+
+        auto* vis = new QCheckBox;
+        vis->setChecked(m.visible);
+        connect(vis, &QCheckBox::toggled, this, [this, id](bool on) {
+            markups_.setVisible(id, on);
+            refreshMarkups();
+        });
+        h->addWidget(vis);
+
+        const QColor col = markups_.color(m);
+        auto* swatch = new QToolButton;
+        swatch->setFixedSize(16, 16);
+        swatch->setToolTip("Click to recolour");
+        swatch->setStyleSheet(
+            QString("background:rgb(%1,%2,%3);border:1px solid #555;")
+                .arg(col.red()).arg(col.green()).arg(col.blue()));
+        connect(swatch, &QToolButton::clicked, this, [this, id] {
+            // Cycle to the next palette colour.
+            const MarkupModel::Markup* found = nullptr;
+            for (const auto& mm : markups_.markups())
+                if (mm.id == id) found = &mm;
+            if (found)
+                markups_.setColorIndex(id, found->colorIndex + 1);
+            rebuildMarkupList();
+            refreshMarkups();
+        });
+        h->addWidget(swatch);
+
+        auto* name = new QLineEdit(m.name);
+        connect(name, &QLineEdit::editingFinished, this,
+                [this, id, name] { markups_.rename(id, name->text()); });
+        h->addWidget(name, 1);
+
+        auto* kind = new QLabel(MarkupModel::title(m.kind));
+        kind->setStyleSheet("color:#8a8f9a;");
+        h->addWidget(kind);
+
+        auto* del = new QToolButton;
+        del->setText("✕");
+        connect(del, &QToolButton::clicked, this, [this, id] {
+            markups_.remove(id);
+            rebuildMarkupList();
+            refreshMarkups();
+        });
+        h->addWidget(del);
+
+        markupListLayout_->addWidget(row);
+    }
+    if (markups_.markups().empty()) {
+        auto* empty = new QLabel("No markups yet.");
+        empty->setStyleSheet("color:#8a8f9a;");
+        markupListLayout_->addWidget(empty);
+    }
+}
+
+void MainWindow::onMarkupPointPicked(int x, int y, int z) {
+    const bool committed = markups_.place(x, y, z);
+    if (committed) rebuildMarkupList();
+    updateMarkupPaletteSelection();
+    updateMarkupPending();
+    refreshMarkups();
+}
+
+// ---------------------------------------------------------------------------
 // Slice board (3 panes + sliders)
 // ---------------------------------------------------------------------------
 QWidget* MainWindow::buildSliceBoard() {
@@ -615,6 +816,8 @@ QWidget* MainWindow::buildSliceBoard() {
                 &MainWindow::onFloodClicked);
         connect(panes_[i], &SliceView::levelTraceClicked, this,
                 &MainWindow::onLevelTraceClicked);
+        connect(panes_[i], &SliceView::markupPointPicked, this,
+                &MainWindow::onMarkupPointPicked);
         connect(panes_[i], &SliceView::strokeBegan, this,
                 &MainWindow::onStrokeBegan);
         col->addWidget(panes_[i], 1);
@@ -675,6 +878,12 @@ void MainWindow::loadPath(const QString& path) {
         segNames_[id] = QString("Segment %1").arg(id);
     }
 
+    // A fresh volume invalidates all markups (their voxel coords no longer map).
+    float sx = 1, sy = 1, sz = 1;
+    lumen_spacing(v, &sx, &sy, &sz);
+    markups_.resetForVolume(sx, sy, sz);
+    if (markupPlaceCheck_) markupPlaceCheck_->setChecked(false);
+
     setStatus(QString::fromStdString(status));
     refreshAll();
     meshView_->clearMeshes();
@@ -687,7 +896,10 @@ void MainWindow::selectTab(int tab) {
     // Segment tab enables canvas tool interactions; others keep left-drag = W/L.
     st_.segmentInteractive = (tab == 1);
     central_->setCurrentIndex(tab == 2 ? 1 : 0);
+    // Markup placement is only active on the Markups tab with the toggle on.
+    st_.markupPlacing = (tab == 4) && markups_.placing();
     if (tab == 3) rebuildExportSegmentList();  // reflect current segments/names
+    if (tab == 4) rebuildMarkupList();
     refreshCanvas();
 }
 

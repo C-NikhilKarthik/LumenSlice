@@ -11,6 +11,8 @@
 
 namespace lumenwin {
 
+class MarkupModel;
+
 // Active segmentation tool. Mirrors the macOS SegTool enum.
 enum class Tool {
     None = 0,     // no active tool: left-drag adjusts window/level
@@ -45,6 +47,10 @@ struct ViewState {
     Tool tool = Tool::None;
     int brushRadius = 12;             // paint/erase disk radius, slice pixels
     float tolerance = 100.0f;         // region-grow HU tolerance
+
+    // Markups: when placing, a plain left-click on a slice drops a point.
+    bool markupPlacing = false;
+    MarkupModel* markups = nullptr;   // borrowed, for slice-overlay drawing
 
     bool hasVolume() const { return volume != nullptr; }
 };

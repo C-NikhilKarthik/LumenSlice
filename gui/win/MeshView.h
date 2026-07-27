@@ -27,6 +27,8 @@ class QWidget;
 
 namespace lumenwin {
 
+class MarkupModel;
+
 class MeshView : public QOpenGLWidget, protected QOpenGLFunctions_3_3_Core {
     Q_OBJECT
 public:
@@ -57,6 +59,9 @@ public:
     // Scissor mode: left-drag draws a freehand lasso instead of orbiting.
     void setScissorMode(bool on);
     void clearLasso();
+
+    // Client-side markups to draw over the surface (borrowed).
+    void setMarkupModel(MarkupModel* m) { markups_ = m; }
 
 signals:
     // A lasso was closed (>= 3 points); points are in widget pixels (y-down).
@@ -89,6 +94,8 @@ private:
     void buildToolbar();
     void positionToolbar();
     void drawGnomon(class QPainter& p);
+    void drawMarkups(class QPainter& p);
+    bool project(const class QVector3D& mm, class QPointF* out) const;
     QMatrix4x4 viewMatrix() const;
     QMatrix4x4 projMatrix() const;
 
@@ -121,6 +128,8 @@ private:
     bool scissorMode_ = false;
     bool lassoActive_ = false;
     QList<QPointF> lasso_;
+
+    MarkupModel* markups_ = nullptr;
 };
 
 }  // namespace lumenwin
