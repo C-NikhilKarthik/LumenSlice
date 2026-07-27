@@ -144,24 +144,27 @@ MainWindow::MainWindow() {
 // ---------------------------------------------------------------------------
 QWidget* MainWindow::buildTabRail() {
     auto* rail = new QWidget;
-    rail->setFixedWidth(64);
-    rail->setStyleSheet("background:#1b1d23;");
+    rail->setFixedWidth(72);
+    rail->setStyleSheet("background:#141519;");
     auto* v = new QVBoxLayout(rail);
-    v->setContentsMargins(8, 12, 8, 12);
+    v->setContentsMargins(10, 14, 10, 14);
     v->setSpacing(8);
 
-    const char* labels[] = {"View", "Seg", "3D", "Save", "Mark"};
+    struct R { const char* glyph; const char* label; };
+    const R items[] = {{"◧", "View"}, {"✎", "Seg"}, {"◈", "3D"},
+                       {"⤓", "Save"}, {"⌖", "Mark"}};
     auto* group = new QButtonGroup(this);
     for (int i = 0; i < 5; ++i) {
         auto* b = new QToolButton;
-        b->setText(labels[i]);
+        b->setText(QString("%1\n%2").arg(items[i].glyph, items[i].label));
         b->setCheckable(true);
-        b->setFixedSize(48, 48);
+        b->setFixedSize(52, 52);
         b->setStyleSheet(
-            "QToolButton{color:#cfd2da;border:none;border-radius:8px;}"
-            "QToolButton:checked{background:#3a6df0;color:white;}");
+            "QToolButton{color:#a7adba;border:none;border-radius:12px;font-size:11px;}"
+            "QToolButton:hover{background:#22252d;color:#e7e9ef;}"
+            "QToolButton:checked{background:#4f7cf0;color:white;}");
         group->addButton(b, i);
-        v->addWidget(b);
+        v->addWidget(b, 0, Qt::AlignHCenter);
     }
     v->addStretch();
     group->button(0)->setChecked(true);
@@ -180,6 +183,7 @@ QWidget* MainWindow::buildVisualizePanel() {
     v->setSpacing(10);
 
     auto* openBtn = new QPushButton("Open DICOM Folder…");
+    openBtn->setObjectName("accent");
     connect(openBtn, &QPushButton::clicked, this, &MainWindow::openFolder);
     v->addWidget(openBtn);
 
@@ -296,6 +300,7 @@ QWidget* MainWindow::buildSegmentPanel() {
     // Segment list.
     auto* segBox = section("Segments");
     auto* addBtn = new QPushButton("+ Add segment");
+    addBtn->setObjectName("accent");
     connect(addBtn, &QPushButton::clicked, this, &MainWindow::addSegment);
     body(segBox)->addWidget(addBtn);
     segListContainer_ = new QWidget;
@@ -528,6 +533,7 @@ QWidget* MainWindow::buildThreeDPanel() {
     v->addWidget(qualBox);
 
     generateBtn_ = new QPushButton("Generate / Update 3D");
+    generateBtn_->setObjectName("accent");
     connect(generateBtn_, &QPushButton::clicked, this,
             &MainWindow::generateMesh);
     v->addWidget(generateBtn_);
@@ -821,8 +827,8 @@ void MainWindow::onMarkupPointPicked(int x, int y, int z) {
 QWidget* MainWindow::buildQuad() {
     auto* board = new QWidget;
     quadLayout_ = new QGridLayout(board);
-    quadLayout_->setContentsMargins(6, 6, 6, 6);
-    quadLayout_->setSpacing(6);
+    quadLayout_->setContentsMargins(8, 8, 8, 8);
+    quadLayout_->setSpacing(8);
     const int axes[3] = {LUMEN_AXIS_AXIAL, LUMEN_AXIS_CORONAL,
                          LUMEN_AXIS_SAGITTAL};
     const int cellPos[4][2] = {{0, 0}, {0, 1}, {1, 0}, {1, 1}};
@@ -860,11 +866,20 @@ QWidget* MainWindow::buildQuad() {
         quadCells_[i] = cell;
         quadLayout_->addWidget(cell, cellPos[i][0], cellPos[i][1]);
     }
-    // Fourth cell: the 3D view.
-    quadCells_[3] = meshView_;
+    // Fourth cell: the 3D view, wrapped in a rounded card frame to match the
+    // slice panes.
+    auto* meshFrame = new QWidget;
+    meshFrame->setObjectName("meshCard");
+    meshFrame->setStyleSheet(
+        "QWidget#meshCard{background:#121418;border:1px solid #2f3440;"
+        "border-radius:12px;}");
+    auto* mf = new QVBoxLayout(meshFrame);
+    mf->setContentsMargins(2, 2, 2, 2);
+    mf->addWidget(meshView_);
     connect(meshView_, &MeshView::doubleClicked, this,
             [this] { toggleMaximize(3); });
-    quadLayout_->addWidget(meshView_, cellPos[3][0], cellPos[3][1]);
+    quadCells_[3] = meshFrame;
+    quadLayout_->addWidget(meshFrame, cellPos[3][0], cellPos[3][1]);
 
     quadLayout_->setRowStretch(0, 1);
     quadLayout_->setRowStretch(1, 1);

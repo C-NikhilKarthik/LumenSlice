@@ -2,6 +2,7 @@
 
 #include <QMouseEvent>
 #include <QPainter>
+#include <QPainterPath>
 #include <QPaintEvent>
 #include <QWheelEvent>
 #include <algorithm>
@@ -89,7 +90,16 @@ bool SliceView::widgetToPixel(const QPoint& p, int imgW, int imgH, int* px,
 
 void SliceView::paintEvent(QPaintEvent*) {
     QPainter painter(this);
-    painter.fillRect(rect(), QColor(24, 26, 32));
+    painter.setRenderHint(QPainter::Antialiasing, true);
+
+    // Rounded card: fill the gaps with the canvas background, then the card, and
+    // clip everything else to it so the pane reads as a distinct tile in the quad.
+    painter.fillRect(rect(), QColor(0x1b, 0x1d, 0x23));
+    const QRectF card = QRectF(rect()).adjusted(1, 1, -1, -1);
+    QPainterPath cardPath;
+    cardPath.addRoundedRect(card, 12, 12);
+    painter.fillPath(cardPath, QColor(0x12, 0x14, 0x18));
+    painter.setClipPath(cardPath);
 
     // Title strip.
     painter.setPen(QColor(210, 214, 224));
@@ -103,6 +113,10 @@ void SliceView::paintEvent(QPaintEvent*) {
     if (!v) {
         painter.setPen(QColor(120, 126, 138));
         painter.drawText(rect(), Qt::AlignCenter, "No volume loaded");
+        painter.setClipping(false);
+        painter.setPen(QPen(QColor(0x2f, 0x34, 0x40), 1));
+        painter.setBrush(Qt::NoBrush);
+        painter.drawPath(cardPath);
         return;
     }
 
@@ -222,6 +236,12 @@ void SliceView::paintEvent(QPaintEvent*) {
     painter.drawText(QRect(8, height() - 22, width() - 16, 18),
                      Qt::AlignRight | Qt::AlignVCenter,
                      QString("%1 / %2").arg(index + 1).arg(count));
+
+    // Card border on top of everything.
+    painter.setClipping(false);
+    painter.setPen(QPen(QColor(0x2f, 0x34, 0x40), 1));
+    painter.setBrush(Qt::NoBrush);
+    painter.drawPath(cardPath);
 }
 
 void SliceView::wheelEvent(QWheelEvent* e) {
