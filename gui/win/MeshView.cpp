@@ -3,9 +3,11 @@
 #include <QDir>
 #include <QFileDialog>
 #include <QHBoxLayout>
+#include <QLineF>
 #include <QMenu>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QPolygonF>
 #include <QResizeEvent>
 #include <QSurfaceFormat>
 #include <QToolButton>
@@ -317,10 +319,16 @@ void MeshView::paintGL() {
         program_.release();
     }
 
-    // 2D overlay: anatomical gnomon (drawn with QPainter over the GL scene).
+    // 2D overlay: anatomical gnomon + in-progress scissor lasso.
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing, true);
     drawGnomon(painter);
+    if (lasso_.size() >= 2) {
+        painter.setPen(QPen(QColor(255, 220, 60), 2, Qt::DashLine));
+        painter.setBrush(QColor(255, 220, 60, 40));
+        QPolygonF poly(lasso_);
+        painter.drawPolygon(poly);
+    }
     painter.end();
 }
 
@@ -346,9 +354,41 @@ void MeshView::drawGnomon(QPainter& p) {
     }
 }
 
-void MeshView::mousePressEvent(QMouseEvent* e) { lastMouse_ = e->pos(); }
+void MeshView::setScissorMode(bool on) {
+    scissorMode_ = on;
+    lassoActive_ = false;
+    lasso_.clear();
+    setCursor(on ? Qt::CrossCursor : Qt::ArrowCursor);
+    update();
+}
+
+void MeshView::clearLasso() {
+    lasso_.clear();
+    lassoActive_ = false;
+    update();
+}
+
+void MeshView::mousePressEvent(QMouseEvent* e) {
+    lastMouse_ = e->pos();
+    if (scissorMode_ && e->button() == Qt::LeftButton) {
+        lasso_.clear();
+        lasso_.append(e->position());
+        lassoActive_ = true;
+        update();
+    }
+}
 
 void MeshView::mouseMoveEvent(QMouseEvent* e) {
+    if (scissorMode_) {
+        if (lassoActive_ && (e->buttons() & Qt::LeftButton)) {
+            const QPointF p = e->position();
+            if (lasso_.isEmpty() ||
+                QLineF(lasso_.last(), p).length() > 2.0)
+                lasso_.append(p);
+            update();
+        }
+        return;
+    }
     if (!(e->buttons() & Qt::LeftButton)) return;
     const QPoint d = e->pos() - lastMouse_;
     lastMouse_ = e->pos();
@@ -357,6 +397,14 @@ void MeshView::mouseMoveEvent(QMouseEvent* e) {
     dq.rotate(d.y() * 0.4f, 1, 0, 0);
     rot_ = dq * rot_;  // orbit in view space
     update();
+}
+
+void MeshView::mouseReleaseEvent(QMouseEvent* e) {
+    if (scissorMode_ && lassoActive_ && e->button() == Qt::LeftButton) {
+        lassoActive_ = false;
+        if (lasso_.size() >= 3) emit scissorFinished(lasso_);
+        update();
+    }
 }
 
 void MeshView::wheelEvent(QWheelEvent* e) {

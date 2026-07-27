@@ -12,12 +12,14 @@
 // Z=Superior).
 #pragma once
 
+#include <QList>
 #include <QMatrix4x4>
 #include <QOpenGLBuffer>
 #include <QOpenGLFunctions_3_3_Core>
 #include <QOpenGLShaderProgram>
 #include <QOpenGLVertexArrayObject>
 #include <QPoint>
+#include <QPointF>
 #include <QOpenGLWidget>
 #include <vector>
 
@@ -47,9 +49,18 @@ public:
     void clearMeshes() { setMeshes({}); }
     bool hasMesh() const { return totalIndices_ > 0; }
 
-    // The model-view-projection matrix used for the last frame, and the viewport
-    // size — exposed for screen-space operations (e.g. the scissor lasso).
+    // The model-view-projection matrix used for the last frame, exposed for
+    // screen-space operations (the scissor lasso). Equals proj*view; its
+    // constData() is the column-major buffer the core's scissor_cut expects.
     QMatrix4x4 lastMvp() const { return lastMvp_; }
+
+    // Scissor mode: left-drag draws a freehand lasso instead of orbiting.
+    void setScissorMode(bool on);
+    void clearLasso();
+
+signals:
+    // A lasso was closed (>= 3 points); points are in widget pixels (y-down).
+    void scissorFinished(const QList<QPointF>& poly);
 
 public slots:
     void resetView();                    // reframe to bounds + default orientation
@@ -64,6 +75,7 @@ protected:
     void paintGL() override;
     void mousePressEvent(QMouseEvent*) override;
     void mouseMoveEvent(QMouseEvent*) override;
+    void mouseReleaseEvent(QMouseEvent*) override;
     void wheelEvent(QWheelEvent*) override;
 
 private:
@@ -104,6 +116,11 @@ private:
 
     QMatrix4x4 lastMvp_;
     QWidget* toolbar_ = nullptr;
+
+    // Scissor lasso.
+    bool scissorMode_ = false;
+    bool lassoActive_ = false;
+    QList<QPointF> lasso_;
 };
 
 }  // namespace lumenwin

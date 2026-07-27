@@ -6,7 +6,9 @@
 
 #include <QFutureWatcher>
 #include <QHash>
+#include <QList>
 #include <QMainWindow>
+#include <QPointF>
 #include <QString>
 #include <vector>
 
@@ -70,6 +72,7 @@ private slots:
     // 3D + export.
     void generateMesh();
     void onMeshReady();
+    void onScissorFinished(const QList<QPointF>& poly);
     void exportStl();
     void exportPng();
 
@@ -155,6 +158,9 @@ private:
     QComboBox* resolutionCombo_ = nullptr;
     QPushButton* generateBtn_ = nullptr;
     QLabel* meshInfoLabel_ = nullptr;
+    QCheckBox* scissorModeCheck_ = nullptr;
+    QComboBox* scissorEraseCombo_ = nullptr;
+    QCheckBox* scissorActiveOnlyCheck_ = nullptr;
 
     // Export controls.
     QWidget* exportSegContainer_ = nullptr;

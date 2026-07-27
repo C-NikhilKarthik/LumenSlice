@@ -126,6 +126,8 @@ MainWindow::MainWindow() {
 
     connect(&meshWatcher_, &QFutureWatcher<int>::finished, this,
             &MainWindow::onMeshReady);
+    connect(meshView_, &MeshView::scissorFinished, this,
+            &MainWindow::onScissorFinished);
 
     selectTab(0);
     refreshAll();
@@ -509,6 +511,23 @@ QWidget* MainWindow::buildThreeDPanel() {
     body(meshBox)->addWidget(meshInfoLabel_);
     body(meshBox)->addWidget(new QLabel("Drag to orbit, scroll to zoom."));
     v->addWidget(meshBox);
+
+    auto* scissorBox = section("Scissor cut");
+    body(scissorBox)->addWidget(new QLabel(
+        "Draw a freehand loop over the surface to cut voxels through the depth, "
+        "then the surface rebuilds."));
+    scissorModeCheck_ = new QCheckBox("Scissor mode (draw to cut)");
+    connect(scissorModeCheck_, &QCheckBox::toggled, this, [this](bool on) {
+        if (meshView_) meshView_->setScissorMode(on);
+    });
+    body(scissorBox)->addWidget(scissorModeCheck_);
+    scissorEraseCombo_ = new QComboBox;
+    scissorEraseCombo_->addItem("Erase inside the loop", 1);
+    scissorEraseCombo_->addItem("Keep inside (erase outside)", 0);
+    body(scissorBox)->addWidget(scissorEraseCombo_);
+    scissorActiveOnlyCheck_ = new QCheckBox("Active segment only");
+    body(scissorBox)->addWidget(scissorActiveOnlyCheck_);
+    v->addWidget(scissorBox);
 
     v->addStretch();
     finishPanel(scroll, page);
@@ -933,6 +952,38 @@ void MainWindow::finishMeshGeneration() {
     LumenVolume* v = st_.volume;
     generateBtn_->setEnabled(v && lumen_seg_count(v) > 0);
     exportStlBtn_->setEnabled(v && lumen_seg_count(v) > 0);
+}
+
+void MainWindow::onScissorFinished(const QList<QPointF>& poly) {
+    LumenVolume* v = st_.volume;
+    if (!v || poly.size() < 3 || generating_) {
+        if (meshView_) meshView_->clearLasso();
+        return;
+    }
+    std::vector<float> xy;
+    xy.reserve(size_t(poly.size()) * 2);
+    for (const QPointF& p : poly) {
+        xy.push_back(float(p.x()));
+        xy.push_back(float(p.y()));
+    }
+    // The core projects with proj*view; QMatrix4x4::constData() is exactly the
+    // column-major buffer its scissor_cut expects (see scissor.hpp).
+    const QMatrix4x4 mvp = meshView_->lastMvp();
+    const int eraseInside = scissorEraseCombo_->currentData().toInt();
+    const int onlyLabel =
+        scissorActiveOnlyCheck_->isChecked() ? lumen_seg_active(v) : 0;
+
+    lumen_seg_push_undo(v);
+    const long cleared = lumen_seg_scissor_cut(
+        v, mvp.constData(), meshView_->width(), meshView_->height(), xy.data(),
+        int(poly.size()), eraseInside, onlyLabel);
+    updateUndoRedo();
+    refreshCanvas();
+    updateSegmentCounts();
+    meshView_->clearLasso();
+    meshInfoLabel_->setText(QString("Scissor cut cleared %1 voxels. Rebuilding…")
+                                .arg(cleared));
+    generateMesh();  // rebuild the surface to reflect the cut
 }
 
 void MainWindow::exportStl() {
