@@ -312,13 +312,28 @@ QWidget* MainWindow::buildSegmentPanel() {
 
     // Tool selector.
     auto* toolBox = section("Tool");
-    toolCombo_ = new QComboBox;
-    toolCombo_->addItem("Threshold", int(Tool::Threshold));
-    toolCombo_->addItem("Fill (region grow)", int(Tool::RegionGrow));
-    toolCombo_->addItem("Level trace", int(Tool::LevelTrace));
-    toolCombo_->addItem("Paint", int(Tool::Paint));
-    toolCombo_->addItem("Erase", int(Tool::Erase));
-    body(toolBox)->addWidget(toolCombo_);
+    auto* toolRow = new QHBoxLayout;
+    toolRow->setSpacing(0);
+    auto* toolGroup = new QButtonGroup(this);
+    const char* toolLabels[5] = {"Thresh", "Fill", "Trace", "Paint", "Erase"};
+    for (int i = 0; i < 5; ++i) {
+        auto* b = new QToolButton;
+        b->setText(toolLabels[i]);
+        b->setCheckable(true);
+        b->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        const QString ends =
+            i == 0 ? "border-top-left-radius:7px;border-bottom-left-radius:7px;"
+            : i == 4 ? "border-top-right-radius:7px;border-bottom-right-radius:7px;"
+                     : "";
+        b->setStyleSheet(
+            "QToolButton{background:#2a2d36;border:1px solid #3a3f4c;padding:6px 2px;"
+            "color:#c3c8d2;font-size:12px;" + ends +
+            "}QToolButton:checked{background:#4f7cf0;color:white;border-color:#4f7cf0;}");
+        toolGroup->addButton(b, i);
+        toolRow->addWidget(b, 1);
+    }
+    toolGroup->button(0)->setChecked(true);
+    body(toolBox)->addLayout(toolRow);
     v->addWidget(toolBox);
 
     // Tool detail (stacked).
@@ -425,14 +440,12 @@ QWidget* MainWindow::buildSegmentPanel() {
     }
     v->addWidget(toolDetail_);
 
-    connect(toolCombo_, &QComboBox::currentIndexChanged, this, [this](int) {
-        st_.tool = Tool(toolCombo_->currentData().toInt());
-        switch (st_.tool) {
-            case Tool::Threshold: toolDetail_->setCurrentIndex(0); break;
-            case Tool::RegionGrow: toolDetail_->setCurrentIndex(1); break;
-            case Tool::LevelTrace: toolDetail_->setCurrentIndex(2); break;
-            default: toolDetail_->setCurrentIndex(3); break;  // paint/erase
-        }
+    connect(toolGroup, &QButtonGroup::idClicked, this, [this](int id) {
+        static const struct { Tool tool; int page; } kMap[5] = {
+            {Tool::Threshold, 0}, {Tool::RegionGrow, 1}, {Tool::LevelTrace, 2},
+            {Tool::Paint, 3}, {Tool::Erase, 3}};
+        st_.tool = kMap[id].tool;
+        toolDetail_->setCurrentIndex(kMap[id].page);
     });
     st_.tool = Tool::Threshold;
 
