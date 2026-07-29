@@ -35,6 +35,8 @@ signals:
     void paintStroke(int axis, int index, int cx, int cy, int radius, bool add);
     void floodClicked(int x, int y, int z);       // region-grow seed (voxel space)
     void levelTraceClicked(int axis, int index, int cx, int cy);
+    void markupPointPicked(int x, int y, int z);   // markup placement (voxel space)
+    void doubleClicked();                          // toggle pane maximize
     // A stroke/gesture that mutated the mask ended — good point to snapshot undo.
     void strokeBegan();
 
@@ -44,6 +46,8 @@ protected:
     void mousePressEvent(QMouseEvent*) override;
     void mouseMoveEvent(QMouseEvent*) override;
     void mouseReleaseEvent(QMouseEvent*) override;
+    void mouseDoubleClickEvent(QMouseEvent*) override;
+    void leaveEvent(QEvent*) override;
 
 private:
     // Geometry of the drawn slice image inside the widget (aspect-preserving).
@@ -58,6 +62,8 @@ private:
     enum class Drag { None, WindowLevel, Brush } drag_ = Drag::None;
     QPoint dragStart_;
     int lastImgW_ = 0, lastImgH_ = 0;  // cached from the last paint for hit-testing
+    bool hovering_ = false;
+    QPoint hoverPos_;
 };
 
 }  // namespace lumenwin

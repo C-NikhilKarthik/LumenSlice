@@ -1,5 +1,6 @@
 #include "MainWindow.h"
 
+#include <QApplication>
 #include <QButtonGroup>
 #include <QCheckBox>
 #include <QColor>
@@ -13,6 +14,7 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
+#include <QGridLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -33,6 +35,7 @@
 #include <QStatusBar>
 #include <QStringList>
 #include <QTableWidget>
+#include <QTimer>
 #include <QToolButton>
 #include <QUrl>
 #include <QVBoxLayout>
@@ -41,6 +44,7 @@
 #include <vector>
 
 #include "MeshView.h"
+#include "RangeSlider.h"
 #include "SliceView.h"
 
 namespace lumenwin {
@@ -61,8 +65,26 @@ QGroupBox* section(const QString& title) {
     v->setSpacing(6);
     return box;
 }
+
+// Install `page` into a control-panel scroll area. Word-wraps every label and
+// forbids the horizontal scrollbar so a long line can never widen the page and
+// shift the content sideways under the icon rail.
+void finishPanel(QScrollArea* scroll, QWidget* page) {
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    const QList<QLabel*> labels = page->findChildren<QLabel*>();
+    for (QLabel* l : labels) l->setWordWrap(true);
+    scroll->setWidget(page);
+}
 QVBoxLayout* body(QGroupBox* box) {
     return qobject_cast<QVBoxLayout*>(box->layout());
+}
+
+// Make a segment name safe to use as a filename stem.
+QString sanitizeFilename(const QString& name) {
+    QString out;
+    for (const QChar c : name)
+        out += (c.isLetterOrNumber() || c == '-' || c == '_') ? c : QChar('_');
+    return out.isEmpty() ? QStringLiteral("segment") : out;
 }
 }  // namespace
 
@@ -89,17 +111,17 @@ MainWindow::MainWindow() {
 
     panels_ = new QStackedWidget;
     panels_->setFixedWidth(kPanelWidth);
+    st_.markups = &markups_;
     panels_->addWidget(buildVisualizePanel());
     panels_->addWidget(buildSegmentPanel());
     panels_->addWidget(buildThreeDPanel());
     panels_->addWidget(buildExportPanel());
+    panels_->addWidget(buildMarkupPanel());
     rootLayout->addWidget(panels_);
 
-    central_ = new QStackedWidget;
-    central_->addWidget(buildSliceBoard());
     meshView_ = new MeshView;
-    central_->addWidget(meshView_);
-    rootLayout->addWidget(central_, 1);
+    meshView_->setMarkupModel(&markups_);
+    rootLayout->addWidget(buildQuad(), 1);
 
     auto* rootWidget = new QWidget;
     rootWidget->setLayout(rootLayout);
@@ -107,6 +129,10 @@ MainWindow::MainWindow() {
 
     connect(&meshWatcher_, &QFutureWatcher<int>::finished, this,
             &MainWindow::onMeshReady);
+    connect(&loadWatcher_, &QFutureWatcher<LoadResult>::finished, this,
+            &MainWindow::onLoadReady);
+    connect(meshView_, &MeshView::scissorFinished, this,
+            &MainWindow::onScissorFinished);
 
     selectTab(0);
     refreshAll();
@@ -118,24 +144,27 @@ MainWindow::MainWindow() {
 // ---------------------------------------------------------------------------
 QWidget* MainWindow::buildTabRail() {
     auto* rail = new QWidget;
-    rail->setFixedWidth(64);
-    rail->setStyleSheet("background:#1b1d23;");
+    rail->setFixedWidth(72);
+    rail->setStyleSheet("background:#141519;");
     auto* v = new QVBoxLayout(rail);
-    v->setContentsMargins(8, 12, 8, 12);
+    v->setContentsMargins(10, 14, 10, 14);
     v->setSpacing(8);
 
-    const char* labels[] = {"View", "Seg", "3D", "Save"};
+    struct R { const char* glyph; const char* label; };
+    const R items[] = {{"◧", "View"}, {"✎", "Seg"}, {"◈", "3D"},
+                       {"⤓", "Save"}, {"⌖", "Mark"}};
     auto* group = new QButtonGroup(this);
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < 5; ++i) {
         auto* b = new QToolButton;
-        b->setText(labels[i]);
+        b->setText(QString("%1\n%2").arg(items[i].glyph, items[i].label));
         b->setCheckable(true);
-        b->setFixedSize(48, 48);
+        b->setFixedSize(52, 52);
         b->setStyleSheet(
-            "QToolButton{color:#cfd2da;border:none;border-radius:8px;}"
-            "QToolButton:checked{background:#3a6df0;color:white;}");
+            "QToolButton{color:#a7adba;border:none;border-radius:12px;font-size:11px;}"
+            "QToolButton:hover{background:#22252d;color:#e7e9ef;}"
+            "QToolButton:checked{background:#4f7cf0;color:white;}");
         group->addButton(b, i);
-        v->addWidget(b);
+        v->addWidget(b, 0, Qt::AlignHCenter);
     }
     v->addStretch();
     group->button(0)->setChecked(true);
@@ -154,6 +183,7 @@ QWidget* MainWindow::buildVisualizePanel() {
     v->setSpacing(10);
 
     auto* openBtn = new QPushButton("Open DICOM Folder…");
+    openBtn->setObjectName("accent");
     connect(openBtn, &QPushButton::clicked, this, &MainWindow::openFolder);
     v->addWidget(openBtn);
 
@@ -243,10 +273,17 @@ QWidget* MainWindow::buildVisualizePanel() {
         refreshCanvas();
     });
     body(ovBox)->addWidget(crosshairCheck_);
+    auto* orientCheck = new QCheckBox("Orientation labels (R/L/A/P/S/I)");
+    orientCheck->setChecked(st_.showOrientationLabels);
+    connect(orientCheck, &QCheckBox::toggled, this, [this](bool on) {
+        st_.showOrientationLabels = on;
+        refreshCanvas();
+    });
+    body(ovBox)->addWidget(orientCheck);
     v->addWidget(ovBox);
 
     v->addStretch();
-    scroll->setWidget(page);
+    finishPanel(scroll, page);
     return scroll;
 }
 
@@ -263,6 +300,7 @@ QWidget* MainWindow::buildSegmentPanel() {
     // Segment list.
     auto* segBox = section("Segments");
     auto* addBtn = new QPushButton("+ Add segment");
+    addBtn->setObjectName("accent");
     connect(addBtn, &QPushButton::clicked, this, &MainWindow::addSegment);
     body(segBox)->addWidget(addBtn);
     segListContainer_ = new QWidget;
@@ -274,13 +312,28 @@ QWidget* MainWindow::buildSegmentPanel() {
 
     // Tool selector.
     auto* toolBox = section("Tool");
-    toolCombo_ = new QComboBox;
-    toolCombo_->addItem("Threshold", int(Tool::Threshold));
-    toolCombo_->addItem("Fill (region grow)", int(Tool::RegionGrow));
-    toolCombo_->addItem("Level trace", int(Tool::LevelTrace));
-    toolCombo_->addItem("Paint", int(Tool::Paint));
-    toolCombo_->addItem("Erase", int(Tool::Erase));
-    body(toolBox)->addWidget(toolCombo_);
+    auto* toolRow = new QHBoxLayout;
+    toolRow->setSpacing(0);
+    auto* toolGroup = new QButtonGroup(this);
+    const char* toolLabels[5] = {"Thresh", "Fill", "Trace", "Paint", "Erase"};
+    for (int i = 0; i < 5; ++i) {
+        auto* b = new QToolButton;
+        b->setText(toolLabels[i]);
+        b->setCheckable(true);
+        b->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        const QString ends =
+            i == 0 ? "border-top-left-radius:7px;border-bottom-left-radius:7px;"
+            : i == 4 ? "border-top-right-radius:7px;border-bottom-right-radius:7px;"
+                     : "";
+        b->setStyleSheet(
+            "QToolButton{background:#2a2d36;border:1px solid #3a3f4c;padding:6px 2px;"
+            "color:#c3c8d2;font-size:12px;" + ends +
+            "}QToolButton:checked{background:#4f7cf0;color:white;border-color:#4f7cf0;}");
+        toolGroup->addButton(b, i);
+        toolRow->addWidget(b, 1);
+    }
+    toolGroup->button(0)->setChecked(true);
+    body(toolBox)->addLayout(toolRow);
     v->addWidget(toolBox);
 
     // Tool detail (stacked).
@@ -289,38 +342,53 @@ QWidget* MainWindow::buildSegmentPanel() {
     {
         auto* w = new QWidget;
         auto* f = new QVBoxLayout(w);
-        f->addWidget(new QLabel("Label every voxel in this HU window into the "
-                                "active segment."));
-        threshLoSpin_ = new QDoubleSpinBox;
-        threshLoSpin_->setRange(-4000, 4000);
-        threshLoSpin_->setDecimals(0);
-        threshLoSpin_->setValue(300);
-        threshHiSpin_ = new QDoubleSpinBox;
-        threshHiSpin_->setRange(-4000, 4000);
-        threshHiSpin_->setDecimals(0);
-        threshHiSpin_->setValue(3000);
-        auto* row = new QHBoxLayout;
-        row->addWidget(new QLabel("Low"));
-        row->addWidget(threshLoSpin_);
-        row->addWidget(new QLabel("High"));
-        row->addWidget(threshHiSpin_);
-        f->addLayout(row);
+        f->addWidget(new QLabel("Drag the handles to label every voxel in this HU "
+                                "window into the active segment (applies live)."));
+        threshLabel_ = new QLabel("Low 300  —  High 3000 HU");
+        f->addWidget(threshLabel_);
+        threshSlider_ = new RangeSlider;
+        threshSlider_->setBounds(-1000, 3000);
+        threshSlider_->setValues(300, 3000);
+        f->addWidget(threshSlider_);
+        // Live, debounced threshold; one undo snapshot per drag.
+        threshTimer_ = new QTimer(this);
+        threshTimer_->setSingleShot(true);
+        threshTimer_->setInterval(120);
+        connect(threshTimer_, &QTimer::timeout, this, &MainWindow::applyThreshold);
+        connect(threshSlider_, &RangeSlider::editingStarted, this, [this] {
+            LumenVolume* v = st_.volume;
+            if (v && lumen_seg_active(v) != 0) {
+                lumen_seg_push_undo(v);
+                updateUndoRedo();
+            }
+        });
+        connect(threshSlider_, &RangeSlider::rangeChanged, this,
+                [this](double lo, double hi) {
+                    threshLabel_->setText(QString("Low %1  —  High %2 HU")
+                                              .arg(qRound(lo))
+                                              .arg(qRound(hi)));
+                    threshTimer_->start();  // debounce, then applyThreshold()
+                });
         auto* presets = new QHBoxLayout;
-        struct T { const char* n; float lo, hi; };
+        struct T { const char* n; double lo, hi; };
         for (T t : {T{"Bone", 300, 3000}, T{"Soft", 40, 80},
                     T{"Lung", -900, -400}}) {
             auto* b = new QPushButton(t.n);
             connect(b, &QPushButton::clicked, this, [this, t] {
-                threshLoSpin_->setValue(t.lo);
-                threshHiSpin_->setValue(t.hi);
+                threshSlider_->setValues(t.lo, t.hi);
+                threshLabel_->setText(QString("Low %1  —  High %2 HU")
+                                          .arg(qRound(t.lo))
+                                          .arg(qRound(t.hi)));
+                LumenVolume* v = st_.volume;
+                if (v && lumen_seg_active(v) != 0) {
+                    lumen_seg_push_undo(v);
+                    updateUndoRedo();
+                }
+                applyThreshold();
             });
             presets->addWidget(b);
         }
         f->addLayout(presets);
-        auto* applyBtn = new QPushButton("Apply threshold");
-        connect(applyBtn, &QPushButton::clicked, this,
-                &MainWindow::applyThreshold);
-        f->addWidget(applyBtn);
         auto* otsuBtn = new QPushButton("Otsu auto-threshold");
         connect(otsuBtn, &QPushButton::clicked, this, &MainWindow::applyOtsu);
         f->addWidget(otsuBtn);
@@ -372,14 +440,12 @@ QWidget* MainWindow::buildSegmentPanel() {
     }
     v->addWidget(toolDetail_);
 
-    connect(toolCombo_, &QComboBox::currentIndexChanged, this, [this](int) {
-        st_.tool = Tool(toolCombo_->currentData().toInt());
-        switch (st_.tool) {
-            case Tool::Threshold: toolDetail_->setCurrentIndex(0); break;
-            case Tool::RegionGrow: toolDetail_->setCurrentIndex(1); break;
-            case Tool::LevelTrace: toolDetail_->setCurrentIndex(2); break;
-            default: toolDetail_->setCurrentIndex(3); break;  // paint/erase
-        }
+    connect(toolGroup, &QButtonGroup::idClicked, this, [this](int id) {
+        static const struct { Tool tool; int page; } kMap[5] = {
+            {Tool::Threshold, 0}, {Tool::RegionGrow, 1}, {Tool::LevelTrace, 2},
+            {Tool::Paint, 3}, {Tool::Erase, 3}};
+        st_.tool = kMap[id].tool;
+        toolDetail_->setCurrentIndex(kMap[id].page);
     });
     st_.tool = Tool::Threshold;
 
@@ -444,7 +510,7 @@ QWidget* MainWindow::buildSegmentPanel() {
     v->addWidget(editBox);
 
     v->addStretch();
-    scroll->setWidget(page);
+    finishPanel(scroll, page);
     return scroll;
 }
 
@@ -480,6 +546,7 @@ QWidget* MainWindow::buildThreeDPanel() {
     v->addWidget(qualBox);
 
     generateBtn_ = new QPushButton("Generate / Update 3D");
+    generateBtn_->setObjectName("accent");
     connect(generateBtn_, &QPushButton::clicked, this,
             &MainWindow::generateMesh);
     v->addWidget(generateBtn_);
@@ -491,8 +558,25 @@ QWidget* MainWindow::buildThreeDPanel() {
     body(meshBox)->addWidget(new QLabel("Drag to orbit, scroll to zoom."));
     v->addWidget(meshBox);
 
+    auto* scissorBox = section("Scissor cut");
+    body(scissorBox)->addWidget(new QLabel(
+        "Draw a freehand loop over the surface to cut voxels through the depth, "
+        "then the surface rebuilds."));
+    scissorModeCheck_ = new QCheckBox("Scissor mode (draw to cut)");
+    connect(scissorModeCheck_, &QCheckBox::toggled, this, [this](bool on) {
+        if (meshView_) meshView_->setScissorMode(on);
+    });
+    body(scissorBox)->addWidget(scissorModeCheck_);
+    scissorEraseCombo_ = new QComboBox;
+    scissorEraseCombo_->addItem("Erase inside the loop", 1);
+    scissorEraseCombo_->addItem("Keep inside (erase outside)", 0);
+    body(scissorBox)->addWidget(scissorEraseCombo_);
+    scissorActiveOnlyCheck_ = new QCheckBox("Active segment only");
+    body(scissorBox)->addWidget(scissorActiveOnlyCheck_);
+    v->addWidget(scissorBox);
+
     v->addStretch();
-    scroll->setWidget(page);
+    finishPanel(scroll, page);
     return scroll;
 }
 
@@ -506,7 +590,32 @@ QWidget* MainWindow::buildExportPanel() {
     auto* v = new QVBoxLayout(page);
     v->setSpacing(10);
 
-    auto* meshBox = section("3D mesh");
+    auto* meshBox = section("3D mesh (STL)");
+    body(meshBox)->addWidget(new QLabel("Choose which segments to export:"));
+
+    exportSegContainer_ = new QWidget;
+    exportSegLayout_ = new QVBoxLayout(exportSegContainer_);
+    exportSegLayout_->setContentsMargins(0, 0, 0, 0);
+    exportSegLayout_->setSpacing(2);
+    body(meshBox)->addWidget(exportSegContainer_);
+
+    auto* allNone = new QHBoxLayout;
+    auto* allBtn = new QPushButton("All");
+    auto* noneBtn = new QPushButton("None");
+    connect(allBtn, &QPushButton::clicked, this, [this] {
+        for (auto* c : exportSegChecks_) c->setChecked(true);
+    });
+    connect(noneBtn, &QPushButton::clicked, this, [this] {
+        for (auto* c : exportSegChecks_) c->setChecked(false);
+    });
+    allNone->addWidget(allBtn);
+    allNone->addWidget(noneBtn);
+    body(meshBox)->addLayout(allNone);
+
+    oneFilePerSegCheck_ = new QCheckBox("One file per segment");
+    oneFilePerSegCheck_->setChecked(true);
+    body(meshBox)->addWidget(oneFilePerSegCheck_);
+
     exportStlBtn_ = new QPushButton("Export STL…");
     connect(exportStlBtn_, &QPushButton::clicked, this, &MainWindow::exportStl);
     body(meshBox)->addWidget(exportStlBtn_);
@@ -523,22 +632,225 @@ QWidget* MainWindow::buildExportPanel() {
     v->addWidget(exportMsgLabel_);
 
     v->addStretch();
-    scroll->setWidget(page);
+    finishPanel(scroll, page);
     return scroll;
 }
 
 // ---------------------------------------------------------------------------
-// Slice board (3 panes + sliders)
+// Markups panel
 // ---------------------------------------------------------------------------
-QWidget* MainWindow::buildSliceBoard() {
+QWidget* MainWindow::buildMarkupPanel() {
+    auto* scroll = new QScrollArea;
+    scroll->setWidgetResizable(true);
+    auto* page = new QWidget;
+    auto* v = new QVBoxLayout(page);
+    v->setSpacing(10);
+
+    v->addWidget(new QLabel(
+        "Drop points on any slice; they show in the 3D view. Point = 1 click, "
+        "Line = 2, Plane = 3 (a triangle)."));
+
+    auto* typeBox = section("Type");
+    markupKindCombo_ = new QComboBox;
+    markupKindCombo_->addItem("Point", int(MarkupModel::Kind::Point));
+    markupKindCombo_->addItem("Line", int(MarkupModel::Kind::Line));
+    markupKindCombo_->addItem("Plane", int(MarkupModel::Kind::Plane));
+    connect(markupKindCombo_, &QComboBox::currentIndexChanged, this, [this](int) {
+        markups_.setKind(MarkupModel::Kind(markupKindCombo_->currentData().toInt()));
+        markups_.cancelPending();
+        updateMarkupPending();
+        refreshMarkups();
+    });
+    body(typeBox)->addWidget(markupKindCombo_);
+    v->addWidget(typeBox);
+
+    auto* colorBox = section("Colour");
+    auto* palRow = new QHBoxLayout;
+    palRow->setSpacing(4);
+    for (int i = 0; i < int(MarkupModel::palette().size()); ++i) {
+        auto* b = new QToolButton;
+        b->setFixedSize(20, 20);
+        b->setToolTip(QString("Colour %1").arg(i + 1));
+        connect(b, &QToolButton::clicked, this, [this, i] {
+            markups_.pickNextColor(i);
+            updateMarkupPaletteSelection();
+            refreshMarkups();
+        });
+        markupPaletteBtns_.append(b);
+        palRow->addWidget(b);
+    }
+    palRow->addStretch();
+    body(colorBox)->addLayout(palRow);
+    body(colorBox)->addWidget(
+        new QLabel("New markups use this colour until you pick another."));
+    v->addWidget(colorBox);
+
+    auto* placeBox = section("Place");
+    markupPlaceCheck_ = new QCheckBox("Place markups (click slices)");
+    connect(markupPlaceCheck_, &QCheckBox::toggled, this, [this](bool on) {
+        markups_.setPlacing(on);
+        st_.markupPlacing = on && currentTab_ == 4;
+        if (!on) markups_.cancelPending();
+        updateMarkupPending();
+        refreshMarkups();
+    });
+    body(placeBox)->addWidget(markupPlaceCheck_);
+    auto* pendRow = new QHBoxLayout;
+    markupPendingLabel_ = new QLabel;
+    markupCancelBtn_ = new QPushButton("Cancel point");
+    connect(markupCancelBtn_, &QPushButton::clicked, this, [this] {
+        markups_.cancelPending();
+        updateMarkupPending();
+        refreshMarkups();
+    });
+    pendRow->addWidget(markupPendingLabel_, 1);
+    pendRow->addWidget(markupCancelBtn_);
+    body(placeBox)->addLayout(pendRow);
+    v->addWidget(placeBox);
+
+    auto* listBox = section("Markups");
+    markupListContainer_ = new QWidget;
+    markupListLayout_ = new QVBoxLayout(markupListContainer_);
+    markupListLayout_->setContentsMargins(0, 0, 0, 0);
+    markupListLayout_->setSpacing(3);
+    body(listBox)->addWidget(markupListContainer_);
+    auto* clearBtn = new QPushButton("Clear all");
+    connect(clearBtn, &QPushButton::clicked, this, [this] {
+        markups_.removeAll();
+        rebuildMarkupList();
+        updateMarkupPending();
+        refreshMarkups();
+    });
+    body(listBox)->addWidget(clearBtn);
+    v->addWidget(listBox);
+
+    v->addStretch();
+    finishPanel(scroll, page);
+    updateMarkupPaletteSelection();
+    updateMarkupPending();
+    return scroll;
+}
+
+void MainWindow::updateMarkupPaletteSelection() {
+    for (int i = 0; i < markupPaletteBtns_.size(); ++i) {
+        const QColor c = MarkupModel::paletteColor(i);
+        const bool sel = (i == markups_.nextColorIndex());
+        markupPaletteBtns_[i]->setStyleSheet(
+            QString("QToolButton{background:rgb(%1,%2,%3);border:%4;border-radius:4px;}")
+                .arg(c.red()).arg(c.green()).arg(c.blue())
+                .arg(sel ? "2px solid white" : "1px solid #555"));
+    }
+}
+
+void MainWindow::updateMarkupPending() {
+    if (!markupPendingLabel_) return;
+    const int have = int(markups_.pending().size());
+    const int need = MarkupModel::pointsNeeded(markups_.kind());
+    markupPendingLabel_->setText(
+        have > 0 ? QString("%1/%2 points placed…").arg(have).arg(need)
+                 : (markups_.placing() ? "Click a slice to drop a point."
+                                       : "Turn on, then click the slices."));
+    markupCancelBtn_->setVisible(have > 0);
+}
+
+void MainWindow::refreshMarkups() {
+    refreshCanvas();
+    if (meshView_) meshView_->update();
+}
+
+void MainWindow::rebuildMarkupList() {
+    if (!markupListLayout_) return;
+    QLayoutItem* item = nullptr;
+    while ((item = markupListLayout_->takeAt(0)) != nullptr) {
+        if (item->widget()) item->widget()->deleteLater();
+        delete item;
+    }
+    for (const auto& m : markups_.markups()) {
+        const int id = m.id;
+        auto* row = new QWidget;
+        auto* h = new QHBoxLayout(row);
+        h->setContentsMargins(2, 1, 2, 1);
+        h->setSpacing(4);
+
+        auto* vis = new QCheckBox;
+        vis->setChecked(m.visible);
+        connect(vis, &QCheckBox::toggled, this, [this, id](bool on) {
+            markups_.setVisible(id, on);
+            refreshMarkups();
+        });
+        h->addWidget(vis);
+
+        const QColor col = markups_.color(m);
+        auto* swatch = new QToolButton;
+        swatch->setFixedSize(16, 16);
+        swatch->setToolTip("Click to recolour");
+        swatch->setStyleSheet(
+            QString("background:rgb(%1,%2,%3);border:1px solid #555;")
+                .arg(col.red()).arg(col.green()).arg(col.blue()));
+        connect(swatch, &QToolButton::clicked, this, [this, id] {
+            // Cycle to the next palette colour.
+            const MarkupModel::Markup* found = nullptr;
+            for (const auto& mm : markups_.markups())
+                if (mm.id == id) found = &mm;
+            if (found)
+                markups_.setColorIndex(id, found->colorIndex + 1);
+            rebuildMarkupList();
+            refreshMarkups();
+        });
+        h->addWidget(swatch);
+
+        auto* name = new QLineEdit(m.name);
+        connect(name, &QLineEdit::editingFinished, this,
+                [this, id, name] { markups_.rename(id, name->text()); });
+        h->addWidget(name, 1);
+
+        auto* kind = new QLabel(MarkupModel::title(m.kind));
+        kind->setStyleSheet("color:#8a8f9a;");
+        h->addWidget(kind);
+
+        auto* del = new QToolButton;
+        del->setText("✕");
+        connect(del, &QToolButton::clicked, this, [this, id] {
+            markups_.remove(id);
+            rebuildMarkupList();
+            refreshMarkups();
+        });
+        h->addWidget(del);
+
+        markupListLayout_->addWidget(row);
+    }
+    if (markups_.markups().empty()) {
+        auto* empty = new QLabel("No markups yet.");
+        empty->setStyleSheet("color:#8a8f9a;");
+        markupListLayout_->addWidget(empty);
+    }
+}
+
+void MainWindow::onMarkupPointPicked(int x, int y, int z) {
+    const bool committed = markups_.place(x, y, z);
+    if (committed) rebuildMarkupList();
+    updateMarkupPaletteSelection();
+    updateMarkupPending();
+    refreshMarkups();
+}
+
+// ---------------------------------------------------------------------------
+// Canvas quad: Axial / Coronal / Sagittal / 3D, each double-click-maximizable
+// ---------------------------------------------------------------------------
+QWidget* MainWindow::buildQuad() {
     auto* board = new QWidget;
-    auto* h = new QHBoxLayout(board);
-    h->setContentsMargins(6, 6, 6, 6);
-    h->setSpacing(6);
+    quadLayout_ = new QGridLayout(board);
+    quadLayout_->setContentsMargins(8, 8, 8, 8);
+    quadLayout_->setSpacing(8);
     const int axes[3] = {LUMEN_AXIS_AXIAL, LUMEN_AXIS_CORONAL,
                          LUMEN_AXIS_SAGITTAL};
+    const int cellPos[4][2] = {{0, 0}, {0, 1}, {1, 0}, {1, 1}};
+
     for (int i = 0; i < 3; ++i) {
-        auto* col = new QVBoxLayout;
+        auto* cell = new QWidget;
+        auto* col = new QVBoxLayout(cell);
+        col->setContentsMargins(0, 0, 0, 0);
+        col->setSpacing(2);
         panes_[i] = new SliceView(axes[i], &st_);
         connect(panes_[i], &SliceView::sliceScrolled, this,
                 &MainWindow::onSliceScrolled);
@@ -552,17 +864,65 @@ QWidget* MainWindow::buildSliceBoard() {
                 &MainWindow::onFloodClicked);
         connect(panes_[i], &SliceView::levelTraceClicked, this,
                 &MainWindow::onLevelTraceClicked);
+        connect(panes_[i], &SliceView::markupPointPicked, this,
+                &MainWindow::onMarkupPointPicked);
         connect(panes_[i], &SliceView::strokeBegan, this,
                 &MainWindow::onStrokeBegan);
+        connect(panes_[i], &SliceView::doubleClicked, this,
+                [this, i] { toggleMaximize(i); });
         col->addWidget(panes_[i], 1);
         sliders_[i] = new QSlider(Qt::Horizontal);
         const int axis = axes[i];
         connect(sliders_[i], &QSlider::valueChanged, this,
                 [this, axis](int val) { onSliceScrolled(axis, val); });
         col->addWidget(sliders_[i]);
-        h->addLayout(col, 1);
+        quadCells_[i] = cell;
+        quadLayout_->addWidget(cell, cellPos[i][0], cellPos[i][1]);
     }
+    // Fourth cell: the 3D view, wrapped in a rounded card frame to match the
+    // slice panes.
+    auto* meshFrame = new QWidget;
+    meshFrame->setObjectName("meshCard");
+    meshFrame->setStyleSheet(
+        "QWidget#meshCard{background:#121418;border:1px solid #2f3440;"
+        "border-radius:12px;}");
+    auto* mf = new QVBoxLayout(meshFrame);
+    mf->setContentsMargins(2, 2, 2, 2);
+    mf->addWidget(meshView_);
+    connect(meshView_, &MeshView::doubleClicked, this,
+            [this] { toggleMaximize(3); });
+    quadCells_[3] = meshFrame;
+    quadLayout_->addWidget(meshFrame, cellPos[3][0], cellPos[3][1]);
+
+    quadLayout_->setRowStretch(0, 1);
+    quadLayout_->setRowStretch(1, 1);
+    quadLayout_->setColumnStretch(0, 1);
+    quadLayout_->setColumnStretch(1, 1);
     return board;
+}
+
+// Double-click maximizes a cell (hides the other three); double-click again
+// restores the 2x2 grid.
+void MainWindow::toggleMaximize(int cell) {
+    maximized_ = (maximized_ == cell) ? -1 : cell;
+    for (int i = 0; i < 4; ++i)
+        if (quadCells_[i])
+            quadCells_[i]->setVisible(maximized_ == -1 || maximized_ == i);
+
+    // Collapse the empty row/column so the maximized cell fills the canvas.
+    const int pos[4][2] = {{0, 0}, {0, 1}, {1, 0}, {1, 1}};
+    if (maximized_ == -1) {
+        quadLayout_->setRowStretch(0, 1);
+        quadLayout_->setRowStretch(1, 1);
+        quadLayout_->setColumnStretch(0, 1);
+        quadLayout_->setColumnStretch(1, 1);
+    } else {
+        const int r = pos[maximized_][0], c = pos[maximized_][1];
+        quadLayout_->setRowStretch(0, r == 0 ? 1 : 0);
+        quadLayout_->setRowStretch(1, r == 1 ? 1 : 0);
+        quadLayout_->setColumnStretch(0, c == 0 ? 1 : 0);
+        quadLayout_->setColumnStretch(1, c == 1 ? 1 : 0);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -575,16 +935,31 @@ void MainWindow::openFolder() {
 }
 
 void MainWindow::loadPath(const QString& path) {
-    std::string status;
-    if (!vol_.load(path.toStdString(), status)) {
-        setStatus(QString("Could not load: %1")
-                      .arg(QString::fromStdString(status)));
-        QMessageBox::warning(this, "LumenSlice",
-                             QString::fromStdString(status).isEmpty()
-                                 ? "Could not load the DICOM folder."
-                                 : QString::fromStdString(status));
+    if (loading_) return;
+    loading_ = true;
+    setStatus(QString("Loading %1 …").arg(path));
+    // Ingestion (recursive crawl + decode) runs off the UI thread so a large
+    // series never freezes the window; the volume is adopted back on the UI thread.
+    loadWatcher_.setFuture(QtConcurrent::run([path]() -> LoadResult {
+        char msg[512] = {0};
+        LumenVolume* v =
+            lumen_load_folder(path.toUtf8().constData(), msg, sizeof(msg));
+        return LoadResult{v, QString::fromUtf8(msg)};
+    }));
+}
+
+void MainWindow::onLoadReady() {
+    loading_ = false;
+    const LoadResult r = loadWatcher_.result();
+    if (!r.volume) {
+        setStatus(QString("Could not load: %1").arg(r.message));
+        QMessageBox::warning(
+            this, "LumenSlice",
+            r.message.isEmpty() ? "Could not load the DICOM folder." : r.message);
         return;
     }
+    vol_.adopt(r.volume);
+    const std::string status = r.message.toStdString();
     st_.volume = vol_.get();
     LumenVolume* v = st_.volume;
 
@@ -612,9 +987,15 @@ void MainWindow::loadPath(const QString& path) {
         segNames_[id] = QString("Segment %1").arg(id);
     }
 
+    // A fresh volume invalidates all markups (their voxel coords no longer map).
+    float sx = 1, sy = 1, sz = 1;
+    lumen_spacing(v, &sx, &sy, &sz);
+    markups_.resetForVolume(sx, sy, sz);
+    if (markupPlaceCheck_) markupPlaceCheck_->setChecked(false);
+
     setStatus(QString::fromStdString(status));
     refreshAll();
-    meshView_->setMesh(nullptr);
+    meshView_->clearMeshes();
     meshInfoLabel_->setText("No surface yet.");
 }
 
@@ -623,7 +1004,10 @@ void MainWindow::selectTab(int tab) {
     panels_->setCurrentIndex(tab);
     // Segment tab enables canvas tool interactions; others keep left-drag = W/L.
     st_.segmentInteractive = (tab == 1);
-    central_->setCurrentIndex(tab == 2 ? 1 : 0);
+    // Markup placement is only active on the Markups tab with the toggle on.
+    st_.markupPlacing = (tab == 4) && markups_.placing();
+    if (tab == 3) rebuildExportSegmentList();  // reflect current segments/names
+    if (tab == 4) rebuildMarkupList();
     refreshCanvas();
 }
 
@@ -707,24 +1091,28 @@ void MainWindow::addSegment() {
 }
 
 void MainWindow::applyThreshold() {
+    // Fills the active segment from the slider's HU window. No undo snapshot here:
+    // the live drag snapshots once on editingStarted, and presets/Otsu snapshot
+    // before calling this.
     LumenVolume* v = st_.volume;
-    if (!v || lumen_seg_active(v) == 0) return;
-    lumen_seg_push_undo(v);
-    lumen_seg_threshold(v, float(threshLoSpin_->value()),
-                        float(threshHiSpin_->value()));
-    updateUndoRedo();
+    if (!v || lumen_seg_active(v) == 0 || !threshSlider_) return;
+    lumen_seg_threshold(v, float(threshSlider_->lowValue()),
+                        float(threshSlider_->highValue()));
     refreshCanvas();
     updateSegmentCounts();
 }
 
 void MainWindow::applyOtsu() {
     LumenVolume* v = st_.volume;
-    if (!v) return;
+    if (!v || lumen_seg_active(v) == 0) return;
     const float t = lumen_seg_otsu(v);
     float lo = 0, hi = 0;
     lumen_hu_range(v, &lo, &hi);
-    threshLoSpin_->setValue(t);
-    threshHiSpin_->setValue(hi);
+    threshSlider_->setValues(t, hi);
+    threshLabel_->setText(
+        QString("Low %1  —  High %2 HU").arg(qRound(t)).arg(qRound(hi)));
+    lumen_seg_push_undo(v);
+    updateUndoRedo();
     applyThreshold();
 }
 
@@ -800,43 +1188,184 @@ void MainWindow::redo() {
 void MainWindow::generateMesh() {
     LumenVolume* v = st_.volume;
     if (!v || generating_) return;
-    if (lumen_seg_count(v) == 0) return;
-    lumen_mesh_snapshot(v);  // main thread: copy the live mask
+
+    // Collect the visible, non-empty segments — one colored surface each.
+    std::vector<long> hist(256, 0);
+    lumen_seg_label_histogram(v, hist.data());
+    pendingSegIds_.clear();
+    const int count = lumen_seg_segment_count(v);
+    for (int i = 0; i < count; ++i) {
+        const int id = lumen_seg_segment_id_at(v, i);
+        if (lumen_seg_get_visible(v, id) && hist[id] > 0) pendingSegIds_.push_back(id);
+    }
+    if (pendingSegIds_.empty()) {
+        meshView_->clearMeshes();
+        meshInfoLabel_->setText("No visible, non-empty segments to surface.");
+        return;
+    }
+
     generating_ = true;
     generateBtn_->setEnabled(false);
     generateBtn_->setText("Generating…");
     exportStlBtn_->setEnabled(false);
+    meshPieces_.clear();
+    pendingSegIndex_ = 0;
+    startNextMeshSegment();
+}
+
+void MainWindow::startNextMeshSegment() {
+    LumenVolume* v = st_.volume;
+    if (!v || pendingSegIndex_ >= int(pendingSegIds_.size())) {
+        finishMeshGeneration();
+        return;
+    }
+    const int id = pendingSegIds_[pendingSegIndex_];
+    lumen_mesh_snapshot_label(v, id);  // UI thread: copy just this segment's mask
     const int smooth = smoothingSpin_->value();
     const int down = resolutionCombo_->currentData().toInt();
-    // Marching cubes on a background thread (touches only the snapshot + mesh).
+    // Marching cubes on a worker thread (touches only the snapshot + mesh).
     meshWatcher_.setFuture(QtConcurrent::run(
         [v, smooth, down] { return lumen_mesh_generate(v, smooth, down); }));
 }
 
 void MainWindow::onMeshReady() {
+    // Back on the UI thread: read this segment's mesh, tint it, keep going.
+    LumenVolume* v = st_.volume;
+    if (v && pendingSegIndex_ < int(pendingSegIds_.size())) {
+        const int id = pendingSegIds_[pendingSegIndex_];
+        const int vcount = lumen_mesh_vertex_count(v);
+        const int icount = lumen_mesh_index_count(v);
+        const float* verts = lumen_mesh_vertices(v);
+        const float* norms = lumen_mesh_normals(v);
+        const unsigned int* idx = lumen_mesh_indices(v);
+        if (vcount > 0 && icount > 0 && verts && idx) {
+            MeshView::MeshPiece piece;
+            piece.interleaved.resize(size_t(vcount) * 6);
+            for (int i = 0; i < vcount; ++i) {
+                float* dst = &piece.interleaved[size_t(i) * 6];
+                for (int k = 0; k < 3; ++k) dst[k] = verts[size_t(i) * 3 + k];
+                for (int k = 0; k < 3; ++k)
+                    dst[3 + k] = norms ? norms[size_t(i) * 3 + k] : 0.0f;
+            }
+            piece.indices.assign(idx, idx + icount);
+            int r = 200, g = 200, b = 200;
+            lumen_seg_get_color(v, id, &r, &g, &b);
+            piece.color[0] = r / 255.0f;
+            piece.color[1] = g / 255.0f;
+            piece.color[2] = b / 255.0f;
+            meshPieces_.push_back(std::move(piece));
+        }
+    }
+    ++pendingSegIndex_;
+    startNextMeshSegment();
+}
+
+void MainWindow::finishMeshGeneration() {
     generating_ = false;
     generateBtn_->setText("Generate / Update 3D");
+    long tris = 0, verts = 0;
+    for (const auto& p : meshPieces_) {
+        tris += long(p.indices.size() / 3);
+        verts += long(p.interleaved.size() / 6);
+    }
+    meshView_->setMeshes(meshPieces_);
+    meshInfoLabel_->setText(QString("Surfaces: %1\nTriangles: %2\nVertices: %3")
+                                .arg(meshPieces_.size())
+                                .arg(tris)
+                                .arg(verts));
     LumenVolume* v = st_.volume;
-    const int tris = meshWatcher_.result();
-    const int verts = v ? lumen_mesh_vertex_count(v) : 0;
-    meshView_->setMesh(v);
-    meshInfoLabel_->setText(
-        QString("Triangles: %1\nVertices: %2").arg(tris).arg(verts));
     generateBtn_->setEnabled(v && lumen_seg_count(v) > 0);
-    exportStlBtn_->setEnabled(tris > 0);
+    exportStlBtn_->setEnabled(v && lumen_seg_count(v) > 0);
+}
+
+void MainWindow::onScissorFinished(const QList<QPointF>& poly) {
+    LumenVolume* v = st_.volume;
+    if (!v || poly.size() < 3 || generating_) {
+        if (meshView_) meshView_->clearLasso();
+        return;
+    }
+    std::vector<float> xy;
+    xy.reserve(size_t(poly.size()) * 2);
+    for (const QPointF& p : poly) {
+        xy.push_back(float(p.x()));
+        xy.push_back(float(p.y()));
+    }
+    // The core projects with proj*view; QMatrix4x4::constData() is exactly the
+    // column-major buffer its scissor_cut expects (see scissor.hpp).
+    const QMatrix4x4 mvp = meshView_->lastMvp();
+    const int eraseInside = scissorEraseCombo_->currentData().toInt();
+    const int onlyLabel =
+        scissorActiveOnlyCheck_->isChecked() ? lumen_seg_active(v) : 0;
+
+    lumen_seg_push_undo(v);
+    const long cleared = lumen_seg_scissor_cut(
+        v, mvp.constData(), meshView_->width(), meshView_->height(), xy.data(),
+        int(poly.size()), eraseInside, onlyLabel);
+    updateUndoRedo();
+    refreshCanvas();
+    updateSegmentCounts();
+    meshView_->clearLasso();
+    meshInfoLabel_->setText(QString("Scissor cut cleared %1 voxels. Rebuilding…")
+                                .arg(cleared));
+    generateMesh();  // rebuild the surface to reflect the cut
 }
 
 void MainWindow::exportStl() {
     LumenVolume* v = st_.volume;
-    if (!v || lumen_mesh_index_count(v) == 0) return;
-    const QString path = QFileDialog::getSaveFileName(
-        this, "Export STL", QDir::homePath() + "/LumenSlice.stl",
-        "STL mesh (*.stl)");
-    if (path.isEmpty()) return;
-    const int rc = lumen_mesh_write_stl(v, path.toUtf8().constData());
-    exportMsgLabel_->setText(rc == 0
-                                 ? QString("Saved %1").arg(QFileInfo(path).fileName())
-                                 : "STL export failed.");
+    if (!v) return;
+
+    // The checked segments that actually carry voxels.
+    std::vector<long> hist(256, 0);
+    lumen_seg_label_histogram(v, hist.data());
+    std::vector<int> ids;
+    for (auto it = exportSegChecks_.constBegin(); it != exportSegChecks_.constEnd();
+         ++it) {
+        if (it.value()->isChecked() && hist[it.key()] > 0) ids.push_back(it.key());
+    }
+    if (ids.empty()) {
+        exportMsgLabel_->setText("Select at least one non-empty segment to export.");
+        return;
+    }
+
+    const int smooth = smoothingSpin_->value();
+    const int down = resolutionCombo_->currentData().toInt();
+
+    if (oneFilePerSegCheck_->isChecked()) {
+        // One STL per segment into a chosen directory.
+        const QString dir = QFileDialog::getExistingDirectory(
+            this, "Export one STL per segment to folder", QDir::homePath());
+        if (dir.isEmpty()) return;
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        int written = 0;
+        for (int id : ids) {
+            lumen_mesh_snapshot_label(v, id);   // UI thread (export is synchronous)
+            if (lumen_mesh_generate(v, smooth, down) <= 0) continue;
+            const QString name = sanitizeFilename(
+                segNames_.value(id, QString("Segment %1").arg(id)));
+            const QString path = QString("%1/%2.stl").arg(dir, name);
+            if (lumen_mesh_write_stl(v, path.toUtf8().constData()) == 0) ++written;
+        }
+        QApplication::restoreOverrideCursor();
+        exportMsgLabel_->setText(
+            QString("Wrote %1 STL file(s) to %2").arg(written).arg(dir));
+    } else {
+        // Fuse the chosen segments into a single STL (union via the bridge).
+        const QString path = QFileDialog::getSaveFileName(
+            this, "Export fused STL", QDir::homePath() + "/LumenSlice.stl",
+            "STL mesh (*.stl)");
+        if (path.isEmpty()) return;
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        lumen_mesh_snapshot_labels(v, ids.data(), int(ids.size()));
+        const int tris = lumen_mesh_generate(v, smooth, down);
+        const int rc =
+            tris > 0 ? lumen_mesh_write_stl(v, path.toUtf8().constData()) : -1;
+        QApplication::restoreOverrideCursor();
+        exportMsgLabel_->setText(
+            rc == 0 ? QString("Saved %1 (%2 segments fused)")
+                          .arg(QFileInfo(path).fileName())
+                          .arg(ids.size())
+                    : "STL export failed.");
+    }
 }
 
 void MainWindow::exportPng() {
@@ -910,6 +1439,7 @@ void MainWindow::refreshVolumeInfo() {
     float lo = 0, hi = 0;
     lumen_hu_range(v, &lo, &hi);
     huLabel_->setText(QString("%1 … %2").arg(lo, 0, 'f', 0).arg(hi, 0, 'f', 0));
+    if (threshSlider_) threshSlider_->setBounds(lo, hi);
 
     // Curated patient/study summary from the meta JSON.
     QStringList lines;
@@ -1052,7 +1582,34 @@ void MainWindow::updateSegmentCounts() {
     if (generateBtn_)
         generateBtn_->setEnabled(total > 0 && !generating_);
     if (exportStlBtn_)
-        exportStlBtn_->setEnabled(lumen_mesh_index_count(v) > 0);
+        exportStlBtn_->setEnabled(total > 0);  // export generates its own meshes
+}
+
+void MainWindow::rebuildExportSegmentList() {
+    if (!exportSegLayout_) return;
+    QLayoutItem* item = nullptr;
+    while ((item = exportSegLayout_->takeAt(0)) != nullptr) {
+        if (item->widget()) item->widget()->deleteLater();
+        delete item;
+    }
+    exportSegChecks_.clear();
+
+    LumenVolume* v = st_.volume;
+    if (!v) return;
+    std::vector<long> hist(256, 0);
+    lumen_seg_label_histogram(v, hist.data());
+    const int count = lumen_seg_segment_count(v);
+    for (int i = 0; i < count; ++i) {
+        const int id = lumen_seg_segment_id_at(v, i);
+        auto* c = new QCheckBox(QString("%1  (%2 voxels)")
+                                    .arg(segNames_.value(
+                                        id, QString("Segment %1").arg(id)))
+                                    .arg(hist[id]));
+        c->setChecked(hist[id] > 0);
+        c->setEnabled(hist[id] > 0);
+        exportSegChecks_[id] = c;
+        exportSegLayout_->addWidget(c);
+    }
 }
 
 void MainWindow::updateUndoRedo() {

@@ -6,28 +6,42 @@
 
 #include <QFutureWatcher>
 #include <QHash>
+#include <QList>
 #include <QMainWindow>
+#include <QPointF>
 #include <QString>
+#include <vector>
 
 #include "BridgeVolume.h"
+#include "MarkupModel.h"
+#include "MeshView.h"
+#include "RangeSlider.h"
 #include "ViewState.h"
 
 class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
+class QGridLayout;
 class QLabel;
 class QListWidget;
 class QPushButton;
 class QSlider;
 class QSpinBox;
 class QStackedWidget;
+class QTimer;
+class QToolButton;
 class QVBoxLayout;
 class QWidget;
 
 namespace lumenwin {
 
+// Result of an off-thread DICOM folder load.
+struct LoadResult {
+    LumenVolume* volume = nullptr;
+    QString message;
+};
+
 class SliceView;
-class MeshView;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -43,6 +57,7 @@ protected:
 
 private slots:
     void openFolder();
+    void onLoadReady();
     void selectTab(int tab);
 
     // Canvas intents.
@@ -69,8 +84,12 @@ private slots:
     // 3D + export.
     void generateMesh();
     void onMeshReady();
+    void onScissorFinished(const QList<QPointF>& poly);
     void exportStl();
     void exportPng();
+
+    // Markups.
+    void onMarkupPointPicked(int x, int y, int z);
 
 private:
     // UI construction.
@@ -79,7 +98,18 @@ private:
     QWidget* buildSegmentPanel();
     QWidget* buildThreeDPanel();
     QWidget* buildExportPanel();
-    QWidget* buildSliceBoard();
+    QWidget* buildMarkupPanel();
+    QWidget* buildQuad();
+    void toggleMaximize(int cell);
+    void rebuildMarkupList();
+    void updateMarkupPaletteSelection();
+    void updateMarkupPending();
+    void refreshMarkups();
+
+    // Sequential per-segment colored mesh generation (one snapshot_label ->
+    // generate -> readback per visible non-empty segment, worker off the UI thread).
+    void startNextMeshSegment();
+    void finishMeshGeneration();
 
     // Refresh helpers.
     void loadPath(const QString& path);
@@ -88,6 +118,7 @@ private:
     void refreshSliders();
     void refreshVolumeInfo();
     void rebuildSegmentList();
+    void rebuildExportSegmentList();
     void updateSegmentCounts();
     void updateUndoRedo();
     void updateWlControls();
@@ -99,8 +130,11 @@ private:
     ViewState st_;
     QString metaJson_;
 
-    // Canvas.
-    QStackedWidget* central_ = nullptr;
+    // Canvas: a 2x2 quad (Axial / Coronal / Sagittal / 3D), each cell
+    // double-click-maximizable.
+    QGridLayout* quadLayout_ = nullptr;
+    QWidget* quadCells_[4] = {nullptr, nullptr, nullptr, nullptr};
+    int maximized_ = -1;
     SliceView* panes_[3] = {nullptr, nullptr, nullptr};
     QSlider* sliders_[3] = {nullptr, nullptr, nullptr};
     MeshView* meshView_ = nullptr;
@@ -128,8 +162,9 @@ private:
     QHash<int, QString> segNames_;
     QComboBox* toolCombo_ = nullptr;
     QStackedWidget* toolDetail_ = nullptr;
-    QDoubleSpinBox* threshLoSpin_ = nullptr;
-    QDoubleSpinBox* threshHiSpin_ = nullptr;
+    RangeSlider* threshSlider_ = nullptr;
+    QLabel* threshLabel_ = nullptr;
+    QTimer* threshTimer_ = nullptr;
     QSlider* toleranceSlider_ = nullptr;
     QLabel* toleranceLabel_ = nullptr;
     QSlider* brushSlider_ = nullptr;
@@ -148,15 +183,39 @@ private:
     QComboBox* resolutionCombo_ = nullptr;
     QPushButton* generateBtn_ = nullptr;
     QLabel* meshInfoLabel_ = nullptr;
+    QCheckBox* scissorModeCheck_ = nullptr;
+    QComboBox* scissorEraseCombo_ = nullptr;
+    QCheckBox* scissorActiveOnlyCheck_ = nullptr;
 
     // Export controls.
+    QWidget* exportSegContainer_ = nullptr;
+    QVBoxLayout* exportSegLayout_ = nullptr;
+    QHash<int, QCheckBox*> exportSegChecks_;
+    QCheckBox* oneFilePerSegCheck_ = nullptr;
     QPushButton* exportStlBtn_ = nullptr;
     QPushButton* exportPngBtn_ = nullptr;
     QLabel* exportMsgLabel_ = nullptr;
 
-    // Mesh generation (off-thread).
+    // Markups (client-side).
+    MarkupModel markups_;
+    QComboBox* markupKindCombo_ = nullptr;
+    QList<QToolButton*> markupPaletteBtns_;
+    QCheckBox* markupPlaceCheck_ = nullptr;
+    QLabel* markupPendingLabel_ = nullptr;
+    QPushButton* markupCancelBtn_ = nullptr;
+    QWidget* markupListContainer_ = nullptr;
+    QVBoxLayout* markupListLayout_ = nullptr;
+
+    // Off-thread folder load.
+    QFutureWatcher<LoadResult> loadWatcher_;
+    bool loading_ = false;
+
+    // Mesh generation (off-thread, per-segment colored surfaces).
     QFutureWatcher<int> meshWatcher_;
     bool generating_ = false;
+    std::vector<int> pendingSegIds_;
+    int pendingSegIndex_ = 0;
+    std::vector<MeshView::MeshPiece> meshPieces_;
 };
 
 }  // namespace lumenwin

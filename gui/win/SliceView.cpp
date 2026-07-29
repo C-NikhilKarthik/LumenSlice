@@ -2,9 +2,12 @@
 
 #include <QMouseEvent>
 #include <QPainter>
+#include <QPainterPath>
 #include <QPaintEvent>
 #include <QWheelEvent>
 #include <algorithm>
+
+#include "MarkupModel.h"
 
 namespace lumenwin {
 
@@ -36,7 +39,7 @@ void planeSpacing(int axis, float sx, float sy, float sz, float* ax, float* ay) 
 
 SliceView::SliceView(int axis, ViewState* state, QWidget* parent)
     : QWidget(parent), axis_(axis), st_(state) {
-    setMouseTracking(false);
+    setMouseTracking(true);  // for the brush-ring cursor preview
     setMinimumSize(160, 160);
     setAttribute(Qt::WA_OpaquePaintEvent, true);
     setFocusPolicy(Qt::StrongFocus);
@@ -87,7 +90,16 @@ bool SliceView::widgetToPixel(const QPoint& p, int imgW, int imgH, int* px,
 
 void SliceView::paintEvent(QPaintEvent*) {
     QPainter painter(this);
-    painter.fillRect(rect(), QColor(24, 26, 32));
+    painter.setRenderHint(QPainter::Antialiasing, true);
+
+    // Rounded card: fill the gaps with the canvas background, then the card, and
+    // clip everything else to it so the pane reads as a distinct tile in the quad.
+    painter.fillRect(rect(), QColor(0x1b, 0x1d, 0x23));
+    const QRectF card = QRectF(rect()).adjusted(1, 1, -1, -1);
+    QPainterPath cardPath;
+    cardPath.addRoundedRect(card, 12, 12);
+    painter.fillPath(cardPath, QColor(0x12, 0x14, 0x18));
+    painter.setClipPath(cardPath);
 
     // Title strip.
     painter.setPen(QColor(210, 214, 224));
@@ -101,6 +113,10 @@ void SliceView::paintEvent(QPaintEvent*) {
     if (!v) {
         painter.setPen(QColor(120, 126, 138));
         painter.drawText(rect(), Qt::AlignCenter, "No volume loaded");
+        painter.setClipping(false);
+        painter.setPen(QPen(QColor(0x2f, 0x34, 0x40), 1));
+        painter.setBrush(Qt::NoBrush);
+        painter.drawPath(cardPath);
         return;
     }
 
@@ -133,7 +149,8 @@ void SliceView::paintEvent(QPaintEvent*) {
         }
     }
 
-    // Crosshair / slice-intersection lines at the shared focus voxel.
+    // Crosshair / slice-intersection lines at the shared focus voxel. Each plane
+    // has its own colour: axial red, coronal green, sagittal yellow.
     if (st_->showCrosshair) {
         int cx = 0, cy = 0;
         lumen_voxel_to_slice_pixel(v, axis_, st_->focus[0], st_->focus[1],
@@ -141,12 +158,74 @@ void SliceView::paintEvent(QPaintEvent*) {
         if (cx >= 0 && cx < w && cy >= 0 && cy < h) {
             const double lx = target.left() + (cx + 0.5) / w * target.width();
             const double ly = target.top() + (cy + 0.5) / h * target.height();
-            painter.setPen(QPen(QColor(90, 200, 255, 180), 1));
+            QColor ch = axis_ == LUMEN_AXIS_AXIAL
+                            ? QColor(235, 80, 80)
+                            : (axis_ == LUMEN_AXIS_CORONAL ? QColor(90, 210, 100)
+                                                           : QColor(240, 210, 60));
+            ch.setAlpha(190);
+            painter.setPen(QPen(ch, 1));
             painter.drawLine(QPointF(target.left(), ly),
                              QPointF(target.right(), ly));
             painter.drawLine(QPointF(lx, target.top()),
                              QPointF(lx, target.bottom()));
         }
+    }
+
+    // Anatomical orientation labels at the four edges (approximate radiological
+    // convention per plane).
+    if (st_->showOrientationLabels) {
+        const char* lbl[4];  // left, right, top, bottom
+        if (axis_ == LUMEN_AXIS_AXIAL) {
+            lbl[0] = "R"; lbl[1] = "L"; lbl[2] = "A"; lbl[3] = "P";
+        } else if (axis_ == LUMEN_AXIS_CORONAL) {
+            lbl[0] = "R"; lbl[1] = "L"; lbl[2] = "S"; lbl[3] = "I";
+        } else {
+            lbl[0] = "A"; lbl[1] = "P"; lbl[2] = "S"; lbl[3] = "I";
+        }
+        painter.setPen(QColor(150, 200, 230, 200));
+        const int cyv = target.center().y();
+        const int cxv = target.center().x();
+        painter.drawText(target.left() + 3, cyv + 5, lbl[0]);
+        painter.drawText(target.right() - 12, cyv + 5, lbl[1]);
+        painter.drawText(cxv - 4, target.top() + 14, lbl[2]);
+        painter.drawText(cxv - 4, target.bottom() - 5, lbl[3]);
+    }
+
+    // Brush-ring cursor preview while a paint/erase tool is active.
+    if (st_->segmentInteractive && hovering_ &&
+        (st_->tool == Tool::Paint || st_->tool == Tool::Erase)) {
+        const double scale = double(target.width()) / w;  // px -> display
+        const double rr = std::max(2.0, st_->brushRadius * scale);
+        painter.setPen(QPen(st_->tool == Tool::Erase ? QColor(255, 120, 120)
+                                                     : QColor(120, 220, 255),
+                            1, Qt::DashLine));
+        painter.setBrush(Qt::NoBrush);
+        painter.drawEllipse(QPointF(hoverPos_), rr, rr);
+    }
+
+    // Markup dots for defining points that lie on this slice (+ pending points).
+    if (st_->markups) {
+        painter.setRenderHint(QPainter::Antialiasing, true);
+        auto drawDot = [&](const std::array<int, 3>& vp, const QColor& col,
+                           bool filled) {
+            int px = 0, py = 0;
+            lumen_voxel_to_slice_pixel(v, axis_, vp[0], vp[1], vp[2], &px, &py);
+            if (px < 0 || px >= w || py < 0 || py >= h) return;
+            const double dx = target.left() + (px + 0.5) / w * target.width();
+            const double dy = target.top() + (py + 0.5) / h * target.height();
+            painter.setPen(QPen(col, 2));
+            painter.setBrush(filled ? QBrush(col) : Qt::NoBrush);
+            painter.drawEllipse(QPointF(dx, dy), 4.5, 4.5);
+        };
+        for (const auto& m : st_->markups->markups()) {
+            if (!m.visible) continue;
+            const QColor col = st_->markups->color(m);
+            for (const auto& vp : m.voxels)
+                if (MarkupModel::onSlice(vp, axis_, index)) drawDot(vp, col, true);
+        }
+        const QColor pc = st_->markups->pendingColor();
+        for (const auto& vp : st_->markups->pending())
+            if (MarkupModel::onSlice(vp, axis_, index)) drawDot(vp, pc, false);
     }
 
     // Slice counter, bottom-right.
@@ -157,6 +236,12 @@ void SliceView::paintEvent(QPaintEvent*) {
     painter.drawText(QRect(8, height() - 22, width() - 16, 18),
                      Qt::AlignRight | Qt::AlignVCenter,
                      QString("%1 / %2").arg(index + 1).arg(count));
+
+    // Card border on top of everything.
+    painter.setClipping(false);
+    painter.setPen(QPen(QColor(0x2f, 0x34, 0x40), 1));
+    painter.setBrush(Qt::NoBrush);
+    painter.drawPath(cardPath);
 }
 
 void SliceView::wheelEvent(QWheelEvent* e) {
@@ -190,8 +275,17 @@ void SliceView::mousePressEvent(QMouseEvent* e) {
         return;
     }
 
-    // Right-drag is always window/level.
-    if (e->button() == Qt::RightButton) {
+    // Markup placement: a plain left-click drops a defining point.
+    if (st_->markupPlacing && e->button() == Qt::LeftButton && inside) {
+        int x = 0, y = 0, z = 0;
+        lumen_slice_pixel_to_voxel(v, axis_, index, pxx, pyy, &x, &y, &z);
+        emit markupPointPicked(x, y, z);
+        return;
+    }
+
+    // Window/level is on a modifier drag: right-button, or Shift+left.
+    if (e->button() == Qt::RightButton ||
+        (e->button() == Qt::LeftButton && (e->modifiers() & Qt::ShiftModifier))) {
         drag_ = Drag::WindowLevel;
         return;
     }
@@ -223,12 +317,24 @@ void SliceView::mousePressEvent(QMouseEvent* e) {
         }
     }
 
-    // Default: left-drag adjusts window/level (the primary W/L control).
-    drag_ = Drag::WindowLevel;
+    // Default: a plain left-click locates — set the shared focus and link panes.
+    if (inside) {
+        int x = 0, y = 0, z = 0;
+        lumen_slice_pixel_to_voxel(v, axis_, index, pxx, pyy, &x, &y, &z);
+        emit focusPicked(x, y, z);
+    }
 }
 
 void SliceView::mouseMoveEvent(QMouseEvent* e) {
-    if (drag_ == Drag::None) return;
+    // Track hover for the brush-ring cursor preview.
+    hoverPos_ = e->pos();
+    hovering_ = true;
+    if (drag_ == Drag::None) {
+        if (st_->segmentInteractive &&
+            (st_->tool == Tool::Paint || st_->tool == Tool::Erase))
+            update();  // redraw the ring at the new position
+        return;
+    }
     LumenVolume* v = st_->volume;
     if (!v) return;
 
@@ -251,5 +357,12 @@ void SliceView::mouseMoveEvent(QMouseEvent* e) {
 }
 
 void SliceView::mouseReleaseEvent(QMouseEvent*) { drag_ = Drag::None; }
+
+void SliceView::mouseDoubleClickEvent(QMouseEvent*) { emit doubleClicked(); }
+
+void SliceView::leaveEvent(QEvent*) {
+    hovering_ = false;
+    update();
+}
 
 }  // namespace lumenwin

@@ -1,8 +1,10 @@
 #include <QApplication>
 #include <QDir>
 #include <QFileInfo>
+#include <QStyleFactory>
 
 #include "MainWindow.h"
+#include "Theme.h"
 
 // Point DCMTK at the bundled data dictionary (resources/dicom.dic beside the exe)
 // before any DICOM parsing — mirrors the setup the original Win32 shell did.
@@ -17,6 +19,8 @@ int main(int argc, char** argv) {
     QApplication app(argc, argv);
     QApplication::setApplicationName("LumenSlice");
     QApplication::setOrganizationName("LumenSlice");
+    QApplication::setStyle(QStyleFactory::create("Fusion"));
+    app.setStyleSheet(lumenwin::kAppStyle);
     configureDicomDictionary();
 
     lumenwin::MainWindow window;
