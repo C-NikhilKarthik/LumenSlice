@@ -203,29 +203,60 @@ void SliceView::paintEvent(QPaintEvent*) {
         painter.drawEllipse(QPointF(hoverPos_), rr, rr);
     }
 
-    // Markup dots for defining points that lie on this slice (+ pending points).
+    // Markup dots for defining points that lie on this slice (+ pending points),
+    // with a Slicer-style dimension label on the first on-slice point of a
+    // completed Line/Plane.
     if (st_->markups) {
         painter.setRenderHint(QPainter::Antialiasing, true);
-        auto drawDot = [&](const std::array<int, 3>& vp, const QColor& col,
-                           bool filled) {
+        auto toDisplay = [&](const std::array<int, 3>& vp, QPointF* out) -> bool {
             int px = 0, py = 0;
             lumen_voxel_to_slice_pixel(v, axis_, vp[0], vp[1], vp[2], &px, &py);
-            if (px < 0 || px >= w || py < 0 || py >= h) return;
-            const double dx = target.left() + (px + 0.5) / w * target.width();
-            const double dy = target.top() + (py + 0.5) / h * target.height();
+            if (px < 0 || px >= w || py < 0 || py >= h) return false;
+            out->setX(target.left() + (px + 0.5) / w * target.width());
+            out->setY(target.top() + (py + 0.5) / h * target.height());
+            return true;
+        };
+        auto drawDot = [&](const QPointF& at, const QColor& col, bool filled) {
             painter.setPen(QPen(col, 2));
             painter.setBrush(filled ? QBrush(col) : Qt::NoBrush);
-            painter.drawEllipse(QPointF(dx, dy), 4.5, 4.5);
+            painter.drawEllipse(at, 4.5, 4.5);
+        };
+        auto drawLabel = [&](const QPointF& at, const QString& text,
+                             const QColor& col) {
+            if (text.isEmpty()) return;
+            QFont lf = painter.font();
+            lf.setBold(true);
+            painter.setFont(lf);
+            QRectF box = painter.fontMetrics().boundingRect(text);
+            box.adjust(-4, -2, 4, 2);
+            box.moveTopLeft(at + QPointF(7, -box.height() - 3));
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(QColor(10, 12, 16, 200));
+            painter.drawRoundedRect(box, 3, 3);
+            painter.setPen(col.lighter(135));
+            painter.drawText(box, Qt::AlignCenter, text);
         };
         for (const auto& m : st_->markups->markups()) {
             if (!m.visible) continue;
             const QColor col = st_->markups->color(m);
-            for (const auto& vp : m.voxels)
-                if (MarkupModel::onSlice(vp, axis_, index)) drawDot(vp, col, true);
+            bool labelled = false;
+            for (const auto& vp : m.voxels) {
+                if (!MarkupModel::onSlice(vp, axis_, index)) continue;
+                QPointF at;
+                if (!toDisplay(vp, &at)) continue;
+                drawDot(at, col, true);
+                if (!labelled) {
+                    drawLabel(at, st_->markups->measurementLabel(m), col);
+                    labelled = true;
+                }
+            }
         }
         const QColor pc = st_->markups->pendingColor();
-        for (const auto& vp : st_->markups->pending())
-            if (MarkupModel::onSlice(vp, axis_, index)) drawDot(vp, pc, false);
+        for (const auto& vp : st_->markups->pending()) {
+            QPointF at;
+            if (MarkupModel::onSlice(vp, axis_, index) && toDisplay(vp, &at))
+                drawDot(at, pc, false);
+        }
     }
 
     // Slice counter, bottom-right.

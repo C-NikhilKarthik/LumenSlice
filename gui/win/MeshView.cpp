@@ -353,6 +353,21 @@ void MeshView::drawMarkups(QPainter& p) {
         p.setBrush(c);
         p.drawEllipse(s, r, r);
     };
+    // A dimension label with a dark pill behind it, so it reads over the surface.
+    auto label = [&](const QPointF& at, const QString& text, const QColor& c) {
+        if (text.isEmpty()) return;
+        QFont f = p.font();
+        f.setBold(true);
+        p.setFont(f);
+        QRectF box = p.fontMetrics().boundingRect(text);
+        box.adjust(-5, -3, 5, 3);
+        box.moveTopLeft(at + QPointF(8, -box.height() - 4));
+        p.setPen(Qt::NoPen);
+        p.setBrush(QColor(10, 12, 16, 200));
+        p.drawRoundedRect(box, 4, 4);
+        p.setPen(c.lighter(135));
+        p.drawText(box, Qt::AlignCenter, text);
+    };
     for (const auto& m : markups_->markups()) {
         if (!m.visible) continue;
         const QColor col = markups_->color(m);
@@ -364,16 +379,22 @@ void MeshView::drawMarkups(QPainter& p) {
             pts.push_back(s);
         }
         if (!ok) continue;
+        QPointF anchor;
         if (pts.size() == 3) {  // plane -> filled triangle
             QPolygonF tri({pts[0], pts[1], pts[2]});
             p.setPen(QPen(col, 2));
             p.setBrush(QColor(col.red(), col.green(), col.blue(), 60));
             p.drawPolygon(tri);
+            anchor = (pts[0] + pts[1] + pts[2]) / 3.0;
         } else if (pts.size() == 2) {  // line -> segment
             p.setPen(QPen(col, 2));
             p.drawLine(pts[0], pts[1]);
+            anchor = (pts[0] + pts[1]) / 2.0;
+        } else if (!pts.empty()) {
+            anchor = pts[0];
         }
         for (const QPointF& s : pts) dot(s, col, 4.5);
+        label(anchor, markups_->measurementLabel(m), col);
     }
     // In-progress (pending) points.
     const QColor pc = markups_->pendingColor();

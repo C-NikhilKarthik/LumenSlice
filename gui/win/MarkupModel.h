@@ -118,6 +118,22 @@ public:
     QVector3D mm(const std::array<int, 3>& v) const {
         return QVector3D(v[0] * sx_, v[1] * sy_, v[2] * sz_);
     }
+    // Slicer-style measurement text for a completed Line/Plane, computed in mm
+    // from the voxel spacing (empty for a Point or an incomplete markup). A line
+    // reports its length; a plane reports its two in-plane side lengths.
+    QString measurementLabel(const Markup& m) const {
+        if (m.kind == Kind::Line && m.voxels.size() == 2) {
+            const double len = (mm(m.voxels[0]) - mm(m.voxels[1])).length();
+            return QString("%1 mm").arg(len, 0, 'f', 1);
+        }
+        if (m.kind == Kind::Plane && m.voxels.size() == 3) {
+            const QVector3D p0 = mm(m.voxels[0]);
+            const double w = (mm(m.voxels[1]) - p0).length();
+            const double h = (mm(m.voxels[2]) - p0).length();
+            return QString("%1 x %2 mm").arg(w, 0, 'f', 1).arg(h, 0, 'f', 1);
+        }
+        return QString();
+    }
     // Whether a voxel lies on the current slice of `axis`.
     static bool onSlice(const std::array<int, 3>& v, int axis, int sliceIndex) {
         const int idx = axis == 0 ? v[2] : (axis == 1 ? v[1] : v[0]);
