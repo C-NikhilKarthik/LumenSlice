@@ -38,6 +38,15 @@ jobs:
       - name: C++ metadata / buffer test
         run: swift run MetaTest
 
+      - name: C++ segmentation test
+        run: swift run SegTest
+
+      - name: DICOM ingestion smoke test
+        run: swift run IngestTest testdata/phantom
+
+      - name: Segmentation to mesh smoke test
+        run: swift run MeshShot testdata/phantom "$RUNNER_TEMP/phantom.stl" 300 3000
+
       - name: Swift unit tests
         run: swift test
 
