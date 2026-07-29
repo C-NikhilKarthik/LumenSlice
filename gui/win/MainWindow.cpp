@@ -573,6 +573,14 @@ QWidget* MainWindow::buildThreeDPanel() {
         "then the surface rebuilds."));
     scissorModeCheck_ = new QCheckBox("Scissor mode (draw to cut)");
     connect(scissorModeCheck_, &QCheckBox::toggled, this, [this](bool on) {
+        // The cut projects through the surface you see, so it needs one first —
+        // otherwise the (stale) camera matrix would carve the wrong region.
+        if (on && (!meshView_ || !meshView_->hasMesh())) {
+            QSignalBlocker b(scissorModeCheck_);
+            scissorModeCheck_->setChecked(false);
+            setStatus("Generate the 3D surface first, then draw the scissor loop.");
+            return;
+        }
         if (meshView_) meshView_->setScissorMode(on);
     });
     body(scissorBox)->addWidget(scissorModeCheck_);
@@ -1328,22 +1336,36 @@ void MainWindow::requestMeshRebuild() {
 
 void MainWindow::onScissorFinished(const QList<QPointF>& poly) {
     LumenVolume* v = st_.volume;
-    if (!v || poly.size() < 3 || generating_) {
-        if (meshView_) meshView_->clearLasso();
+    if (meshView_) meshView_->clearLasso();
+    // Guardrails (mirroring Slicer's scissor preconditions) so a cut can never
+    // run against a stale matrix, an empty mask, or a missing active segment.
+    if (!v || poly.size() < 3 || generating_) return;
+    if (!meshView_ || !meshView_->hasMesh()) {
+        setStatus("Generate the 3D surface before cutting.");
         return;
     }
+    if (lumen_seg_count(v) == 0) {
+        setStatus("Nothing to cut — segment a structure first.");
+        return;
+    }
+    const bool activeOnly = scissorActiveOnlyCheck_->isChecked();
+    if (activeOnly && lumen_seg_active(v) == 0) {
+        setStatus("Pick an active segment, or uncheck 'Active segment only'.");
+        return;
+    }
+
     std::vector<float> xy;
     xy.reserve(size_t(poly.size()) * 2);
     for (const QPointF& p : poly) {
         xy.push_back(float(p.x()));
         xy.push_back(float(p.y()));
     }
-    // The core projects with proj*view; QMatrix4x4::constData() is exactly the
-    // column-major buffer its scissor_cut expects (see scissor.hpp).
+    // The core projects with proj*view; QMatrix4x4::constData() is the column-major
+    // buffer its scissor_cut expects — indexed as mvp[i*4+j] this yields M·world,
+    // matching how the mesh is drawn (see scissor.hpp).
     const QMatrix4x4 mvp = meshView_->lastMvp();
     const int eraseInside = scissorEraseCombo_->currentData().toInt();
-    const int onlyLabel =
-        scissorActiveOnlyCheck_->isChecked() ? lumen_seg_active(v) : 0;
+    const int onlyLabel = activeOnly ? lumen_seg_active(v) : 0;
 
     lumen_seg_push_undo(v);
     const long cleared = lumen_seg_scissor_cut(
@@ -1352,10 +1374,14 @@ void MainWindow::onScissorFinished(const QList<QPointF>& poly) {
     updateUndoRedo();
     refreshCanvas();
     updateSegmentCounts();
-    meshView_->clearLasso();
-    meshInfoLabel_->setText(QString("Scissor cut cleared %1 voxels. Rebuilding…")
-                                .arg(cleared));
-    generateMesh();  // rebuild the surface to reflect the cut
+    if (cleared > 0) {
+        meshInfoLabel_->setText(
+            QString("Scissor cut cleared %1 voxels. Rebuilding…").arg(cleared));
+        generateMesh();  // rebuild the surface to reflect the cut
+    } else {
+        meshInfoLabel_->setText(
+            "The loop enclosed no surface voxels — draw around the part to cut.");
+    }
 }
 
 void MainWindow::exportStl() {
