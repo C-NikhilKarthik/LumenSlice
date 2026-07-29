@@ -76,6 +76,8 @@ private slots:
     void refineGrow();
     void refineShrink();
     void refineSmooth();
+    void keepLargest();
+    void removeSmallIslands();
     void growFromSeeds();
     void undo();
     void redo();
@@ -173,6 +175,7 @@ private:
     QLabel* seedItersLabel_ = nullptr;
     QLabel* seedGateLabel_ = nullptr;
     QPushButton* growSeedsBtn_ = nullptr;
+    QSpinBox* removeSmallSpin_ = nullptr;
     QPushButton* undoBtn_ = nullptr;
     QPushButton* redoBtn_ = nullptr;
     QCheckBox* overlayCheck_ = nullptr;

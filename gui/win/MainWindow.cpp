@@ -464,6 +464,25 @@ QWidget* MainWindow::buildSegmentPanel() {
     body(refineBox)->addWidget(smoothBtn);
     v->addWidget(refineBox);
 
+    // Island cleanup. Keep the same operations and defaults as the macOS
+    // segmentation model; the implementation remains in the shared core.
+    auto* islandsBox = section("Islands");
+    auto* keepBtn = new QPushButton("Keep largest island");
+    connect(keepBtn, &QPushButton::clicked, this, &MainWindow::keepLargest);
+    body(islandsBox)->addWidget(keepBtn);
+    auto* removeRow = new QHBoxLayout;
+    removeSmallSpin_ = new QSpinBox;
+    removeSmallSpin_->setRange(1, 1000000000);
+    removeSmallSpin_->setValue(50);
+    removeRow->addWidget(new QLabel("Remove below voxels:"));
+    removeRow->addWidget(removeSmallSpin_);
+    auto* removeBtn = new QPushButton("Remove small islands");
+    connect(removeBtn, &QPushButton::clicked, this,
+            &MainWindow::removeSmallIslands);
+    removeRow->addWidget(removeBtn);
+    body(islandsBox)->addLayout(removeRow);
+    v->addWidget(islandsBox);
+
     // Grow from seeds.
     auto* seedsBox = section("Grow from seeds");
     body(seedsBox)->addWidget(new QLabel(
@@ -1141,6 +1160,26 @@ void MainWindow::refineSmooth() {
     if (!v || lumen_seg_active(v) == 0) return;
     lumen_seg_push_undo(v);
     lumen_seg_smooth(v, 1);
+    updateUndoRedo();
+    refreshCanvas();
+    updateSegmentCounts();
+}
+
+void MainWindow::keepLargest() {
+    LumenVolume* v = st_.volume;
+    if (!v || lumen_seg_active(v) == 0) return;
+    lumen_seg_push_undo(v);
+    lumen_seg_keep_largest(v);
+    updateUndoRedo();
+    refreshCanvas();
+    updateSegmentCounts();
+}
+
+void MainWindow::removeSmallIslands() {
+    LumenVolume* v = st_.volume;
+    if (!v || lumen_seg_active(v) == 0 || !removeSmallSpin_) return;
+    lumen_seg_push_undo(v);
+    lumen_seg_remove_small(v, removeSmallSpin_->value());
     updateUndoRedo();
     refreshCanvas();
     updateSegmentCounts();

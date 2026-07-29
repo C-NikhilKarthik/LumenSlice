@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.24)
 project(LumenSlice LANGUAGES CXX)
 
+enable_testing()
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -43,6 +45,21 @@ target_link_libraries(LumenCore PUBLIC ${DCMTK_DCMJPLS} ${DCMTK_DCMJPEG}
 if(WIN32)
     target_link_libraries(LumenCore PUBLIC ws2_32)
 endif()
+
+# Headless shared-core tests. These are intentionally outside the Windows UI
+# target so CI can validate the same segmentation/metadata engine independently
+# of Qt and the desktop environment.
+add_executable(SegTest tests/cpp/seg_test.cpp)
+target_link_libraries(SegTest PRIVATE LumenCore)
+target_include_directories(SegTest PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src")
+add_test(NAME SegTest COMMAND SegTest)
+
+add_executable(MetaTest tests/cpp/meta_test.cpp)
+target_link_libraries(MetaTest PRIVATE LumenCore)
+target_include_directories(MetaTest PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src")
+add_test(NAME MetaTest COMMAND MetaTest)
 
 if(WIN32)
     # Windows front-end: a Qt 6 Widgets GUI (gui/win) over the shared C++ core

@@ -79,6 +79,9 @@ jobs:
       - name: Build Windows executable
         run: cmake --build build --config Release --parallel
 
+      - name: Run shared C++ tests
+        run: ctest --test-dir build -C Release --output-on-failure
+
       - name: Assemble Windows package
         shell: pwsh
         run: |
