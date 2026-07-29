@@ -1044,7 +1044,11 @@ void MainWindow::adoptLoadedVolume(const LoadResult& r) {
     if (markupPlaceCheck_) markupPlaceCheck_->setChecked(false);
 
     setStatus(QString::fromStdString(status));
-    refreshVolumeTexture();
+    // Volume texture extraction is intentionally lazy. It is a multi-million
+    // voxel transfer and must not block startup or the Visualize tab when the
+    // optional volume-rendering checkbox is off.
+    if (volumeRenderCheck_ && volumeRenderCheck_->isChecked())
+        refreshVolumeTexture();
     refreshAll();
     meshView_->clearMeshes();
     meshInfoLabel_->setText("No surface yet.");
@@ -1086,7 +1090,7 @@ void MainWindow::refreshVolumeTexture() {
     if (!v || !meshView_) return;
     int w = 0, h = 0, d = 0;
     const unsigned char* data = lumen_extract_volume_texture(
-        v, st_.level, st_.window, 256, &w, &h, &d);
+        v, st_.level, st_.window, 160, &w, &h, &d);
     if (!data || w <= 0 || h <= 0 || d <= 0) {
         meshView_->clearVolumeTexture();
         return;
