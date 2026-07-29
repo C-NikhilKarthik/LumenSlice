@@ -117,6 +117,11 @@ void lumen_seg_clear(LumenVolume* v);
 // Total labelled voxels across all segments (for enabling the 3D step).
 long lumen_seg_count(const LumenVolume* v);
 
+// Monotonically increasing presentation/mask revision. UI layers can use this
+// to retain their own decoded image copy across repaint events and invalidate it
+// only after a segmentation or segment-appearance change.
+unsigned long long lumen_seg_revision(const LumenVolume* v);
+
 // --- Auto-threshold + island cleanup ----------------------------------------
 
 // Otsu's method over the HU histogram: the HU value separating dark from bright.

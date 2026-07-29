@@ -136,6 +136,10 @@ long lumen_seg_count(const LumenVolume* v) {
     return v == nullptr ? 0 : v->editor.total_labelled();
 }
 
+unsigned long long lumen_seg_revision(const LumenVolume* v) {
+    return v == nullptr ? 0 : static_cast<unsigned long long>(v->mask_revision);
+}
+
 float lumen_seg_otsu(const LumenVolume* v) {
     if (v == nullptr) return 0.0f;
     return lumen::otsu_threshold(v->volume);

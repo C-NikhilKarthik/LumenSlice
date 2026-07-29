@@ -111,6 +111,9 @@ void SliceView::paintEvent(QPaintEvent*) {
 
     LumenVolume* v = st_->volume;
     if (!v) {
+        cachedVolume_ = nullptr;
+        sliceCacheValid_ = false;
+        overlayCacheValid_ = false;
         painter.setPen(QColor(120, 126, 138));
         painter.drawText(rect(), Qt::AlignCenter, "No volume loaded");
         painter.setClipping(false);
@@ -122,31 +125,50 @@ void SliceView::paintEvent(QPaintEvent*) {
 
     const int index = st_->sliceIndex[axis_];
     int w = 0, h = 0;
-    const unsigned char* px =
-        lumen_extract_slice(v, axis_, index, st_->level, st_->window, &w, &h);
-    if (!px || w <= 0 || h <= 0) return;
-
-    // Deep-copy: the bridge buffer is only valid until the next extract call.
-    QImage slice(reinterpret_cast<const uchar*>(px), w, h, w * 4,
-                 QImage::Format_RGBA8888);
-    QImage sliceCopy = slice.copy();
+    if (!sliceCacheValid_ || cachedVolume_ != v || cachedSliceIndex_ != index ||
+        cachedLevel_ != st_->level || cachedWindow_ != st_->window) {
+        const unsigned char* px = lumen_extract_slice(
+            v, axis_, index, st_->level, st_->window, &w, &h);
+        if (!px || w <= 0 || h <= 0) return;
+        QImage slice(reinterpret_cast<const uchar*>(px), w, h, w * 4,
+                     QImage::Format_RGBA8888);
+        cachedSlice_ = slice.copy();
+        cachedVolume_ = v;
+        cachedSliceIndex_ = index;
+        cachedLevel_ = st_->level;
+        cachedWindow_ = st_->window;
+        sliceCacheValid_ = true;
+        overlayCacheValid_ = false;
+    } else {
+        w = cachedSlice_.width();
+        h = cachedSlice_.height();
+    }
 
     const QRect target = imageRect(w, h);
     lastImgW_ = w;
     lastImgH_ = h;
     painter.setRenderHint(QPainter::SmoothPixmapTransform, false);
-    painter.drawImage(target, sliceCopy);
+    painter.drawImage(target, cachedSlice_);
 
     // Colored mask overlay (premultiplied RGBA, transparent where unlabelled).
     if (st_->showOverlay) {
-        int mw = 0, mh = 0;
-        const unsigned char* mask =
-            lumen_extract_mask_slice(v, axis_, index, &mw, &mh);
-        if (mask && mw == w && mh == h) {
-            QImage overlay(reinterpret_cast<const uchar*>(mask), w, h, w * 4,
-                           QImage::Format_RGBA8888_Premultiplied);
-            painter.drawImage(target, overlay.copy());
+        const unsigned long long revision = lumen_seg_revision(v);
+        if (!overlayCacheValid_ || cachedVolume_ != v ||
+            cachedOverlayIndex_ != index || cachedOverlayRevision_ != revision) {
+            int mw = 0, mh = 0;
+            const unsigned char* mask =
+                lumen_extract_mask_slice(v, axis_, index, &mw, &mh);
+            cachedOverlay_ = (mask && mw == w && mh == h)
+                                 ? QImage(reinterpret_cast<const uchar*>(mask), w,
+                                          h, w * 4,
+                                          QImage::Format_RGBA8888_Premultiplied)
+                                       .copy()
+                                 : QImage();
+            cachedOverlayIndex_ = index;
+            cachedOverlayRevision_ = revision;
+            overlayCacheValid_ = true;
         }
+        if (!cachedOverlay_.isNull()) painter.drawImage(target, cachedOverlay_);
     }
 
     // Crosshair / slice-intersection lines at the shared focus voxel. Each plane

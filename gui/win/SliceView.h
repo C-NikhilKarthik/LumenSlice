@@ -65,6 +65,20 @@ private:
     int lastImgW_ = 0, lastImgH_ = 0;  // cached from the last paint for hit-testing
     bool hovering_ = false;
     QPoint hoverPos_;
+
+    // QImage owns a private copy so another pane can reuse the bridge scratch
+    // buffers without invalidating this pane's next repaint. The keys avoid
+    // repeating the expensive RGBA decode/copy while only UI chrome changes.
+    LumenVolume* cachedVolume_ = nullptr;
+    bool sliceCacheValid_ = false;
+    int cachedSliceIndex_ = 0;
+    float cachedLevel_ = 0.0f;
+    float cachedWindow_ = 0.0f;
+    QImage cachedSlice_;
+    bool overlayCacheValid_ = false;
+    int cachedOverlayIndex_ = 0;
+    unsigned long long cachedOverlayRevision_ = 0;
+    QImage cachedOverlay_;
 };
 
 }  // namespace lumenwin
