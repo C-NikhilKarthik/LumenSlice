@@ -291,6 +291,7 @@ void SliceView::mousePressEvent(QMouseEvent* e) {
     if (!v) return;
     const int index = st_->sliceIndex[axis_];
     dragStart_ = e->pos();
+    shiftArmed_ = false;  // disarm crosshair-follow until a fresh plain move
 
     const bool focusChord =
         (e->button() == Qt::MiddleButton) ||
@@ -361,6 +362,21 @@ void SliceView::mouseMoveEvent(QMouseEvent* e) {
     hoverPos_ = e->pos();
     hovering_ = true;
     if (drag_ == Drag::None) {
+        const bool shift = (e->modifiers() & Qt::ShiftModifier);
+        // Re-arm after a plain move so the crosshair doesn't chase the cursor
+        // while Shift is still held right after a Shift+drag window/level.
+        if (!shift) shiftArmed_ = true;
+        LumenVolume* v = st_->volume;
+        // Shift + hover (no button): move the shared crosshair to this voxel.
+        if (shift && shiftArmed_ && v && e->buttons() == Qt::NoButton) {
+            int pxx = 0, pyy = 0;
+            if (widgetToPixel(e->pos(), lastImgW_, lastImgH_, &pxx, &pyy)) {
+                int x = 0, y = 0, z = 0;
+                lumen_slice_pixel_to_voxel(v, axis_, st_->sliceIndex[axis_], pxx,
+                                           pyy, &x, &y, &z);
+                emit crosshairMoved(x, y, z);
+            }
+        }
         if (st_->segmentInteractive &&
             (st_->tool == Tool::Paint || st_->tool == Tool::Erase))
             update();  // redraw the ring at the new position

@@ -20,6 +20,7 @@
 #include <QOpenGLVertexArrayObject>
 #include <QPoint>
 #include <QPointF>
+#include <QVector3D>
 #include <QOpenGLWidget>
 #include <vector>
 
@@ -63,6 +64,10 @@ public:
     // Client-side markups to draw over the surface (borrowed).
     void setMarkupModel(MarkupModel* m) { markups_ = m; }
 
+    // Live crosshair marker at a world-mm point, driven by Shift+hover on the 2D
+    // slice panes. `show`=false hides it.
+    void setCrosshair(const QVector3D& mmPos, bool show);
+
 signals:
     // A lasso was closed (>= 3 points); points are in widget pixels (y-down).
     void scissorFinished(const QList<QPointF>& poly);
@@ -97,6 +102,7 @@ private:
     void positionToolbar();
     void drawGnomon(class QPainter& p);
     void drawMarkups(class QPainter& p);
+    void drawCrosshair(class QPainter& p);
     bool project(const class QVector3D& mm, class QPointF* out) const;
     QMatrix4x4 viewMatrix() const;
     QMatrix4x4 projMatrix() const;
@@ -132,6 +138,10 @@ private:
     QList<QPointF> lasso_;
 
     MarkupModel* markups_ = nullptr;
+
+    // Live crosshair marker (world mm) from the 2D panes' Shift+hover.
+    QVector3D crosshairMm_;
+    bool crosshairShown_ = false;
 };
 
 }  // namespace lumenwin

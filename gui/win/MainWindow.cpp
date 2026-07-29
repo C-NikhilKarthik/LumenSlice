@@ -868,6 +868,10 @@ QWidget* MainWindow::buildQuad() {
                 &MainWindow::onMarkupPointPicked);
         connect(panes_[i], &SliceView::strokeBegan, this,
                 &MainWindow::onStrokeBegan);
+        // Shift+hover moves the shared crosshair — same handler as a locate click,
+        // which also links the panes and drives the live 3D-view marker.
+        connect(panes_[i], &SliceView::crosshairMoved, this,
+                &MainWindow::onFocusPicked);
         connect(panes_[i], &SliceView::doubleClicked, this,
                 [this, i] { toggleMaximize(i); });
         col->addWidget(panes_[i], 1);
@@ -1041,6 +1045,13 @@ void MainWindow::onFocusPicked(int x, int y, int z) {
             st_.sliceIndex[axis] = std::clamp(idx[axis], 0, count - 1);
         }
         refreshSliders();
+        // Drive the live 3D crosshair marker. World mm = voxel * spacing, the same
+        // space the mesh vertices and markups live in.
+        if (meshView_) {
+            float sx = 1, sy = 1, sz = 1;
+            lumen_spacing(v, &sx, &sy, &sz);
+            meshView_->setCrosshair(QVector3D(x * sx, y * sy, z * sz), true);
+        }
     }
     refreshCanvas();
 }

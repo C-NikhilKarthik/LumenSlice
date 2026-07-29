@@ -39,6 +39,9 @@ signals:
     void doubleClicked();                          // toggle pane maximize
     // A stroke/gesture that mutated the mask ended — good point to snapshot undo.
     void strokeBegan();
+    // Shift + hover (no button) moved the shared crosshair to this voxel. Drives
+    // the linked panes and the live 3D-view marker.
+    void crosshairMoved(int x, int y, int z);
 
 protected:
     void paintEvent(QPaintEvent*) override;
@@ -64,6 +67,9 @@ private:
     int lastImgW_ = 0, lastImgH_ = 0;  // cached from the last paint for hit-testing
     bool hovering_ = false;
     QPoint hoverPos_;
+    // Crosshair-follow is armed only after a plain (no-Shift) move, so it doesn't
+    // chase the cursor while Shift stays held after a Shift+drag window/level.
+    bool shiftArmed_ = true;
 };
 
 }  // namespace lumenwin

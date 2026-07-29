@@ -332,6 +332,7 @@ void MeshView::paintGL() {
         painter.drawPolygon(poly);
     }
     drawMarkups(painter);
+    drawCrosshair(painter);
     painter.end();
 }
 
@@ -424,6 +425,31 @@ void MeshView::drawGnomon(QPainter& p) {
         p.drawText(QRectF(end.x() - 7, end.y() - 8, 14, 16), Qt::AlignCenter,
                    a.label);
     }
+}
+
+void MeshView::setCrosshair(const QVector3D& mmPos, bool show) {
+    crosshairMm_ = mmPos;
+    crosshairShown_ = show;
+    update();
+}
+
+// Live crosshair marker: a screen-space cross + ring at the projected world
+// point, sized in screen pixels (Slicer sizes its 3D crosshair in screen-percent)
+// so it stays visible at any zoom. Only shown once a surface exists to sit in.
+void MeshView::drawCrosshair(QPainter& p) {
+    if (!crosshairShown_ || totalIndices_ == 0) return;
+    QPointF s;
+    if (!project(crosshairMm_, &s)) return;
+    const double r = std::max(7.0, height() * 0.03);
+    // Dark halo first, then the bright cross, so it reads over any surface colour.
+    p.setBrush(Qt::NoBrush);
+    p.setPen(QPen(QColor(0, 0, 0, 170), 3));
+    p.drawLine(QPointF(s.x() - r, s.y()), QPointF(s.x() + r, s.y()));
+    p.drawLine(QPointF(s.x(), s.y() - r), QPointF(s.x(), s.y() + r));
+    p.setPen(QPen(QColor(255, 210, 40), 1.5));
+    p.drawLine(QPointF(s.x() - r, s.y()), QPointF(s.x() + r, s.y()));
+    p.drawLine(QPointF(s.x(), s.y() - r), QPointF(s.x(), s.y() + r));
+    p.drawEllipse(s, r * 0.35, r * 0.35);
 }
 
 void MeshView::setScissorMode(bool on) {
