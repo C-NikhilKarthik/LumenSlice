@@ -982,6 +982,19 @@ void MainWindow::onLoadReady() {
             r.message.isEmpty() ? "Could not load the DICOM folder." : r.message);
         return;
     }
+    // A worker mesh generation owns the current handle until its finished
+    // callback has copied the generated buffers. Hold the newly decoded handle
+    // instead of replacing/freeing the old one underneath that worker.
+    if (generating_ || meshWatcher_.isRunning()) {
+        pendingLoad_ = r;
+        hasPendingLoad_ = true;
+        setStatus("Volume loaded; waiting for the current surface job to finish…");
+        return;
+    }
+    adoptLoadedVolume(r);
+}
+
+void MainWindow::adoptLoadedVolume(const LoadResult& r) {
     vol_.adopt(r.volume);
     const std::string status = r.message.toStdString();
     st_.volume = vol_.get();
@@ -1348,6 +1361,13 @@ void MainWindow::finishMeshGeneration() {
     LumenVolume* v = st_.volume;
     generateBtn_->setEnabled(v && lumen_seg_count(v) > 0);
     exportStlBtn_->setEnabled(v && lumen_seg_count(v) > 0);
+
+    if (hasPendingLoad_) {
+        const LoadResult next = pendingLoad_;
+        pendingLoad_ = {};
+        hasPendingLoad_ = false;
+        adoptLoadedVolume(next);
+    }
 }
 
 void MainWindow::onScissorFinished(const QList<QPointF>& poly) {

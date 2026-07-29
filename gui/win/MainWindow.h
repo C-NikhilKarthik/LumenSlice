@@ -118,6 +118,7 @@ private:
 
     // Refresh helpers.
     void loadPath(const QString& path);
+    void adoptLoadedVolume(const LoadResult& result);
     void refreshAll();
     void refreshCanvas();
     void refreshSliders();
@@ -215,6 +216,8 @@ private:
     // Off-thread folder load.
     QFutureWatcher<LoadResult> loadWatcher_;
     bool loading_ = false;
+    LoadResult pendingLoad_;
+    bool hasPendingLoad_ = false;
 
     // Mesh generation (off-thread, per-segment colored surfaces).
     QFutureWatcher<int> meshWatcher_;
