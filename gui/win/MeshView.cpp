@@ -438,6 +438,20 @@ void MeshView::resizeEvent(QResizeEvent* e) {
     positionToolbar();
 }
 
+void MeshView::setFocusVoxel(int x, int y, int z, int width, int height, int depth,
+                             float sx, float sy, float sz) {
+    focusVoxel_[0] = x;
+    focusVoxel_[1] = y;
+    focusVoxel_[2] = z;
+    focusDimensions_[0] = width;
+    focusDimensions_[1] = height;
+    focusDimensions_[2] = depth;
+    focusSpacing_[0] = sx;
+    focusSpacing_[1] = sy;
+    focusSpacing_[2] = sz;
+    update();
+}
+
 void MeshView::paintGL() {
     if (pendingUpload_) uploadPending();
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -498,6 +512,7 @@ void MeshView::paintGL() {
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing, true);
     drawGnomon(painter);
+    drawFocus(painter);
     if (lasso_.size() >= 2) {
         painter.setPen(QPen(QColor(255, 220, 60), 2, Qt::DashLine));
         painter.setBrush(QColor(255, 220, 60, 40));
@@ -506,6 +521,36 @@ void MeshView::paintGL() {
     }
     drawMarkups(painter);
     painter.end();
+}
+
+void MeshView::drawFocus(QPainter& p) {
+    if (focusDimensions_[0] <= 0 || focusDimensions_[1] <= 0 || focusDimensions_[2] <= 0)
+        return;
+    const float x = focusVoxel_[0] * focusSpacing_[0];
+    const float y = focusVoxel_[1] * focusSpacing_[1];
+    const float z = focusVoxel_[2] * focusSpacing_[2];
+    const float maxX = std::max(0, focusDimensions_[0] - 1) * focusSpacing_[0];
+    const float maxY = std::max(0, focusDimensions_[1] - 1) * focusSpacing_[1];
+    const float maxZ = std::max(0, focusDimensions_[2] - 1) * focusSpacing_[2];
+    const QVector3D center(x, y, z);
+    const QVector3D ends[3][2] = {
+        {QVector3D(0, y, z), QVector3D(maxX, y, z)},
+        {QVector3D(x, 0, z), QVector3D(x, maxY, z)},
+        {QVector3D(x, y, 0), QVector3D(x, y, maxZ)}
+    };
+    const QColor colors[3] = {Qt::red, Qt::green, Qt::blue};
+    for (int axis = 0; axis < 3; ++axis) {
+        QPointF a, b;
+        if (!project(ends[axis][0], &a) || !project(ends[axis][1], &b)) continue;
+        p.setPen(QPen(colors[axis], 1.5, Qt::SolidLine));
+        p.drawLine(a, b);
+    }
+    QPointF c;
+    if (project(center, &c)) {
+        p.setPen(QPen(Qt::yellow, 1.5));
+        p.setBrush(Qt::yellow);
+        p.drawEllipse(c, 4.0, 4.0);
+    }
 }
 
 // Project an mm point through the last frame's proj*view to widget pixels.

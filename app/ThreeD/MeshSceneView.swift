@@ -20,6 +20,9 @@ struct MeshSceneView: NSViewRepresentable {
     var pendingPoints: [SCNVector3] = []
     var pendingColor: NSColor = .white
     var markerRadius: Float = 2
+    var focusVoxel: SIMD3<Int> = .zero
+    var volumeDimensions: SIMD3<Int> = .zero
+    var spacing: SIMD3<Float> = SIMD3<Float>(1, 1, 1)
 
     final class Coordinator {
         // Identity of the geometry set we last built nodes for, so orbit/zoom (which
@@ -27,6 +30,7 @@ struct MeshSceneView: NSViewRepresentable {
         var rendered: [ObjectIdentifier] = []
         // Signature of the markups we last built, so orbit doesn't rebuild them.
         var markupSig = ""
+        var focusSig = ""
         // Whether we've framed the camera to markups (only matters when there is no
         // mesh to frame to). Reset when markups go empty.
         var framedMarkups = false
@@ -158,6 +162,17 @@ struct MeshSceneView: NSViewRepresentable {
             if markups.isEmpty { coord.framedMarkups = false }
         }
 
+        // Keep the linked slice focus visible in 3D without touching mesh nodes.
+        // Three thin axis lines plus a bright center marker are cheap to rebuild
+        // and make focus changes immediately legible while the surface is static.
+        let focusKey = "\(focusVoxel.x),\(focusVoxel.y),\(focusVoxel.z)|\(volumeDimensions.x),\(volumeDimensions.y),\(volumeDimensions.z)|\(spacing.x),\(spacing.y),\(spacing.z)|\(markerRadius)"
+        if focusKey != coord.focusSig {
+            coord.focusSig = focusKey
+            root.childNodes.filter { $0.name == "focus" }
+                .forEach { $0.removeFromParentNode() }
+            buildFocusNodes().forEach { root.addChildNode($0) }
+        }
+
         // When there is no surface to frame to, frame the camera to the markups once
         // (so the first dropped point isn't lost off-screen).
         if geometries.isEmpty && !markups.isEmpty && !coord.framedMarkups {
@@ -216,6 +231,35 @@ struct MeshSceneView: NSViewRepresentable {
             nodes.append(Self.sphere(at: p, radius: markerRadius * 0.8,
                                      color: pendingColor.withAlphaComponent(0.7)))
         }
+        return nodes
+    }
+
+    private func buildFocusNodes() -> [SCNNode] {
+        guard volumeDimensions.x > 0, volumeDimensions.y > 0, volumeDimensions.z > 0 else {
+            return []
+        }
+        let x = Float(focusVoxel.x) * spacing.x
+        let y = Float(focusVoxel.y) * spacing.y
+        let z = Float(focusVoxel.z) * spacing.z
+        let maxX = Float(max(volumeDimensions.x - 1, 0)) * spacing.x
+        let maxY = Float(max(volumeDimensions.y - 1, 0)) * spacing.y
+        let maxZ = Float(max(volumeDimensions.z - 1, 0)) * spacing.z
+        let p = SCNVector3(x, y, z)
+        let lines: [(SCNVector3, SCNVector3, NSColor)] = [
+            (SCNVector3(0, y, z), SCNVector3(maxX, y, z), .systemRed),
+            (SCNVector3(x, 0, z), SCNVector3(x, maxY, z), .systemGreen),
+            (SCNVector3(x, y, 0), SCNVector3(x, y, maxZ), .systemBlue)
+        ]
+        var nodes = lines.map { a, b, color -> SCNNode in
+            let node = Self.cylinder(from: a, to: b,
+                                     radius: max(markerRadius * 0.16, 0.15), color: color)
+            node.name = "focus"
+            return node
+        }
+        let marker = Self.sphere(at: p, radius: max(markerRadius * 0.75, 0.5),
+                                 color: .systemYellow)
+        marker.name = "focus"
+        nodes.append(marker)
         return nodes
     }
 
@@ -370,6 +414,7 @@ final class LassoOverlayView: NSView {
 // The central canvas for the 3D and Export tabs: the mesh viewport, or an empty /
 // generating placeholder.
 struct MeshCanvas: View {
+    @EnvironmentObject var model: VolumeModel
     @EnvironmentObject var mesh: MeshModel
     @EnvironmentObject var seg: SegmentationModel
     @EnvironmentObject var markup: MarkupModel
@@ -385,7 +430,10 @@ struct MeshCanvas: View {
                               markups: markup.renders(),
                               pendingPoints: markup.pendingMM(),
                               pendingColor: markup.pendingColorNS(),
-                              markerRadius: markup.markerRadius)
+                              markerRadius: markup.markerRadius,
+                              focusVoxel: model.focus,
+                              volumeDimensions: SIMD3(model.width, model.height, model.depth),
+                              spacing: model.spacing)
             } else {
                 VStack(spacing: 12) {
                     Image(systemName: "cube.transparent")

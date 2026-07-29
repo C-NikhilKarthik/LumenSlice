@@ -58,6 +58,11 @@ public:
     void clearVolumeTexture();
     void setVolumeRendering(bool on);
 
+    // Show the shared slice focus in physical volume coordinates as three linked
+    // axis lines and a center marker in the 3D view.
+    void setFocusVoxel(int x, int y, int z, int width, int height, int depth,
+                       float sx, float sy, float sz);
+
     // The model-view-projection matrix used for the last frame, exposed for
     // screen-space operations (the scissor lasso). Equals proj*view; its
     // constData() is the column-major buffer the core's scissor_cut expects.
@@ -104,6 +109,7 @@ private:
     void buildToolbar();
     void positionToolbar();
     void drawGnomon(class QPainter& p);
+    void drawFocus(class QPainter& p);
     void drawMarkups(class QPainter& p);
     bool project(const class QVector3D& mm, class QPointF* out) const;
     QMatrix4x4 viewMatrix() const;
@@ -134,6 +140,9 @@ private:
     std::vector<unsigned char> pendingVolume_;
     int volumeWidth_ = 0, volumeHeight_ = 0, volumeDepth_ = 0;
     float volumeSpacing_[3] = {1, 1, 1};
+    int focusVoxel_[3] = {0, 0, 0};
+    int focusDimensions_[3] = {0, 0, 0};
+    float focusSpacing_[3] = {1, 1, 1};
 
     // Camera: orbit rotation (world -> view) + distance, orbiting the mesh centre.
     float center_[3] = {0, 0, 0};

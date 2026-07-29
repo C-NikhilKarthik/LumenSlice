@@ -1553,6 +1553,14 @@ void MainWindow::refreshAll() {
 }
 
 void MainWindow::refreshCanvas() {
+    if (meshView_ && st_.volume) {
+        int w = 0, h = 0, d = 0;
+        float sx = 1, sy = 1, sz = 1;
+        lumen_dims(st_.volume, &w, &h, &d);
+        lumen_spacing(st_.volume, &sx, &sy, &sz);
+        meshView_->setFocusVoxel(st_.focus[0], st_.focus[1], st_.focus[2],
+                                 w, h, d, sx, sy, sz);
+    }
     for (auto* p : panes_)
         if (p) p->update();
 }

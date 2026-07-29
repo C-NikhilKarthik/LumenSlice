@@ -11,6 +11,7 @@ struct ThreeDPane: View {
     @EnvironmentObject var mesh: MeshModel
     @EnvironmentObject var seg: SegmentationModel
     @EnvironmentObject var markup: MarkupModel
+    @EnvironmentObject var model: VolumeModel
     var isFocused: Bool = false
     var onToggleFocus: (() -> Void)? = nil
 
@@ -97,7 +98,10 @@ struct ThreeDPane: View {
                               markups: markup.renders(),
                               pendingPoints: markup.pendingMM(),
                               pendingColor: markup.pendingColorNS(),
-                              markerRadius: markup.markerRadius)
+                              markerRadius: markup.markerRadius,
+                              focusVoxel: model.focus,
+                              volumeDimensions: SIMD3(model.width, model.height, model.depth),
+                              spacing: model.spacing)
                     .clipShape(RoundedRectangle(cornerRadius: 10))
                     .overlay(alignment: .top) {
                         if mesh.scissorActive { ScissorBanner() }
