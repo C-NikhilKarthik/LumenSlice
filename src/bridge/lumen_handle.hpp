@@ -25,6 +25,10 @@ struct LumenVolume {
     lumen::SliceImage scratch;      // reused grayscale slice buffer
     lumen::SliceImage mask_scratch; // reused overlay buffer
     lumen::VolumeTexture volume_texture_scratch; // reused GPU upload texture
+    bool volume_texture_cache_valid = false;
+    float volume_texture_cache_level = 0.0f;
+    float volume_texture_cache_window = 0.0f;
+    int volume_texture_cache_limit = 0;
     // The grayscale slice is immutable until one of these request parameters
     // changes. Keeping this cache at the bridge seam benefits both Swift and Qt,
     // especially when a repaint only changes crosshair/brush/UI chrome.

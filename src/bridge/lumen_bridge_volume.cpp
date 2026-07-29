@@ -109,8 +109,17 @@ const unsigned char* lumen_extract_volume_texture(LumenVolume* v, float level,
                                                   int* out_w, int* out_h,
                                                   int* out_d) {
     if (v == nullptr) return nullptr;
-    lumen::ExtractVolumeTexture(v->volume, level, window, max_dimension,
-                                v->volume_texture_scratch);
+    if (!v->volume_texture_cache_valid ||
+        v->volume_texture_cache_level != level ||
+        v->volume_texture_cache_window != window ||
+        v->volume_texture_cache_limit != max_dimension) {
+        lumen::ExtractVolumeTexture(v->volume, level, window, max_dimension,
+                                    v->volume_texture_scratch);
+        v->volume_texture_cache_level = level;
+        v->volume_texture_cache_window = window;
+        v->volume_texture_cache_limit = max_dimension;
+        v->volume_texture_cache_valid = true;
+    }
     if (out_w) *out_w = v->volume_texture_scratch.width;
     if (out_h) *out_h = v->volume_texture_scratch.height;
     if (out_d) *out_d = v->volume_texture_scratch.depth;
