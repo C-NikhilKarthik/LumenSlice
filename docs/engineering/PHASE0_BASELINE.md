@@ -20,10 +20,12 @@ undo/redo, margin, smoothing, grow-from-seeds, scissors, and level tracing.
 
 ## Build observations
 
-The local Homebrew DCMTK static libraries were built for macOS 26.0 while the
-package links them with a macOS 13 deployment target. The linker currently emits
-warnings for this mismatch. This must be resolved before claiming compatibility
-with older macOS versions or producing release artifacts.
+The local Homebrew DCMTK static libraries may be built for the host macOS SDK
+(macOS 26 on the development machine) while the package targets macOS 14. On
+that host the linker emits a compatibility warning for the static objects; this
+does not fail the build. The package no longer advertises macOS 13 support. A
+release intended for macOS 14 should be built on macOS 14 or with DCMTK rebuilt
+for the macOS 14 deployment target; the macOS CI runner is macOS 14.
 
 The initial sandboxed SwiftPM invocation could not access the system compiler cache.
 Running the focused targets with normal SwiftPM cache access succeeded; this is an

@@ -105,5 +105,5 @@ jobs:
           - **right-click the app → Open** (then confirm), once, or
           - run `xattr -dr com.apple.quarantine /Applications/LumenSlice.app`
 
-          Requires macOS 13+ on **Apple Silicon** (arm64).
+          Requires macOS 14+ on **Apple Silicon** (arm64).
           NOTES

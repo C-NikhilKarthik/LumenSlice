@@ -7,7 +7,10 @@ let dcmtkLib = "/opt/homebrew/opt/dcmtk/lib"
 
 let package = Package(
     name: "LumenSlice",
-    platforms: [.macOS(.v13)],
+    // Homebrew's DCMTK binaries are built for macOS 14+. Keep the package
+    // deployment target aligned so the linker does not produce incompatible
+    // object-file warnings and the app's advertised minimum is truthful.
+    platforms: [.macOS(.v14)],
     targets: [
         // C++ core (data-oriented, UI-agnostic) + the C bridge Swift talks to.
         .target(
