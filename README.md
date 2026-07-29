@@ -195,7 +195,7 @@ Then in Xcode:
 > at runtime under Xcode without any extra `DYLD`/rpath configuration.
 
 > **Status — Phase 1 (Week 1–2 milestone) complete on macOS.** DCMTK-based DICOM
-> ingestion (recursive folder crawl, `DICM` signature filter, HU rescale,
+> ingestion (recursive folder crawl, DICOM signature/extension filter, HU rescale,
 > geometric Z-sort by Image Position/Orientation), a flat contiguous voxel core,
 > and a native tri-axis slice viewer (Axial/Coronal/Sagittal) with live
 > window/level, presets, physical-aspect rendering, a folder picker, and

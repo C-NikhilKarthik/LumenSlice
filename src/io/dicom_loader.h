@@ -1,9 +1,9 @@
 // LumenSlice — DICOM ingestion (docs/plan.md §1, docs/dependencies.md "DCMTK").
 //
-// Crawls a folder, keeps only real DICOM files (verified by the "DICM" magic at
-// byte 128), parses the pixel data via DCMTK's `dcmdata`, calibrates every voxel
-// to Hounsfield Units, and geometrically sorts the slices along the scan normal
-// so Z ordering is correct regardless of file naming.
+// Crawls a folder, keeping DICOM files with either the standard "DICM" magic or
+// a conventional .dcm/.dicom extension (the preamble is optional). It parses
+// pixel data via DCMTK, calibrates every voxel to Hounsfield Units, and sorts
+// slices along the scan normal so Z ordering ignores file names.
 
 #pragma once
 

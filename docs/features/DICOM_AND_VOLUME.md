@@ -90,9 +90,10 @@ presets and the drag-on-image gesture do not refresh twice.
 ## How it works, end to end
 
 1. Crawl. `LoadDicomFolder` walks the folder recursively (skipping permission-denied
-   entries) and keeps only regular files whose byte 128 carries the four-character
-   `DICM` signature. `HasDicmSignature` is a cheap pre-filter so DCMTK's heavier
-   parser is only handed plausible files.
+   entries) and keeps regular files whose byte 128 carries the four-character
+   `DICM` signature, plus conventional `.dcm`/`.dicom` files whose optional
+   preamble is absent. `HasDicmSignature` remains the cheap fast path; DCMTK's
+   parser validates extension-only candidates.
 
 2. Parse and decode each candidate. `ParseSlice` loads the dataset with DCMTK. If the
    pixel data uses an encapsulated (compressed) transfer syntax, it is decoded to

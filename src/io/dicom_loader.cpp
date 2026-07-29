@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cctype>
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
@@ -62,6 +63,16 @@ bool HasDicmSignature(const fs::path& path) {
     char magic[4] = {0, 0, 0, 0};
     if (!f.read(magic, 4)) return false;
     return magic[0] == 'D' && magic[1] == 'I' && magic[2] == 'C' && magic[3] == 'M';
+}
+
+// The DICM preamble is optional in the DICOM standard. Many PACS exports use
+// the conventional .dcm/.dicom extension but omit the 128-byte preamble, so
+// retain those files for DCMTK's parser instead of discarding them up front.
+bool HasDicomExtension(const fs::path& path) {
+    std::string ext = path.extension().string();
+    std::transform(ext.begin(), ext.end(), ext.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return ext == ".dcm" || ext == ".dicom";
 }
 
 // Pull a single slice out of one DICOM dataset. Returns false (with the file
@@ -154,18 +165,20 @@ LoadResult LoadDicomFolder(const std::string& folder) {
         return result;
     }
 
-    // Crawl: collect every regular file that carries the DICM signature.
+    // Crawl: keep the fast signature path, plus conventional DICOM extensions
+    // for valid files that intentionally omit the optional preamble.
     std::vector<fs::path> candidates;
     for (auto it = fs::recursive_directory_iterator(
              folder, fs::directory_options::skip_permission_denied, ec);
          !ec && it != fs::recursive_directory_iterator(); it.increment(ec)) {
         if (!it->is_regular_file(ec)) continue;
         ++result.files_scanned;
-        if (HasDicmSignature(it->path())) candidates.push_back(it->path());
+        if (HasDicmSignature(it->path()) || HasDicomExtension(it->path()))
+            candidates.push_back(it->path());
     }
 
     if (candidates.empty()) {
-        result.message = "No DICOM files (DICM signature) found under " + folder;
+        result.message = "No DICOM files found under " + folder;
         return result;
     }
 
