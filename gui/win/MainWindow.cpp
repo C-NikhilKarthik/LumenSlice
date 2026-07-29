@@ -133,6 +133,10 @@ MainWindow::MainWindow() {
             &MainWindow::onLoadReady);
     connect(meshView_, &MeshView::scissorFinished, this,
             &MainWindow::onScissorFinished);
+    meshRefreshTimer_.setSingleShot(true);
+    meshRefreshTimer_.setInterval(180);
+    connect(&meshRefreshTimer_, &QTimer::timeout, this,
+            &MainWindow::onAutoMeshRefresh);
 
     selectTab(0);
     refreshAll();
@@ -1140,6 +1144,7 @@ void MainWindow::onStrokeEnded() {
     refreshCanvas();
     updateSegmentCounts();
     updateUndoRedo();
+    scheduleMeshRefresh();
 }
 
 void MainWindow::onFloodClicked(int x, int y, int z) {
@@ -1147,6 +1152,7 @@ void MainWindow::onFloodClicked(int x, int y, int z) {
     lumen_seg_region_grow(st_.volume, x, y, z, st_.tolerance);
     refreshCanvas();
     updateSegmentCounts();
+    scheduleMeshRefresh();
 }
 
 void MainWindow::onLevelTraceClicked(int axis, int index, int cx, int cy) {
@@ -1154,6 +1160,7 @@ void MainWindow::onLevelTraceClicked(int axis, int index, int cx, int cy) {
     lumen_seg_level_trace(st_.volume, axis, index, cx, cy);
     refreshCanvas();
     updateSegmentCounts();
+    scheduleMeshRefresh();
 }
 
 QColor MainWindow::nextSegmentColor() const {
@@ -1183,6 +1190,7 @@ void MainWindow::applyThreshold() {
                         float(threshSlider_->highValue()));
     refreshCanvas();
     updateSegmentCounts();
+    scheduleMeshRefresh();
 }
 
 void MainWindow::applyOtsu() {
@@ -1207,6 +1215,7 @@ void MainWindow::refineGrow() {
     updateUndoRedo();
     refreshCanvas();
     updateSegmentCounts();
+    scheduleMeshRefresh();
 }
 
 void MainWindow::refineShrink() {
@@ -1217,6 +1226,7 @@ void MainWindow::refineShrink() {
     updateUndoRedo();
     refreshCanvas();
     updateSegmentCounts();
+    scheduleMeshRefresh();
 }
 
 void MainWindow::refineHollow() {
@@ -1227,6 +1237,7 @@ void MainWindow::refineHollow() {
     updateUndoRedo();
     refreshCanvas();
     updateSegmentCounts();
+    scheduleMeshRefresh();
 }
 
 void MainWindow::refineSmooth() {
@@ -1237,6 +1248,7 @@ void MainWindow::refineSmooth() {
     updateUndoRedo();
     refreshCanvas();
     updateSegmentCounts();
+    scheduleMeshRefresh();
 }
 
 void MainWindow::keepLargest() {
@@ -1247,6 +1259,7 @@ void MainWindow::keepLargest() {
     updateUndoRedo();
     refreshCanvas();
     updateSegmentCounts();
+    scheduleMeshRefresh();
 }
 
 void MainWindow::removeSmallIslands() {
@@ -1257,6 +1270,7 @@ void MainWindow::removeSmallIslands() {
     updateUndoRedo();
     refreshCanvas();
     updateSegmentCounts();
+    scheduleMeshRefresh();
 }
 
 void MainWindow::growFromSeeds() {
@@ -1267,6 +1281,7 @@ void MainWindow::growFromSeeds() {
     updateUndoRedo();
     refreshCanvas();
     updateSegmentCounts();
+    scheduleMeshRefresh();
 }
 
 void MainWindow::clearActive() {
@@ -1301,6 +1316,8 @@ void MainWindow::redo() {
 void MainWindow::generateMesh() {
     LumenVolume* v = st_.volume;
     if (!v || generating_) return;
+    meshRefreshPending_ = false;
+    meshRefreshTimer_.stop();
 
     // Collect the visible, non-empty segments — one colored surface each.
     std::vector<long> hist(256, 0);
@@ -1324,6 +1341,19 @@ void MainWindow::generateMesh() {
     meshPieces_.clear();
     pendingSegIndex_ = 0;
     startNextMeshSegment();
+}
+
+void MainWindow::scheduleMeshRefresh() {
+    if (!st_.volume) return;
+    meshRefreshPending_ = true;
+    meshRefreshTimer_.start();
+}
+
+void MainWindow::onAutoMeshRefresh() {
+    if (!meshRefreshPending_) return;
+    if (generating_) return; // finishMeshGeneration will restart the timer.
+    meshRefreshPending_ = false;
+    generateMesh();
 }
 
 void MainWindow::startNextMeshSegment() {
@@ -1389,6 +1419,7 @@ void MainWindow::finishMeshGeneration() {
     LumenVolume* v = st_.volume;
     generateBtn_->setEnabled(v && lumen_seg_count(v) > 0);
     exportStlBtn_->setEnabled(v && lumen_seg_count(v) > 0);
+    if (meshRefreshPending_ && !generating_) meshRefreshTimer_.start();
 
     if (hasPendingLoad_) {
         const LoadResult next = pendingLoad_;

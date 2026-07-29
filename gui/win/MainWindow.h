@@ -10,6 +10,7 @@
 #include <QList>
 #include <QMainWindow>
 #include <QPointF>
+#include <QTimer>
 #include <QString>
 #include <vector>
 
@@ -89,6 +90,7 @@ private slots:
     // 3D + export.
     void generateMesh();
     void onMeshReady();
+    void onAutoMeshRefresh();
     void onScissorFinished(const QList<QPointF>& poly);
     void exportStl();
     void exportPng();
@@ -115,6 +117,7 @@ private:
     // generate -> readback per visible non-empty segment, worker off the UI thread).
     void startNextMeshSegment();
     void finishMeshGeneration();
+    void scheduleMeshRefresh();
 
     // Refresh helpers.
     void loadPath(const QString& path);
@@ -224,6 +227,8 @@ private:
     // Mesh generation (off-thread, per-segment colored surfaces).
     QFutureWatcher<int> meshWatcher_;
     bool generating_ = false;
+    QTimer meshRefreshTimer_;
+    bool meshRefreshPending_ = false;
     QElapsedTimer paintRefreshClock_;
     bool brushStrokeActive_ = false;
     std::vector<int> pendingSegIds_;

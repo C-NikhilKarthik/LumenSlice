@@ -15,6 +15,8 @@ final class MeshModel: ObservableObject {
     private let volume: VolumeModel
     private let segmentation: SegmentationModel
     private var cancellables = Set<AnyCancellable>()
+    private var automaticGenerateTask: Task<Void, Never>?
+    private var automaticGeneratePending = false
 
     @Published var smoothing: Int = 1
     @Published var downsample: Int = 1
@@ -37,6 +39,19 @@ final class MeshModel: ObservableObject {
                 self?.vertexCount = 0
             }
             .store(in: &cancellables)
+
+        // Mask edits publish a new voxel count at stroke/effect boundaries, and
+        // segment appearance changes publish the segment list. Coalesce either
+        // signal so a brush drag produces one background rebuild after the user
+        // pauses instead of one marching-cubes job per input event.
+        segmentation.$voxelCount
+            .dropFirst()
+            .sink { [weak self] _ in self?.scheduleAutomaticGenerate() }
+            .store(in: &cancellables)
+        segmentation.$segments
+            .dropFirst()
+            .sink { [weak self] _ in self?.scheduleAutomaticGenerate() }
+            .store(in: &cancellables)
     }
 
     private struct SegmentSpec {
@@ -50,6 +65,8 @@ final class MeshModel: ObservableObject {
     }
 
     func generate() {
+        automaticGeneratePending = false
+        automaticGenerateTask?.cancel()
         guard volume.handle != nil, !isGenerating else { return }
         // Capture the visible, non-empty segments (id + colour components) up front
         // on the main actor; only Sendable value types cross into the task.
@@ -114,6 +131,22 @@ final class MeshModel: ObservableObject {
         geometries = built.map { $0.geometry }
         triangleCount = built.reduce(0) { $0 + $1.triangles }
         vertexCount = built.reduce(0) { $0 + $1.vertices }
+        if automaticGeneratePending { scheduleAutomaticGenerate() }
+    }
+
+    private func scheduleAutomaticGenerate() {
+        guard volume.handle != nil else { return }
+        automaticGeneratePending = true
+        automaticGenerateTask?.cancel()
+        automaticGenerateTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 180_000_000)
+            guard !Task.isCancelled, let self else { return }
+            if self.isGenerating {
+                return // finishGenerate retries when the current job completes.
+            }
+            self.automaticGeneratePending = false
+            self.generate()
+        }
     }
 
     // Export the union of all segments as one binary STL (regenerates the combined
