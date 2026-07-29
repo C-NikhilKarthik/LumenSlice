@@ -81,6 +81,10 @@ swift run LumenSlice testdata/phantom
 swift run IngestTest testdata/phantom
 ```
 
+The generated `.dcm` files are intentionally ignored by Git, so a fresh clone
+must run the two phantom-generation commands before using `IngestTest` with the
+bundled path. For your own scan, pass its folder path instead.
+
 #### Try it on a real scan
 
 The loader reads **uncompressed** DICOM. A clean, directly-downloadable example is

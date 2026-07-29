@@ -32,6 +32,12 @@ jobs:
           swift --version
           echo "dcmtk prefix: $(brew --prefix dcmtk)"
 
+      - name: Generate DICOM smoke-test series
+        run: |
+          python3 -m venv "$RUNNER_TEMP/lumenslice-venv"
+          "$RUNNER_TEMP/lumenslice-venv/bin/python" -m pip install --quiet numpy pydicom
+          "$RUNNER_TEMP/lumenslice-venv/bin/python" tools/make_test_series.py testdata/phantom
+
       - name: Build (debug)
         run: swift build
 
