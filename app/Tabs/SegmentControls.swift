@@ -191,6 +191,10 @@ struct SegmentControls: View {
                         .frame(maxWidth: .infinity)
                 }
             }
+            Button { seg.hollow() } label: {
+                Label("Hollow (1 voxel)", systemImage: "circle.dotted")
+                    .frame(maxWidth: .infinity)
+            }
             Button { seg.smooth() } label: {
                 Label("Smooth edges", systemImage: "wand.and.rays")
                     .frame(maxWidth: .infinity)

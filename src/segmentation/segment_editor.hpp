@@ -90,6 +90,7 @@ public:
     long remove_small(long min_voxels);
     long grow_margin(int iterations);
     long shrink_margin(int iterations);
+    long hollow(int thickness);
     long smooth(int iterations);
 
     // Grow the current multi-label seeds competitively (grow-cut) over the seeds'

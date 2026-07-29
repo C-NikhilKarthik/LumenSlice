@@ -198,6 +198,25 @@ long erode_label(LabelVolume& mask, std::uint8_t label, int iterations) {
     return removed;
 }
 
+long hollow_label(LabelVolume& mask, std::uint8_t label, int iterations) {
+    if (!mask.valid() || label == 0 || iterations <= 0) return 0;
+
+    // Erode a copy so the original boundary remains available for the shell.
+    LabelVolume interior = mask;
+    erode_label(interior, label, iterations);
+
+    std::uint8_t* data = mask.data();
+    const std::uint8_t* inner = interior.data();
+    long cleared = 0;
+    for (std::size_t i = 0; i < mask.voxel_count(); ++i) {
+        if (data[i] == label && inner[i] == label) {
+            data[i] = 0;
+            ++cleared;
+        }
+    }
+    return cleared;
+}
+
 long smooth_label(LabelVolume& mask, std::uint8_t label, int iterations) {
     if (!mask.valid() || label == 0 || iterations <= 0) return 0;
     const int w = mask.width(), h = mask.height(), d = mask.depth();

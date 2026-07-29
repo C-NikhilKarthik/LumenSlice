@@ -459,6 +459,9 @@ QWidget* MainWindow::buildSegmentPanel() {
     refineRow->addWidget(shrinkBtn);
     refineRow->addWidget(growBtn);
     body(refineBox)->addLayout(refineRow);
+    auto* hollowBtn = new QPushButton("Hollow (1 voxel)");
+    connect(hollowBtn, &QPushButton::clicked, this, &MainWindow::refineHollow);
+    body(refineBox)->addWidget(hollowBtn);
     auto* smoothBtn = new QPushButton("Smooth edges");
     connect(smoothBtn, &QPushButton::clicked, this, &MainWindow::refineSmooth);
     body(refineBox)->addWidget(smoothBtn);
@@ -1170,6 +1173,16 @@ void MainWindow::refineShrink() {
     if (!v || lumen_seg_active(v) == 0) return;
     lumen_seg_push_undo(v);
     lumen_seg_shrink(v, 1);
+    updateUndoRedo();
+    refreshCanvas();
+    updateSegmentCounts();
+}
+
+void MainWindow::refineHollow() {
+    LumenVolume* v = st_.volume;
+    if (!v || lumen_seg_active(v) == 0) return;
+    lumen_seg_push_undo(v);
+    lumen_seg_hollow(v, 1);
     updateUndoRedo();
     refreshCanvas();
     updateSegmentCounts();

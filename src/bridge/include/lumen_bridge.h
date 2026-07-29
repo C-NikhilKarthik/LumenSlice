@@ -137,6 +137,9 @@ long lumen_seg_remove_small(LumenVolume* v, long min_voxels);
 // returns the number of voxels changed.
 long lumen_seg_grow(LumenVolume* v, int iterations);
 long lumen_seg_shrink(LumenVolume* v, int iterations);
+// Hollow the active segment by removing its eroded interior. `thickness` is
+// the number of voxel layers retained at the boundary.
+long lumen_seg_hollow(LumenVolume* v, int thickness);
 long lumen_seg_smooth(LumenVolume* v, int iterations);
 
 // Competitive grow-cut from the current multi-label seeds: grow every painted

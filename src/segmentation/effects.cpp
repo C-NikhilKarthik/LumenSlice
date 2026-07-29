@@ -63,6 +63,11 @@ long ShrinkMarginEffect::apply(const Volume& /*volume*/, LabelVolume& mask,
     return erode_label(mask, label, iterations_);
 }
 
+long HollowEffect::apply(const Volume& /*volume*/, LabelVolume& mask,
+                         std::uint8_t label) const {
+    return hollow_label(mask, label, thickness_);
+}
+
 long SmoothEffect::apply(const Volume& /*volume*/, LabelVolume& mask,
                          std::uint8_t label) const {
     return smooth_label(mask, label, iterations_);

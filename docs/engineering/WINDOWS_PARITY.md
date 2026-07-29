@@ -33,7 +33,7 @@ Mac behavior check and a Windows wiring/build check.
 | Smoothing | Yes | Yes | Yes | baseline |
 | Grow from seeds | Yes | Yes | Yes | baseline |
 | Island cleanup | Yes | Yes | No UI wiring | next UI phase |
-| Hollow | No | No | No | shared-core phase |
+| Hollow | Yes | Yes | Yes | baseline, one-voxel shell |
 | Undo/redo | Yes | Yes | Yes | baseline |
 | 3D surface generation | Yes | Yes | Yes | background-job audit needed |
 | 3D volume rendering | No | No | No | rendering phase |

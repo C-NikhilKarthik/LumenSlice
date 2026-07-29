@@ -134,6 +134,17 @@ private:
     int iterations_;
 };
 
+// Remove the eroded interior, leaving the active segment as a shell.
+class HollowEffect final : public SegmentationEffect {
+public:
+    explicit HollowEffect(int thickness) : thickness_(thickness) {}
+    [[nodiscard]] long apply(const Volume& volume, LabelVolume& mask,
+                             std::uint8_t label) const override;
+
+private:
+    int thickness_;
+};
+
 // Smooth the active label with a 26-neighbour majority filter.
 class SmoothEffect final : public SegmentationEffect {
 public:

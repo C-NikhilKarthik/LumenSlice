@@ -332,6 +332,23 @@ static void test_islands() {
     CHECK(mask.count_nonzero() == 27, "big blob above the cutoff survives");
 }
 
+// Hollow removes the eroded interior while preserving the active label's shell.
+static void test_hollow() {
+    std::printf("hollow\n");
+    Volume v = make_volume(8, 0.0f);
+    LabelVolume mask;
+    mask.reset_to(v);
+    for (int z = 1; z <= 5; ++z)
+        for (int y = 1; y <= 5; ++y)
+            for (int x = 1; x <= 5; ++x) mask.set(x, y, z, 1);
+
+    const long cleared = hollow_label(mask, 1, 1);
+    CHECK(cleared == 27, "hollow removes the 3x3x3 interior");
+    CHECK(mask.count_nonzero() == 98, "hollow preserves the one-voxel shell");
+    CHECK(mask.at(1, 3, 3) == 1, "hollow keeps the boundary");
+    CHECK(mask.at(3, 3, 3) == 0, "hollow clears the center");
+}
+
 // 12. Undo/redo round-trips a mutation and respects the depth cap.
 static void test_undo() {
     std::printf("undo / redo\n");
@@ -555,6 +572,7 @@ int main() {
     test_segment_table();
     test_otsu();
     test_islands();
+    test_hollow();
     test_undo();
     test_morphology();
     test_effects();

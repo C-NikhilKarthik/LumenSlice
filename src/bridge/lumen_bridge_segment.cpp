@@ -173,6 +173,13 @@ long lumen_seg_shrink(LumenVolume* v, int iterations) {
     return changed;
 }
 
+long lumen_seg_hollow(LumenVolume* v, int thickness) {
+    if (v == nullptr) return 0;
+    const long changed = v->editor.hollow(thickness);
+    if (changed > 0) invalidate_mask_cache(v);
+    return changed;
+}
+
 long lumen_seg_smooth(LumenVolume* v, int iterations) {
     if (v == nullptr) return 0;
     const long changed = v->editor.smooth(iterations);

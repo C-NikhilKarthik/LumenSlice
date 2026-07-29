@@ -36,6 +36,10 @@ long dilate_label(LabelVolume& mask, std::uint8_t label, int iterations);
 // label voxel touching a non-label voxel is peeled off). Returns voxels removed.
 long erode_label(LabelVolume& mask, std::uint8_t label, int iterations);
 
+// Remove the eroded interior of the active label, leaving a shell whose
+// thickness is approximately `iterations` voxels. Other labels are untouched.
+long hollow_label(LabelVolume& mask, std::uint8_t label, int iterations);
+
 // Smooth: a 26-neighbourhood majority (median) filter applied `iterations` times.
 // Rounds off jagged paint and fills pinholes; claims only background and clears
 // only `label` (other segments are untouched). Returns voxels changed.

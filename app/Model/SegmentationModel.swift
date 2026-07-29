@@ -439,6 +439,7 @@ final class SegmentationModel: ObservableObject {
 
     func growMargin() { applyMorphology { lumen_seg_grow($0, 1) } }
     func shrinkMargin() { applyMorphology { lumen_seg_shrink($0, 1) } }
+    func hollow() { applyMorphology { lumen_seg_hollow($0, 1) } }
     func smooth() { applyMorphology { lumen_seg_smooth($0, 1) } }
 
     private func applyMorphology(_ op: (OpaquePointer) -> Int) {

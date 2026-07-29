@@ -81,6 +81,10 @@ long SegmentEditor::shrink_margin(int iterations) {
     return apply(ShrinkMarginEffect{iterations});
 }
 
+long SegmentEditor::hollow(int thickness) {
+    return apply(HollowEffect{thickness});
+}
+
 long SegmentEditor::smooth(int iterations) {
     return apply(SmoothEffect{iterations});
 }

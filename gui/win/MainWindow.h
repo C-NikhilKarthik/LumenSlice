@@ -77,6 +77,7 @@ private slots:
     void applyOtsu();
     void refineGrow();
     void refineShrink();
+    void refineHollow();
     void refineSmooth();
     void keepLargest();
     void removeSmallIslands();
