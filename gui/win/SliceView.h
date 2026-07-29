@@ -9,6 +9,7 @@
 
 #include <QImage>
 #include <QPoint>
+#include <QPointF>
 #include <QRect>
 #include <QWidget>
 
@@ -65,6 +66,16 @@ private:
     int lastImgW_ = 0, lastImgH_ = 0;  // cached from the last paint for hit-testing
     bool hovering_ = false;
     QPoint hoverPos_;
+
+    // Navigation state mirrors the Mac canvas: right-drag zooms around the
+    // cursor anchor, middle-drag pans, and wheel deltas accumulate until they
+    // represent one slice step on either a mouse or high-resolution wheel.
+    enum class Navigation { None, Zoom, Pan } navigation_ = Navigation::None;
+    QPoint zoomAnchor_;
+    QPoint lastNavigationPos_;
+    double zoom_ = 1.0;
+    QPointF pan_;
+    double wheelAccum_ = 0.0;
 
     // QImage owns a private copy so another pane can reuse the bridge scratch
     // buffers without invalidating this pane's next repaint. The keys avoid

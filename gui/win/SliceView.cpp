@@ -6,6 +6,7 @@
 #include <QPaintEvent>
 #include <QWheelEvent>
 #include <algorithm>
+#include <cmath>
 
 #include "MarkupModel.h"
 
@@ -68,7 +69,15 @@ QRect SliceView::imageRect(int imgW, int imgH) const {
     }
     const int x = 4 + int((availW - rw) / 2.0);
     const int y = kTitleH + 4 + int((availH - rh) / 2.0);
-    return QRect(x, y, int(rw), int(rh));
+    QRect fitted(x, y, int(rw), int(rh));
+    if (zoom_ <= 1.0 && pan_ == QPointF(0, 0)) return fitted;
+
+    const QPointF anchor = zoomAnchor_.isNull() ? fitted.center() : zoomAnchor_;
+    const double nw = fitted.width() * zoom_;
+    const double nh = fitted.height() * zoom_;
+    const double nx = anchor.x() + (fitted.left() - anchor.x()) * zoom_ + pan_.x();
+    const double ny = anchor.y() + (fitted.top() - anchor.y()) * zoom_ + pan_.y();
+    return QRect(qRound(nx), qRound(ny), qRound(nw), qRound(nh));
 }
 
 bool SliceView::widgetToPixel(const QPoint& p, int imgW, int imgH, int* px,
@@ -271,9 +280,16 @@ void SliceView::wheelEvent(QWheelEvent* e) {
     if (!v) return;
     const int count = lumen_slice_count(v, axis_);
     if (count <= 0) return;
-    const int step = (e->angleDelta().y() > 0) ? -1 : 1;
-    const int next = std::clamp(st_->sliceIndex[axis_] + step, 0, count - 1);
-    if (next != st_->sliceIndex[axis_]) emit sliceScrolled(axis_, next);
+    const QPoint pixel = e->pixelDelta();
+    const QPoint angle = e->angleDelta();
+    const double delta = pixel.y() != 0 ? pixel.y() : (angle.y() / 12.0);
+    wheelAccum_ += delta;
+    while (std::abs(wheelAccum_) >= 10.0) {
+        const int step = wheelAccum_ > 0 ? -1 : 1;
+        wheelAccum_ -= step > 0 ? 10.0 : -10.0;
+        const int next = std::clamp(st_->sliceIndex[axis_] + step, 0, count - 1);
+        if (next != st_->sliceIndex[axis_]) emit sliceScrolled(axis_, next);
+    }
     e->accept();
 }
 
@@ -284,7 +300,6 @@ void SliceView::mousePressEvent(QMouseEvent* e) {
     dragStart_ = e->pos();
 
     const bool focusChord =
-        (e->button() == Qt::MiddleButton) ||
         (e->button() == Qt::LeftButton && (e->modifiers() & Qt::ControlModifier));
 
     int pxx = 0, pyy = 0;
@@ -294,6 +309,17 @@ void SliceView::mousePressEvent(QMouseEvent* e) {
         int x = 0, y = 0, z = 0;
         lumen_slice_pixel_to_voxel(v, axis_, index, pxx, pyy, &x, &y, &z);
         emit focusPicked(x, y, z);
+        return;
+    }
+
+    if (e->button() == Qt::RightButton || e->button() == Qt::MiddleButton) {
+        if (!inside) return;
+        navigation_ = e->button() == Qt::RightButton ? Navigation::Zoom
+                                                       : Navigation::Pan;
+        lastNavigationPos_ = e->pos();
+        if (navigation_ == Navigation::Zoom) zoomAnchor_ = e->pos();
+        setCursor(navigation_ == Navigation::Zoom ? Qt::SizeVerCursor
+                                                   : Qt::SizeAllCursor);
         return;
     }
 
@@ -351,6 +377,38 @@ void SliceView::mouseMoveEvent(QMouseEvent* e) {
     // Track hover for the brush-ring cursor preview.
     hoverPos_ = e->pos();
     hovering_ = true;
+    if (drag_ == Drag::None && navigation_ == Navigation::None &&
+        (e->modifiers() & Qt::ShiftModifier) && st_->volume) {
+        int px = 0, py = 0;
+        if (widgetToPixel(e->pos(), lastImgW_, lastImgH_, &px, &py)) {
+            int x = 0, y = 0, z = 0;
+            lumen_slice_pixel_to_voxel(st_->volume, axis_, st_->sliceIndex[axis_],
+                                       px, py, &x, &y, &z);
+            emit focusPicked(x, y, z);
+        }
+    }
+    if (navigation_ == Navigation::Zoom) {
+        const int dy = e->pos().y() - lastNavigationPos_.y();
+        zoom_ = std::clamp(zoom_ * std::exp(-double(dy) * 0.01), 1.0, 8.0);
+        if (zoom_ <= 1.0) pan_ = QPointF(0, 0);
+        lastNavigationPos_ = e->pos();
+        update();
+        return;
+    }
+    if (navigation_ == Navigation::Pan) {
+        if (zoom_ > 1.0) {
+            const QPoint d = e->pos() - lastNavigationPos_;
+            pan_ += QPointF(d.x(), d.y());
+            const QRect fitted = imageRect(lastImgW_, lastImgH_);
+            const double maxX = fitted.width() * (zoom_ - 1.0) / (2.0 * zoom_);
+            const double maxY = fitted.height() * (zoom_ - 1.0) / (2.0 * zoom_);
+            pan_.setX(std::clamp(pan_.x(), -maxX, maxX));
+            pan_.setY(std::clamp(pan_.y(), -maxY, maxY));
+        }
+        lastNavigationPos_ = e->pos();
+        update();
+        return;
+    }
     if (drag_ == Drag::None) {
         if (st_->segmentInteractive &&
             (st_->tool == Tool::Paint || st_->tool == Tool::Erase))
@@ -381,6 +439,8 @@ void SliceView::mouseMoveEvent(QMouseEvent* e) {
 void SliceView::mouseReleaseEvent(QMouseEvent*) {
     if (drag_ == Drag::Brush) emit strokeEnded();
     drag_ = Drag::None;
+    navigation_ = Navigation::None;
+    unsetCursor();
 }
 
 void SliceView::mouseDoubleClickEvent(QMouseEvent*) { emit doubleClicked(); }
