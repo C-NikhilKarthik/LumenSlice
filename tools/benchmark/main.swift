@@ -57,6 +57,7 @@ if !loadMessage.isEmpty { print("loader=\(loadMessage)") }
 var sliceTimes: [Double] = []
 var cachedSliceTimes: [Double] = []
 var overlayTimes: [Double] = []
+var cachedOverlayTimes: [Double] = []
 var thresholdTimes: [Double] = []
 var meshSnapshotTimes: [Double] = []
 var meshGenerateTimes: [Double] = []
@@ -91,6 +92,10 @@ for _ in 0..<iterations {
         _ = lumen_extract_mask_slice(volume, Int32(LUMEN_AXIS_AXIAL),
                                      depth / 2, &maskWidth, &maskHeight)
     })
+    cachedOverlayTimes.append(elapsedMilliseconds {
+        _ = lumen_extract_mask_slice(volume, Int32(LUMEN_AXIS_AXIAL),
+                                     depth / 2, &maskWidth, &maskHeight)
+    })
 
     meshSnapshotTimes.append(elapsedMilliseconds {
         lumen_mesh_snapshot(volume)
@@ -104,6 +109,7 @@ print(String(format: "slice_extract_all_axes_ms=%.3f", average(sliceTimes)))
 print(String(format: "slice_extract_cached_ms=%.3f", average(cachedSliceTimes)))
 print(String(format: "threshold_ms=%.3f", average(thresholdTimes)))
 print(String(format: "mask_overlay_ms=%.3f", average(overlayTimes)))
+print(String(format: "mask_overlay_cached_ms=%.3f", average(cachedOverlayTimes)))
 print(String(format: "mesh_snapshot_ms=%.3f", average(meshSnapshotTimes)))
 print(String(format: "mesh_generate_ms=%.3f", average(meshGenerateTimes)))
 print("labelled_voxels=\(lumen_seg_count(volume)) triangles=\(lastTriangles)")

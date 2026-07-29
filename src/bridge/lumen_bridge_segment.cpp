@@ -16,6 +16,7 @@
 #include "segmentation/mask_view.hpp"
 
 using lumen_bridge_detail::clamp_u8;
+using lumen_bridge_detail::invalidate_mask_cache;
 
 extern "C" {
 
@@ -23,13 +24,16 @@ extern "C" {
 
 int lumen_seg_add(LumenVolume* v, int r, int g, int b) {
     if (v == nullptr) return 0;
-    return v->editor.add_segment(
+    const int id = v->editor.add_segment(
         lumen::Rgb{clamp_u8(r), clamp_u8(g), clamp_u8(b)});
+    if (id != 0) invalidate_mask_cache(v);
+    return id;
 }
 
 void lumen_seg_remove(LumenVolume* v, int id) {
     if (v == nullptr || id <= 0 || id > 255) return;
     v->editor.remove_segment(static_cast<std::uint8_t>(id));
+    invalidate_mask_cache(v);
 }
 
 int lumen_seg_active(const LumenVolume* v) {
@@ -53,6 +57,7 @@ void lumen_seg_set_color(LumenVolume* v, int id, int r, int g, int b) {
     if (v == nullptr || id <= 0 || id > 255) return;
     v->editor.set_color(static_cast<std::uint8_t>(id),
                         lumen::Rgb{clamp_u8(r), clamp_u8(g), clamp_u8(b)});
+    invalidate_mask_cache(v);
 }
 
 void lumen_seg_get_color(const LumenVolume* v, int id, int* r, int* g, int* b) {
@@ -66,6 +71,7 @@ void lumen_seg_get_color(const LumenVolume* v, int id, int* r, int* g, int* b) {
 void lumen_seg_set_visible(LumenVolume* v, int id, int visible) {
     if (v == nullptr || id <= 0 || id > 255) return;
     v->editor.set_visible(static_cast<std::uint8_t>(id), visible != 0);
+    invalidate_mask_cache(v);
 }
 
 int lumen_seg_get_visible(const LumenVolume* v, int id) {
@@ -93,28 +99,37 @@ void lumen_seg_label_histogram(const LumenVolume* v, long* out) {
 void lumen_seg_threshold(LumenVolume* v, float lo, float hi) {
     if (v == nullptr) return;
     v->editor.threshold(lo, hi);
+    invalidate_mask_cache(v);
 }
 
 long lumen_seg_region_grow(LumenVolume* v, int x, int y, int z, float tol) {
     if (v == nullptr) return 0;
-    return v->editor.region_grow(x, y, z, tol);
+    const long changed = v->editor.region_grow(x, y, z, tol);
+    if (changed > 0) invalidate_mask_cache(v);
+    return changed;
 }
 
 long lumen_seg_paint(LumenVolume* v, int axis, int index, int cx, int cy,
                      int radius, int add) {
     if (v == nullptr) return 0;
-    return v->editor.paint(static_cast<lumen::Axis>(axis), index, cx, cy, radius,
-                           add != 0);
+    const long changed = v->editor.paint(static_cast<lumen::Axis>(axis), index, cx,
+                                         cy, radius, add != 0);
+    if (changed > 0) invalidate_mask_cache(v);
+    return changed;
 }
 
 long lumen_seg_level_trace(LumenVolume* v, int axis, int index, int cx, int cy) {
     if (v == nullptr) return 0;
-    return v->editor.level_trace(static_cast<lumen::Axis>(axis), index, cx, cy);
+    const long changed =
+        v->editor.level_trace(static_cast<lumen::Axis>(axis), index, cx, cy);
+    if (changed > 0) invalidate_mask_cache(v);
+    return changed;
 }
 
 void lumen_seg_clear(LumenVolume* v) {
     if (v == nullptr) return;
     v->editor.clear_active();
+    invalidate_mask_cache(v);
 }
 
 long lumen_seg_count(const LumenVolume* v) {
@@ -127,30 +142,47 @@ float lumen_seg_otsu(const LumenVolume* v) {
 }
 
 long lumen_seg_keep_largest(LumenVolume* v) {
-    return v == nullptr ? 0 : v->editor.keep_largest();
+    if (v == nullptr) return 0;
+    const long changed = v->editor.keep_largest();
+    if (changed > 0) invalidate_mask_cache(v);
+    return changed;
 }
 
 long lumen_seg_remove_small(LumenVolume* v, long min_voxels) {
-    return v == nullptr ? 0 : v->editor.remove_small(min_voxels);
+    if (v == nullptr) return 0;
+    const long changed = v->editor.remove_small(min_voxels);
+    if (changed > 0) invalidate_mask_cache(v);
+    return changed;
 }
 
 long lumen_seg_grow(LumenVolume* v, int iterations) {
-    return v == nullptr ? 0 : v->editor.grow_margin(iterations);
+    if (v == nullptr) return 0;
+    const long changed = v->editor.grow_margin(iterations);
+    if (changed > 0) invalidate_mask_cache(v);
+    return changed;
 }
 
 long lumen_seg_shrink(LumenVolume* v, int iterations) {
-    return v == nullptr ? 0 : v->editor.shrink_margin(iterations);
+    if (v == nullptr) return 0;
+    const long changed = v->editor.shrink_margin(iterations);
+    if (changed > 0) invalidate_mask_cache(v);
+    return changed;
 }
 
 long lumen_seg_smooth(LumenVolume* v, int iterations) {
-    return v == nullptr ? 0 : v->editor.smooth(iterations);
+    if (v == nullptr) return 0;
+    const long changed = v->editor.smooth(iterations);
+    if (changed > 0) invalidate_mask_cache(v);
+    return changed;
 }
 
 long lumen_seg_grow_from_seeds(LumenVolume* v, int max_iters) {
     if (v == nullptr) return 0;
     // Fixed 8-voxel margin around the seeds: enough headroom for the grow to reach
     // structure edges without ballooning the working box on a large scan.
-    return v->editor.grow_from_seeds(max_iters, 8);
+    const long changed = v->editor.grow_from_seeds(max_iters, 8);
+    if (changed > 0) invalidate_mask_cache(v);
+    return changed;
 }
 
 long lumen_seg_scissor_cut(LumenVolume* v, const float* mvp, int vp_w, int vp_h,
@@ -160,8 +192,10 @@ long lumen_seg_scissor_cut(LumenVolume* v, const float* mvp, int vp_w, int vp_h,
     const std::uint8_t label =
         (only_label > 0 && only_label < 256) ? static_cast<std::uint8_t>(only_label)
                                              : 0;
-    return v->editor.scissor_cut(mvp, vp_w, vp_h, poly_xy, poly_count,
-                                 erase_inside != 0, label);
+    const long changed = v->editor.scissor_cut(
+        mvp, vp_w, vp_h, poly_xy, poly_count, erase_inside != 0, label);
+    if (changed > 0) invalidate_mask_cache(v);
+    return changed;
 }
 
 // --- Undo / redo ------------------------------------------------------------
@@ -171,11 +205,15 @@ void lumen_seg_push_undo(LumenVolume* v) {
 }
 
 int lumen_seg_undo(LumenVolume* v) {
-    return (v != nullptr && v->editor.undo()) ? 1 : 0;
+    if (v == nullptr || !v->editor.undo()) return 0;
+    invalidate_mask_cache(v);
+    return 1;
 }
 
 int lumen_seg_redo(LumenVolume* v) {
-    return (v != nullptr && v->editor.redo()) ? 1 : 0;
+    if (v == nullptr || !v->editor.redo()) return 0;
+    invalidate_mask_cache(v);
+    return 1;
 }
 
 int lumen_seg_can_undo(const LumenVolume* v) {
@@ -191,9 +229,19 @@ int lumen_seg_can_redo(const LumenVolume* v) {
 const unsigned char* lumen_extract_mask_slice(LumenVolume* v, int axis, int index,
                                               int* out_w, int* out_h) {
     if (v == nullptr) return nullptr;
+    if (v->mask_cache_valid && v->mask_cache_revision == v->mask_revision &&
+        v->mask_cache_axis == axis && v->mask_cache_index == index) {
+        if (out_w) *out_w = v->mask_scratch.width;
+        if (out_h) *out_h = v->mask_scratch.height;
+        return v->mask_scratch.rgba.empty() ? nullptr : v->mask_scratch.rgba.data();
+    }
     lumen::ExtractMaskSlice(v->volume, v->editor.mask(), v->editor.segments(),
                             static_cast<lumen::Axis>(axis), index,
                             v->mask_scratch);
+    v->mask_cache_revision = v->mask_revision;
+    v->mask_cache_axis = axis;
+    v->mask_cache_index = index;
+    v->mask_cache_valid = true;
     if (out_w) *out_w = v->mask_scratch.width;
     if (out_h) *out_h = v->mask_scratch.height;
     return v->mask_scratch.rgba.empty() ? nullptr : v->mask_scratch.rgba.data();

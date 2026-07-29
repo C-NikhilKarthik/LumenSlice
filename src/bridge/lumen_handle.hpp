@@ -31,6 +31,13 @@ struct LumenVolume {
     int slice_cache_index = 0;
     float slice_cache_level = 0.0f;
     float slice_cache_window = 0.0f;
+    // The overlay is derived from the editor mask and segment presentation
+    // state. A revision lets both UI frontends reuse it across repaint events.
+    std::uint64_t mask_revision = 1;
+    bool mask_cache_valid = false;
+    std::uint64_t mask_cache_revision = 0;
+    int mask_cache_axis = 0;
+    int mask_cache_index = 0;
     lumen::SegmentEditor editor;    // owns mask + segments + undo
     std::string meta_json;
 
@@ -56,6 +63,12 @@ inline std::uint8_t clamp_u8(int v) {
     if (v < 0) return 0;
     if (v > 255) return 255;
     return static_cast<std::uint8_t>(v);
+}
+
+inline void invalidate_mask_cache(LumenVolume* v) {
+    if (v == nullptr) return;
+    ++v->mask_revision;
+    v->mask_cache_valid = false;
 }
 
 } // namespace lumen_bridge_detail
