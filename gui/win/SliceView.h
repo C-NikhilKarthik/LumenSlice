@@ -39,6 +39,7 @@ signals:
     void doubleClicked();                          // toggle pane maximize
     // A stroke/gesture that mutated the mask ended — good point to snapshot undo.
     void strokeBegan();
+    void strokeEnded();
 
 protected:
     void paintEvent(QPaintEvent*) override;

@@ -356,7 +356,10 @@ void SliceView::mouseMoveEvent(QMouseEvent* e) {
     }
 }
 
-void SliceView::mouseReleaseEvent(QMouseEvent*) { drag_ = Drag::None; }
+void SliceView::mouseReleaseEvent(QMouseEvent*) {
+    if (drag_ == Drag::Brush) emit strokeEnded();
+    drag_ = Drag::None;
+}
 
 void SliceView::mouseDoubleClickEvent(QMouseEvent*) { emit doubleClicked(); }
 

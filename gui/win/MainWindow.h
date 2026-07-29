@@ -6,6 +6,7 @@
 
 #include <QFutureWatcher>
 #include <QHash>
+#include <QElapsedTimer>
 #include <QList>
 #include <QMainWindow>
 #include <QPointF>
@@ -68,6 +69,7 @@ private slots:
     void onFloodClicked(int x, int y, int z);
     void onLevelTraceClicked(int axis, int index, int cx, int cy);
     void onStrokeBegan();
+    void onStrokeEnded();
 
     // Segment ops.
     void addSegment();
@@ -216,6 +218,8 @@ private:
     // Mesh generation (off-thread, per-segment colored surfaces).
     QFutureWatcher<int> meshWatcher_;
     bool generating_ = false;
+    QElapsedTimer paintRefreshClock_;
+    bool brushStrokeActive_ = false;
     std::vector<int> pendingSegIds_;
     int pendingSegIndex_ = 0;
     std::vector<MeshView::MeshPiece> meshPieces_;

@@ -887,6 +887,8 @@ QWidget* MainWindow::buildQuad() {
                 &MainWindow::onMarkupPointPicked);
         connect(panes_[i], &SliceView::strokeBegan, this,
                 &MainWindow::onStrokeBegan);
+        connect(panes_[i], &SliceView::strokeEnded, this,
+                &MainWindow::onStrokeEnded);
         connect(panes_[i], &SliceView::doubleClicked, this,
                 [this, i] { toggleMaximize(i); });
         col->addWidget(panes_[i], 1);
@@ -1068,14 +1070,32 @@ void MainWindow::onStrokeBegan() {
     if (!st_.volume) return;
     lumen_seg_push_undo(st_.volume);
     updateUndoRedo();
+    if (st_.tool == Tool::Paint || st_.tool == Tool::Erase) {
+        brushStrokeActive_ = true;
+        paintRefreshClock_.start();
+    }
 }
 
 void MainWindow::onPaintStroke(int axis, int index, int cx, int cy, int radius,
                                bool add) {
     if (!st_.volume) return;
     lumen_seg_paint(st_.volume, axis, index, cx, cy, radius, add ? 1 : 0);
+    // The mask changes on every input event, but extracting three full overlays
+    // and rescanning the whole mask for counts does not need to happen at input
+    // frequency. Keep interaction responsive and settle exactly on mouse-up.
+    if (!brushStrokeActive_ || !paintRefreshClock_.isValid() ||
+        paintRefreshClock_.hasExpired(16)) {
+        refreshCanvas();
+        paintRefreshClock_.restart();
+    }
+}
+
+void MainWindow::onStrokeEnded() {
+    if (!brushStrokeActive_) return;
+    brushStrokeActive_ = false;
     refreshCanvas();
     updateSegmentCounts();
+    updateUndoRedo();
 }
 
 void MainWindow::onFloodClicked(int x, int y, int z) {
