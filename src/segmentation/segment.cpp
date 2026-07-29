@@ -4,6 +4,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <thread>
 #include <vector>
 
 namespace lumen {
@@ -25,15 +26,45 @@ void threshold_fill(const Volume& vol, float lo, float hi, LabelVolume& mask,
     const float* hu = vol.voxel_buffer.get();
     std::uint8_t* out = mask.data();
     const std::size_t n = mask.voxel_count();
-    for (std::size_t i = 0; i < n; ++i) {
-        const bool in = hu[i] >= lo && hu[i] <= hi;
-        if (out[i] == label) {
-            out[i] = in ? label : 0; // keep own voxel only while still in range
-        } else if (out[i] == 0 && in) {
-            out[i] = label;          // claim background in range
+
+    // Each voxel is independent and each worker owns a disjoint output range.
+    // Avoid creating a thread per tiny test volume: the threshold UI is often
+    // used on small scans too, where serial work is faster than scheduling.
+    constexpr std::size_t kMinParallelVoxels = 256 * 1024;
+    const unsigned hardware = std::thread::hardware_concurrency();
+    const unsigned workers =
+        (n < kMinParallelVoxels || hardware < 2)
+            ? 1u
+            : std::min<unsigned>(hardware, static_cast<unsigned>(
+                                             (n + kMinParallelVoxels - 1) /
+                                             kMinParallelVoxels));
+    const auto apply_range = [&](std::size_t begin, std::size_t end) {
+        for (std::size_t i = begin; i < end; ++i) {
+            const bool in = hu[i] >= lo && hu[i] <= hi;
+            if (out[i] == label) {
+                out[i] = in ? label : 0; // keep own voxel only while in range
+            } else if (out[i] == 0 && in) {
+                out[i] = label;          // claim background in range
+            }
+            // Voxels owned by other segments remain untouched.
         }
-        // voxels owned by other segments are left untouched
+    };
+
+    if (workers == 1) {
+        apply_range(0, n);
+        return;
     }
+
+    std::vector<std::thread> pool;
+    pool.reserve(workers - 1);
+    const std::size_t block = (n + workers - 1) / workers;
+    for (unsigned worker = 0; worker + 1 < workers; ++worker) {
+        const std::size_t begin = static_cast<std::size_t>(worker) * block;
+        const std::size_t end = std::min(n, begin + block);
+        pool.emplace_back(apply_range, begin, end);
+    }
+    apply_range(static_cast<std::size_t>(workers - 1) * block, n);
+    for (auto& worker : pool) worker.join();
 }
 
 long region_grow(const Volume& vol, int sx, int sy, int sz, float tol,
