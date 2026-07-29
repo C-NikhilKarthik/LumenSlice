@@ -108,8 +108,22 @@ const unsigned char* lumen_extract_slice(LumenVolume* v, int axis, int index,
                                          float level, float window, int* out_w,
                                          int* out_h) {
     if (v == nullptr) return nullptr;
+
+    if (v->slice_cache_valid && v->slice_cache_axis == axis &&
+        v->slice_cache_index == index && v->slice_cache_level == level &&
+        v->slice_cache_window == window) {
+        if (out_w) *out_w = v->scratch.width;
+        if (out_h) *out_h = v->scratch.height;
+        return v->scratch.rgba.empty() ? nullptr : v->scratch.rgba.data();
+    }
+
     lumen::ExtractSlice(v->volume, static_cast<lumen::Axis>(axis), index, level,
                         window, v->scratch);
+    v->slice_cache_axis = axis;
+    v->slice_cache_index = index;
+    v->slice_cache_level = level;
+    v->slice_cache_window = window;
+    v->slice_cache_valid = !v->scratch.rgba.empty();
     if (out_w) *out_w = v->scratch.width;
     if (out_h) *out_h = v->scratch.height;
     return v->scratch.rgba.empty() ? nullptr : v->scratch.rgba.data();

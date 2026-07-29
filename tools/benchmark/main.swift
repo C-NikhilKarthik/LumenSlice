@@ -55,6 +55,7 @@ var loadMessage = String(cString: message)
 if !loadMessage.isEmpty { print("loader=\(loadMessage)") }
 
 var sliceTimes: [Double] = []
+var cachedSliceTimes: [Double] = []
 var overlayTimes: [Double] = []
 var thresholdTimes: [Double] = []
 var meshSnapshotTimes: [Double] = []
@@ -72,6 +73,10 @@ for _ in 0..<iterations {
             _ = lumen_extract_slice(volume, axis, count / 2, 40, 400,
                                     &outWidth, &outHeight)
         }
+        cachedSliceTimes.append(elapsedMilliseconds {
+            _ = lumen_extract_slice(volume, axis, count / 2, 40, 400,
+                                    &outWidth, &outHeight)
+        })
     }
     sliceTimes.append(sliceTime)
 
@@ -96,6 +101,7 @@ for _ in 0..<iterations {
 }
 
 print(String(format: "slice_extract_all_axes_ms=%.3f", average(sliceTimes)))
+print(String(format: "slice_extract_cached_ms=%.3f", average(cachedSliceTimes)))
 print(String(format: "threshold_ms=%.3f", average(thresholdTimes)))
 print(String(format: "mask_overlay_ms=%.3f", average(overlayTimes)))
 print(String(format: "mesh_snapshot_ms=%.3f", average(meshSnapshotTimes)))

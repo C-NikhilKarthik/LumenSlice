@@ -23,6 +23,14 @@ struct LumenVolume {
     lumen::Volume volume;
     lumen::SliceImage scratch;      // reused grayscale slice buffer
     lumen::SliceImage mask_scratch; // reused overlay buffer
+    // The grayscale slice is immutable until one of these request parameters
+    // changes. Keeping this cache at the bridge seam benefits both Swift and Qt,
+    // especially when a repaint only changes crosshair/brush/UI chrome.
+    bool slice_cache_valid = false;
+    int slice_cache_axis = 0;
+    int slice_cache_index = 0;
+    float slice_cache_level = 0.0f;
+    float slice_cache_window = 0.0f;
     lumen::SegmentEditor editor;    // owns mask + segments + undo
     std::string meta_json;
 
