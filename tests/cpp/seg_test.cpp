@@ -23,6 +23,7 @@
 #include "segmentation/segment_table.hpp"
 #include "segmentation/stl_export.hpp"
 #include "segmentation/undo_stack.hpp"
+#include "visualization/volume_texture.h"
 
 using namespace lumen;
 
@@ -349,6 +350,22 @@ static void test_hollow() {
     CHECK(mask.at(3, 3, 3) == 0, "hollow clears the center");
 }
 
+static void test_volume_texture() {
+    std::printf("volume texture\n");
+    Volume v = make_volume(4, 0.0f);
+    set_hu(v, 1, 1, 1, 100.0f);
+    VolumeTexture texture;
+    ExtractVolumeTexture(v, 50.0f, 100.0f, 2, texture);
+    CHECK(texture.width == 2 && texture.height == 2 && texture.depth == 2,
+          "volume texture respects max dimension");
+    CHECK(texture.voxels.size() == 8, "volume texture has one byte per voxel");
+    ExtractVolumeTexture(v, 50.0f, 100.0f, 0, texture);
+    CHECK(texture.width == 4 && texture.height == 4 && texture.depth == 4,
+          "zero max dimension preserves full resolution");
+    CHECK(texture.voxels[0] == 0, "volume texture maps lower window edge");
+    CHECK(texture.voxels[21] == 255, "volume texture maps upper window edge");
+}
+
 // 12. Undo/redo round-trips a mutation and respects the depth cap.
 static void test_undo() {
     std::printf("undo / redo\n");
@@ -573,6 +590,7 @@ int main() {
     test_otsu();
     test_islands();
     test_hollow();
+    test_volume_texture();
     test_undo();
     test_morphology();
     test_effects();

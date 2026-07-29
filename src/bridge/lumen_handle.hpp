@@ -18,11 +18,13 @@
 #include "segmentation/marching_cubes.hpp"
 #include "segmentation/segment_editor.hpp"
 #include "visualization/slice_view.h"
+#include "visualization/volume_texture.h"
 
 struct LumenVolume {
     lumen::Volume volume;
     lumen::SliceImage scratch;      // reused grayscale slice buffer
     lumen::SliceImage mask_scratch; // reused overlay buffer
+    lumen::VolumeTexture volume_texture_scratch; // reused GPU upload texture
     // The grayscale slice is immutable until one of these request parameters
     // changes. Keeping this cache at the bridge seam benefits both Swift and Qt,
     // especially when a repaint only changes crosshair/brush/UI chrome.

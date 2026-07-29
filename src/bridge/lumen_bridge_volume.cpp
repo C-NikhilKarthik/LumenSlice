@@ -104,6 +104,21 @@ float lumen_sample_hu(const LumenVolume* v, int x, int y, int z) {
     return vol.voxel_buffer[vol.index(x, y, z)];
 }
 
+const unsigned char* lumen_extract_volume_texture(LumenVolume* v, float level,
+                                                  float window, int max_dimension,
+                                                  int* out_w, int* out_h,
+                                                  int* out_d) {
+    if (v == nullptr) return nullptr;
+    lumen::ExtractVolumeTexture(v->volume, level, window, max_dimension,
+                                v->volume_texture_scratch);
+    if (out_w) *out_w = v->volume_texture_scratch.width;
+    if (out_h) *out_h = v->volume_texture_scratch.height;
+    if (out_d) *out_d = v->volume_texture_scratch.depth;
+    return v->volume_texture_scratch.voxels.empty()
+               ? nullptr
+               : v->volume_texture_scratch.voxels.data();
+}
+
 const unsigned char* lumen_extract_slice(LumenVolume* v, int axis, int index,
                                          float level, float window, int* out_w,
                                          int* out_h) {

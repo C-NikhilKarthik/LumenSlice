@@ -176,6 +176,14 @@ int lumen_seg_can_redo(const LumenVolume* v);
 const unsigned char* lumen_extract_mask_slice(LumenVolume* v, int axis, int index,
                                               int* out_w, int* out_h);
 
+// Prepare a normalized R8 scalar 3D texture for a GPU volume renderer. The
+// buffer is X-fastest and valid until the next call on this handle. If
+// max_dimension > 0, the largest axis is downsampled to that bound.
+const unsigned char* lumen_extract_volume_texture(LumenVolume* v, float level,
+                                                  float window, int max_dimension,
+                                                  int* out_w, int* out_h,
+                                                  int* out_d);
+
 // Map a displayed slice pixel (px,py) on `axis`/`index` to a voxel coordinate.
 // One source of truth for the coronal/sagittal flip (mirrors lumen_extract_slice).
 void lumen_slice_pixel_to_voxel(const LumenVolume* v, int axis, int index, int px,
