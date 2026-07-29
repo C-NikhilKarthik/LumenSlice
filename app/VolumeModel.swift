@@ -70,6 +70,9 @@ final class VolumeModel: ObservableObject {
     // others (3D-Slicer-style linked navigation).
     @Published var focus = SIMD3<Int>(0, 0, 0)
     @Published var images: [CGImage?] = [nil, nil, nil]
+    @Published private(set) var volumeTexture = Data()
+    @Published private(set) var volumeTextureDimensions = SIMD3<Int>(0, 0, 0)
+    @Published private(set) var volumeTextureRevision = 0
 
     // Display toggles for the slice overlays (crosshair/intersection lines and the
     // R/L/A/P/S/I orientation letters), persisted across launches in UserDefaults.
@@ -275,6 +278,18 @@ final class VolumeModel: ObservableObject {
     func refreshAll() {
         guard hasVolume else { return }
         for axis in 0..<3 { refresh(axis) }
+        refreshVolumeTexture()
+    }
+
+    private func refreshVolumeTexture() {
+        guard let h = handle else { return }
+        var w: Int32 = 0, ht: Int32 = 0, d: Int32 = 0
+        guard let ptr = lumen_extract_volume_texture(h, level, window, 160,
+                                                     &w, &ht, &d),
+              w > 0, ht > 0, d > 0 else { return }
+        volumeTexture = Data(bytes: ptr, count: Int(w) * Int(ht) * Int(d))
+        volumeTextureDimensions = SIMD3(Int(w), Int(ht), Int(d))
+        volumeTextureRevision &+= 1
     }
 
     private func refresh(_ axis: Int) {

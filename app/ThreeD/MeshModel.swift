@@ -23,6 +23,10 @@ final class MeshModel: ObservableObject {
     // Scissor mode: when on, a freehand lasso over the 3D surface cuts the mask
     // (and camera orbit is suspended while drawing). Toggled from the 3D controls.
     @Published var scissorActive = false
+    @Published var volumeRendering = UserDefaults.standard.object(
+        forKey: "volumeRendering") as? Bool ?? false {
+        didSet { UserDefaults.standard.set(volumeRendering, forKey: "volumeRendering") }
+    }
     @Published private(set) var isGenerating = false
     @Published private(set) var triangleCount = 0
     @Published private(set) var vertexCount = 0

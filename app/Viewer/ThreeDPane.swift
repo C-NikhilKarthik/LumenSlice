@@ -91,7 +91,8 @@ struct ThreeDPane: View {
             RoundedRectangle(cornerRadius: 10)
                 .fill(.black)
             if !mesh.geometries.isEmpty || !markup.markups.isEmpty
-                || !markup.pending.isEmpty {
+                || !markup.pending.isEmpty
+                || (mesh.volumeRendering && !model.volumeTexture.isEmpty) {
                 MeshSceneView(geometries: mesh.geometries,
                               scissorActive: mesh.scissorActive,
                               onScissor: performScissor,
@@ -101,7 +102,11 @@ struct ThreeDPane: View {
                               markerRadius: markup.markerRadius,
                               focusVoxel: model.focus,
                               volumeDimensions: SIMD3(model.width, model.height, model.depth),
-                              spacing: model.spacing)
+                              spacing: model.spacing,
+                              volumeRendering: mesh.volumeRendering,
+                              volumeTexture: model.volumeTexture,
+                              volumeTextureDimensions: model.volumeTextureDimensions,
+                              volumeTextureRevision: model.volumeTextureRevision)
                     .clipShape(RoundedRectangle(cornerRadius: 10))
                     .overlay(alignment: .top) {
                         if mesh.scissorActive { ScissorBanner() }

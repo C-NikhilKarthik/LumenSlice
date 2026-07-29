@@ -23,6 +23,10 @@ struct MeshSceneView: NSViewRepresentable {
     var focusVoxel: SIMD3<Int> = .zero
     var volumeDimensions: SIMD3<Int> = .zero
     var spacing: SIMD3<Float> = SIMD3<Float>(1, 1, 1)
+    var volumeRendering = false
+    var volumeTexture = Data()
+    var volumeTextureDimensions: SIMD3<Int> = .zero
+    var volumeTextureRevision = 0
 
     final class Coordinator {
         // Identity of the geometry set we last built nodes for, so orbit/zoom (which
@@ -31,6 +35,7 @@ struct MeshSceneView: NSViewRepresentable {
         // Signature of the markups we last built, so orbit doesn't rebuild them.
         var markupSig = ""
         var focusSig = ""
+        var volumeSig = ""
         // Whether we've framed the camera to markups (only matters when there is no
         // mesh to frame to). Reset when markups go empty.
         var framedMarkups = false
@@ -173,6 +178,14 @@ struct MeshSceneView: NSViewRepresentable {
             buildFocusNodes().forEach { root.addChildNode($0) }
         }
 
+        let volumeKey = "\(volumeRendering)|\(volumeTextureRevision)|\(volumeTextureDimensions.x),\(volumeTextureDimensions.y),\(volumeTextureDimensions.z)"
+        if volumeKey != coord.volumeSig {
+            coord.volumeSig = volumeKey
+            root.childNodes.filter { $0.name == "volume" }
+                .forEach { $0.removeFromParentNode() }
+            if volumeRendering { buildVolumeNodes().forEach { root.addChildNode($0) } }
+        }
+
         // When there is no surface to frame to, frame the camera to the markups once
         // (so the first dropped point isn't lost off-screen).
         if geometries.isEmpty && !markups.isEmpty && !coord.framedMarkups {
@@ -181,6 +194,16 @@ struct MeshSceneView: NSViewRepresentable {
             if !markupNodes.isEmpty {
                 DispatchQueue.main.async {
                     view.defaultCameraController.frameNodes(markupNodes)
+                }
+            }
+        }
+        if geometries.isEmpty && markups.isEmpty && volumeRendering && !volumeTexture.isEmpty
+            && !coord.framedMarkups {
+            coord.framedMarkups = true
+            let volumeNodes = root.childNodes.filter { $0.name == "volume" }
+            if !volumeNodes.isEmpty {
+                DispatchQueue.main.async {
+                    view.defaultCameraController.frameNodes(volumeNodes)
                 }
             }
         }
@@ -260,6 +283,54 @@ struct MeshSceneView: NSViewRepresentable {
                                  color: .systemYellow)
         marker.name = "focus"
         nodes.append(marker)
+        return nodes
+    }
+
+    // SceneKit has no portable 3D texture material across the macOS deployment
+    // targets, so use a cached stack of translucent XY planes. The bridge caps
+    // the texture at 160 voxels; nodes are rebuilt only when W/L or the toggle
+    // changes, keeping orbit and focus movement inexpensive.
+    private func buildVolumeNodes() -> [SCNNode] {
+        let dims = volumeTextureDimensions
+        let planeCount = dims.x * dims.y
+        guard dims.x > 0, dims.y > 0, dims.z > 0,
+              volumeTexture.count >= planeCount * dims.z else { return [] }
+        let extentX = Float(max(dims.x - 1, 1)) * spacing.x
+        let extentY = Float(max(dims.y - 1, 1)) * spacing.y
+        var nodes: [SCNNode] = []
+        nodes.reserveCapacity(dims.z)
+        for z in 0..<dims.z {
+            let rgba = volumeTexture.withUnsafeBytes { raw -> Data in
+                let source = raw.bindMemory(to: UInt8.self)
+                var output = Data(count: planeCount * 4)
+                output.withUnsafeMutableBytes { outRaw in
+                    let out = outRaw.bindMemory(to: UInt8.self)
+                    for i in 0..<planeCount {
+                        let value = source[z * planeCount + i]
+                        out[i * 4] = 255
+                        out[i * 4 + 1] = 255
+                        out[i * 4 + 2] = 255
+                        out[i * 4 + 3] = UInt8((Float(value) / 255) * 72)
+                    }
+                }
+                return output
+            }
+            guard let image = VolumeModel.makeImage(data: rgba, width: dims.x,
+                                                    height: dims.y) else { continue }
+            let plane = SCNPlane(width: CGFloat(extentX), height: CGFloat(extentY))
+            let material = SCNMaterial()
+            material.diffuse.contents = image
+            material.isDoubleSided = true
+            material.blendMode = .alpha
+            material.writesToDepthBuffer = false
+            material.readsFromDepthBuffer = false
+            plane.materials = [material]
+            let node = SCNNode(geometry: plane)
+            node.name = "volume"
+            node.position = SCNVector3(extentX / 2, extentY / 2,
+                                       Float(z) * spacing.z)
+            nodes.append(node)
+        }
         return nodes
     }
 
@@ -423,7 +494,8 @@ struct MeshCanvas: View {
         ZStack {
             Color.black
             if !mesh.geometries.isEmpty || !markup.markups.isEmpty
-                || !markup.pending.isEmpty {
+                || !markup.pending.isEmpty
+                || (mesh.volumeRendering && !model.volumeTexture.isEmpty) {
                 MeshSceneView(geometries: mesh.geometries,
                               scissorActive: mesh.scissorActive,
                               onScissor: performScissor,
@@ -433,7 +505,11 @@ struct MeshCanvas: View {
                               markerRadius: markup.markerRadius,
                               focusVoxel: model.focus,
                               volumeDimensions: SIMD3(model.width, model.height, model.depth),
-                              spacing: model.spacing)
+                              spacing: model.spacing,
+                              volumeRendering: mesh.volumeRendering,
+                              volumeTexture: model.volumeTexture,
+                              volumeTextureDimensions: model.volumeTextureDimensions,
+                              volumeTextureRevision: model.volumeTextureRevision)
             } else {
                 VStack(spacing: 12) {
                     Image(systemName: "cube.transparent")

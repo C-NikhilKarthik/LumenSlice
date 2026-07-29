@@ -27,6 +27,13 @@ struct ThreeDControls: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section("Volume") {
+                Toggle("Volume rendering", isOn: $mesh.volumeRendering)
+                Text("Fast downsampled preview controlled by window and level.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
             Section {
                 Button {
                     mesh.generate()
