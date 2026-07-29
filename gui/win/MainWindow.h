@@ -111,6 +111,10 @@ private:
     // generate -> readback per visible non-empty segment, worker off the UI thread).
     void startNextMeshSegment();
     void finishMeshGeneration();
+    // Coalesced, generation-guarded 3D rebuild after a structural segment change
+    // (add / delete / visibility / colour / clear / undo). Prevents the stale
+    // surface and the add/delete-while-generating race.
+    void requestMeshRebuild();
 
     // Refresh helpers.
     void loadPath(const QString& path);
@@ -219,6 +223,12 @@ private:
     std::vector<int> pendingSegIds_;
     int pendingSegIndex_ = 0;
     std::vector<MeshView::MeshPiece> meshPieces_;
+
+    // Auto-rebuild coalescing (see requestMeshRebuild). meshAuto_ turns on once the
+    // user has generated a surface, so we don't surface segments unprompted.
+    QTimer* meshRebuildTimer_ = nullptr;
+    bool meshDirty_ = false;
+    bool meshAuto_ = false;
 };
 
 }  // namespace lumenwin

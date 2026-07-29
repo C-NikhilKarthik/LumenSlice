@@ -1108,6 +1108,7 @@ void MainWindow::addSegment() {
     rebuildSegmentList();
     updateSegmentCounts();
     refreshCanvas();
+    requestMeshRebuild();
 }
 
 void MainWindow::applyThreshold() {
@@ -1184,6 +1185,7 @@ void MainWindow::clearActive() {
     updateUndoRedo();
     refreshCanvas();
     updateSegmentCounts();
+    requestMeshRebuild();
 }
 
 void MainWindow::undo() {
@@ -1191,6 +1193,7 @@ void MainWindow::undo() {
         refreshCanvas();
         updateSegmentCounts();
         updateUndoRedo();
+        requestMeshRebuild();
     }
 }
 
@@ -1199,6 +1202,7 @@ void MainWindow::redo() {
         refreshCanvas();
         updateSegmentCounts();
         updateUndoRedo();
+        requestMeshRebuild();
     }
 }
 
@@ -1208,6 +1212,7 @@ void MainWindow::redo() {
 void MainWindow::generateMesh() {
     LumenVolume* v = st_.volume;
     if (!v || generating_) return;
+    meshAuto_ = true;  // keep the 3D in sync with structural changes from now on
 
     // Collect the visible, non-empty segments — one colored surface each.
     std::vector<long> hist(256, 0);
@@ -1296,6 +1301,29 @@ void MainWindow::finishMeshGeneration() {
     LumenVolume* v = st_.volume;
     generateBtn_->setEnabled(v && lumen_seg_count(v) > 0);
     exportStlBtn_->setEnabled(v && lumen_seg_count(v) > 0);
+    // A structural change arrived mid-generation — rebuild once more to reflect it.
+    if (meshDirty_ && meshRebuildTimer_) meshRebuildTimer_->start();
+}
+
+void MainWindow::requestMeshRebuild() {
+    if (!meshAuto_) return;  // only after the user has generated a surface once
+    meshDirty_ = true;
+    if (!meshRebuildTimer_) {
+        meshRebuildTimer_ = new QTimer(this);
+        meshRebuildTimer_->setSingleShot(true);
+        meshRebuildTimer_->setInterval(200);  // coalesce a burst of edits
+        connect(meshRebuildTimer_, &QTimer::timeout, this, [this] {
+            if (generating_) {           // never overlap a running generation
+                meshRebuildTimer_->start();
+                return;
+            }
+            if (meshDirty_) {
+                meshDirty_ = false;
+                generateMesh();
+            }
+        });
+    }
+    meshRebuildTimer_->start();
 }
 
 void MainWindow::onScissorFinished(const QList<QPointF>& poly) {
@@ -1535,6 +1563,7 @@ void MainWindow::rebuildSegmentList() {
                     lumen_seg_set_visible(st_.volume, id, on ? 1 : 0);
                     tintEye(eye);
                     refreshCanvas();
+                    requestMeshRebuild();  // visible set defines the 3D surfaces
                 });
         h->addWidget(eye);
 
@@ -1558,6 +1587,7 @@ void MainWindow::rebuildSegmentList() {
                     QString("background:rgb(%1,%2,%3);border:1px solid #555;")
                         .arg(picked.red()).arg(picked.green()).arg(picked.blue()));
                 refreshCanvas();
+                requestMeshRebuild();  // re-tint the segment's 3D surface
             }
         });
         h->addWidget(swatch);
@@ -1584,6 +1614,7 @@ void MainWindow::rebuildSegmentList() {
             rebuildSegmentList();
             updateSegmentCounts();
             refreshCanvas();
+            requestMeshRebuild();
         });
         h->addWidget(del);
 
