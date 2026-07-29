@@ -28,7 +28,7 @@ struct AppShell: View {
     var body: some View {
         HStack(spacing: 0) {
             TabRail(selection: $selectedTab)
-                .onChange(of: selectedTab) { newTab in
+                .onChange(of: selectedTab) { _, newTab in
                     // Only the Segment tab does overlay extraction work.
                     segmentation.isActive = (newTab == .segment)
                     // Leaving the Markups tab exits placement, so slice clicks go
@@ -115,4 +115,3 @@ private struct AppHeader: View {
         .padding(.bottom, 10)
     }
 }
-

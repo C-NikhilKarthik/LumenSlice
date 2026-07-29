@@ -46,7 +46,7 @@ struct SegmentListRow: View {
                 .textFieldStyle(.plain)
                 .focused($nameFocused)
                 .onSubmit { commitName() }
-                .onChange(of: nameFocused) { focused in if !focused { commitName() } }
+                .onChange(of: nameFocused) { _, focused in if !focused { commitName() } }
 
             Spacer(minLength: 4)
 
@@ -69,7 +69,7 @@ struct SegmentListRow: View {
         .contentShape(Rectangle())
         .onTapGesture { seg.setActive(row.id) }
         .onAppear { editingName = row.name }
-        .onChange(of: row.name) { newName in if !nameFocused { editingName = newName } }
+        .onChange(of: row.name) { _, newName in if !nameFocused { editingName = newName } }
     }
 
     // Explicitly main-actor: older Swift toolchains (the CI runner) don't infer

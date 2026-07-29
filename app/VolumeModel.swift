@@ -308,7 +308,7 @@ final class VolumeModel: ObservableObject {
 
     // Wrap raw premultiplied-RGBA8 bytes in a CGImage. Shared with the
     // SegmentationModel for mask overlays (same pixel format).
-    static func makeImage(data: Data, width: Int, height: Int) -> CGImage? {
+    nonisolated static func makeImage(data: Data, width: Int, height: Int) -> CGImage? {
         guard let provider = CGDataProvider(data: data as CFData) else { return nil }
         let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)
         return CGImage(

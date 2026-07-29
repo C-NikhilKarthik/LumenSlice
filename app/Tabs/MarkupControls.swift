@@ -149,7 +149,7 @@ private struct MarkupRow: View {
                 .textFieldStyle(.plain)
                 .focused($focused)
                 .onSubmit { commit() }
-                .onChange(of: focused) { f in if !f { commit() } }
+        .onChange(of: focused) { _, f in if !f { commit() } }
             Spacer(minLength: 4)
             Text(m.kind.title)
                 .font(.caption2)
@@ -164,7 +164,7 @@ private struct MarkupRow: View {
         .padding(.vertical, 2)
         .opacity(m.visible ? 1 : 0.5)
         .onAppear { editingName = m.name }
-        .onChange(of: m.name) { n in if !focused { editingName = n } }
+        .onChange(of: m.name) { _, n in if !focused { editingName = n } }
     }
 
     @MainActor private func commit() {
