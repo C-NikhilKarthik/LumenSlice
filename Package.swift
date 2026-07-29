@@ -112,6 +112,13 @@ let package = Package(
             dependencies: ["LumenCore"],
             path: "tools/meshshot"
         ),
+        // Headless performance baseline for the shared bridge. Requires a real
+        // DICOM folder, and is intended to be run in debug and release builds.
+        .executableTarget(
+            name: "LumenBench",
+            dependencies: ["LumenCore"],
+            path: "tools/benchmark"
+        ),
     ],
     cxxLanguageStandard: .cxx20
 )

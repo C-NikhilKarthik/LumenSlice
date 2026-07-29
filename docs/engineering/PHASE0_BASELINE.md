@@ -1,0 +1,48 @@
+# Phase 0 Baseline
+
+Date: 2026-07-30
+
+This is the first reproducible baseline before changing the volume, rendering, or
+segmentation engine.
+
+## Verified commands
+
+| Command | Result |
+|---|---|
+| `swift run SegTest` | Passed: all C++ segmentation tests |
+| `swift test` | Passed: 21 Swift tests, 0 failures |
+| `swift build --product LumenBench` | Passed: benchmark target compiles |
+| `git status --short` | Clean before this report |
+
+The C++ test target covers coordinate mapping, thresholding, region growing,
+painting, overlays, marching cubes, STL output, multi-segment isolation, islands,
+undo/redo, margin, smoothing, grow-from-seeds, scissors, and level tracing.
+
+## Build observations
+
+The local Homebrew DCMTK static libraries were built for macOS 26.0 while the
+package links them with a macOS 13 deployment target. The linker currently emits
+warnings for this mismatch. This must be resolved before claiming compatibility
+with older macOS versions or producing release artifacts.
+
+The initial sandboxed SwiftPM invocation could not access the system compiler cache.
+Running the focused targets with normal SwiftPM cache access succeeded; this is an
+environment issue, not a source failure.
+
+## Baseline gaps
+
+- No checked-in DICOM fixture was found, so ingestion and slice-render timings are
+  not yet recorded here.
+- The repository contains synthetic-series tooling, but a real representative
+  dataset is needed for compressed transfer syntaxes, orientation, spacing, and
+  large-volume performance checks.
+- Existing tests are correctness-focused. They do not yet assert latency, peak
+  memory, allocations, frame pacing, or cancellation behavior.
+
+## Next phase
+
+Phase 1 should run `LumenBench` against representative datasets. It measures slice
+extraction for all three axes, mask overlay, threshold, and mesh snapshot/generation
+in both debug and release builds. The benchmark reports dimensions, spacing, voxel
+count, and elapsed time. Load timing and peak working-set measurement should be
+added once the dataset matrix is checked in.
