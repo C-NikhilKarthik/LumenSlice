@@ -81,3 +81,8 @@ jobs:
             --title "LumenSlice (latest)" \
             --notes "$NOTES" \
             --target "$GITHUB_SHA"
+
+      - name: Clean generated smoke-test data
+        if: always()
+        run: |
+          rm -rf "$RUNNER_TEMP/lumenslice-venv" testdata/phantom
