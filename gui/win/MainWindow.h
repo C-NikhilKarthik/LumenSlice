@@ -18,6 +18,7 @@
 #include "RangeSlider.h"
 #include "ViewState.h"
 
+class QButtonGroup;
 class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
@@ -159,6 +160,7 @@ private:
     // Segment controls.
     QVBoxLayout* segListLayout_ = nullptr;
     QWidget* segListContainer_ = nullptr;
+    QButtonGroup* segActiveGroup_ = nullptr;  // exclusive active-segment radios
     QHash<int, QLabel*> segCountLabels_;
     QHash<int, QString> segNames_;
     QComboBox* toolCombo_ = nullptr;

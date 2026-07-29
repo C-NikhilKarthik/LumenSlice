@@ -27,6 +27,7 @@
 #include <QMessageBox>
 #include <QMimeData>
 #include <QPushButton>
+#include <QRadioButton>
 #include <QScrollArea>
 #include <QSignalBlocker>
 #include <QSlider>
@@ -1486,6 +1487,11 @@ void MainWindow::rebuildSegmentList() {
         delete item;
     }
     segCountLabels_.clear();
+    // One exclusive group per rebuild drives the active-segment radios; deleting
+    // the previous group leaves its (already torn-down) buttons untouched.
+    delete segActiveGroup_;
+    segActiveGroup_ = new QButtonGroup(this);
+    segActiveGroup_->setExclusive(true);
 
     LumenVolume* v = st_.volume;
     if (!v) return;
@@ -1498,14 +1504,39 @@ void MainWindow::rebuildSegmentList() {
         h->setContentsMargins(2, 2, 2, 2);
         h->setSpacing(4);
 
-        // Visibility.
-        auto* vis = new QCheckBox;
-        vis->setChecked(lumen_seg_get_visible(v, id) != 0);
-        connect(vis, &QCheckBox::toggled, this, [this, id](bool on) {
-            lumen_seg_set_visible(st_.volume, id, on ? 1 : 0);
+        // Active selector: an exclusive radio, so exactly one segment is active
+        // (the target of every edit) and ANY segment can be picked — not just the
+        // last one added.
+        auto* activeRadio = new QRadioButton;
+        activeRadio->setToolTip(
+            "Active segment — paint / threshold / scissors apply here");
+        activeRadio->setChecked(id == active);
+        segActiveGroup_->addButton(activeRadio, id);
+        connect(activeRadio, &QRadioButton::clicked, this, [this, id] {
+            lumen_seg_set_active(st_.volume, id);
+            updateSegmentCounts();
             refreshCanvas();
         });
-        h->addWidget(vis);
+        h->addWidget(activeRadio);
+
+        // Visibility: an eye toggle, fully independent of which segment is active.
+        auto* eye = new QToolButton;
+        eye->setCheckable(true);
+        eye->setText("👁");
+        eye->setToolTip("Show / hide this segment");
+        eye->setChecked(lumen_seg_get_visible(v, id) != 0);
+        auto tintEye = [](QToolButton* b) {
+            b->setStyleSheet(QString("QToolButton{border:none;color:%1;}")
+                                 .arg(b->isChecked() ? "#e2e4ea" : "#565b66"));
+        };
+        tintEye(eye);
+        connect(eye, &QToolButton::toggled, this,
+                [this, id, eye, tintEye](bool on) {
+                    lumen_seg_set_visible(st_.volume, id, on ? 1 : 0);
+                    tintEye(eye);
+                    refreshCanvas();
+                });
+        h->addWidget(eye);
 
         // Colour swatch.
         int r = 0, g = 0, b = 0;
@@ -1543,19 +1574,6 @@ void MainWindow::rebuildSegmentList() {
         cnt->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
         segCountLabels_[id] = cnt;
         h->addWidget(cnt);
-
-        // Active toggle.
-        auto* activeBtn = new QToolButton;
-        activeBtn->setText("●");
-        activeBtn->setCheckable(true);
-        activeBtn->setChecked(id == active);
-        activeBtn->setToolTip("Set active");
-        connect(activeBtn, &QToolButton::clicked, this, [this, id] {
-            lumen_seg_set_active(st_.volume, id);
-            rebuildSegmentList();
-            updateSegmentCounts();
-        });
-        h->addWidget(activeBtn);
 
         // Delete.
         auto* del = new QToolButton;
