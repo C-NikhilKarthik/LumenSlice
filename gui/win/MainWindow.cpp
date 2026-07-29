@@ -215,6 +215,11 @@ QWidget* MainWindow::buildVisualizePanel() {
     v->addWidget(metaBox);
 
     auto* wlBox = section("Window / Level (HU)");
+    wlBox->setToolTip(
+        "Level = brightness: the HU value at the centre of the grey ramp.\n"
+        "Window = contrast: the width of the HU band shown black→white.\n"
+        "Displayed range = [Level − Window/2, Level + Window/2]. HU below is\n"
+        "black, above is white. Drag a slice: horizontal = Window, vertical = Level.");
     body(wlBox)->addWidget(
         new QLabel("Drag on a slice to adjust, or set exact values here."));
     levelSpin_ = new QDoubleSpinBox;
@@ -263,6 +268,9 @@ QWidget* MainWindow::buildVisualizePanel() {
         presets->addWidget(b);
     }
     body(wlBox)->addLayout(presets);
+    wlRangeLabel_ = new QLabel("—");
+    wlRangeLabel_->setStyleSheet("color:#9aa0ac;");
+    body(wlBox)->addWidget(wlRangeLabel_);
     v->addWidget(wlBox);
 
     auto* ovBox = section("Overlays");
@@ -1638,6 +1646,12 @@ void MainWindow::updateWlControls() {
     windowSpin_->setValue(st_.window);
     levelSlider_->setValue(int(st_.level));
     windowSlider_->setValue(int(st_.window));
+    if (wlRangeLabel_) {
+        const int lo = int(st_.level - st_.window / 2.0f);
+        const int hi = int(st_.level + st_.window / 2.0f);
+        wlRangeLabel_->setText(
+            QString("Shows HU [%1 … %2]  (black … white)").arg(lo).arg(hi));
+    }
 }
 
 void MainWindow::setStatus(const QString& text) {

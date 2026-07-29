@@ -153,6 +153,7 @@ private:
     QDoubleSpinBox* windowSpin_ = nullptr;
     QSlider* levelSlider_ = nullptr;
     QSlider* windowSlider_ = nullptr;
+    QLabel* wlRangeLabel_ = nullptr;  // "Shows HU [lo … hi]" from level/window
     QCheckBox* crosshairCheck_ = nullptr;
 
     // Segment controls.

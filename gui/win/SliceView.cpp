@@ -12,8 +12,7 @@
 namespace lumenwin {
 
 namespace {
-constexpr int kTitleH = 26;           // top strip for the axis label
-constexpr float kWlSensitivity = 2.0f;  // HU per pixel, matches WindowLevelDrag
+constexpr int kTitleH = 26;  // top strip for the axis label
 
 const char* axisTitle(int axis) {
     switch (axis) {
@@ -388,8 +387,16 @@ void SliceView::mouseMoveEvent(QMouseEvent* e) {
     if (drag_ == Drag::WindowLevel) {
         const QPoint d = e->pos() - dragStart_;
         dragStart_ = e->pos();
-        const float dWindow = d.x() * kWlSensitivity;
-        const float dLevel = -d.y() * kWlSensitivity;
+        // Slicer-style sensitivity: dragging the pane's short edge sweeps roughly
+        // the whole data range, so the feel is consistent regardless of modality.
+        // Horizontal = window (contrast), vertical = level (brightness).
+        float lo = 0, hi = 0;
+        lumen_hu_range(v, &lo, &hi);
+        const float range = std::max(1.0f, hi - lo);
+        const int shortEdge = std::max(1, std::min(width(), height() - kTitleH));
+        const float gain = range / float(shortEdge);
+        const float dWindow = d.x() * gain;
+        const float dLevel = -d.y() * gain;
         emit windowLevelDragged(dLevel, dWindow);
         return;
     }
