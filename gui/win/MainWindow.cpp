@@ -1576,20 +1576,23 @@ void MainWindow::rebuildSegmentList() {
         h->addWidget(activeRadio);
 
         // Visibility: an eye toggle, fully independent of which segment is active.
+        // Glyphs are BMP (filled vs dotted circle) to stay safe under MSVC without
+        // /utf-8; the tint reinforces shown vs hidden.
         auto* eye = new QToolButton;
         eye->setCheckable(true);
-        eye->setText("👁");
-        eye->setToolTip("Show / hide this segment");
         eye->setChecked(lumen_seg_get_visible(v, id) != 0);
-        auto tintEye = [](QToolButton* b) {
+        eye->setToolTip("Show / hide this segment");
+        auto styleEye = [](QToolButton* b) {
+            const bool on = b->isChecked();
+            b->setText(on ? "◉" : "◌");
             b->setStyleSheet(QString("QToolButton{border:none;color:%1;}")
-                                 .arg(b->isChecked() ? "#e2e4ea" : "#565b66"));
+                                 .arg(on ? "#e2e4ea" : "#565b66"));
         };
-        tintEye(eye);
+        styleEye(eye);
         connect(eye, &QToolButton::toggled, this,
-                [this, id, eye, tintEye](bool on) {
+                [this, id, eye, styleEye](bool on) {
                     lumen_seg_set_visible(st_.volume, id, on ? 1 : 0);
-                    tintEye(eye);
+                    styleEye(eye);
                     refreshCanvas();
                     requestMeshRebuild();  // visible set defines the 3D surfaces
                 });
