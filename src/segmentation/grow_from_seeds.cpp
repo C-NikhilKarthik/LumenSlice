@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <thread>
 #include <vector>
 
 namespace lumen {
@@ -88,45 +89,70 @@ long grow_from_seeds(const Volume& vol, LabelVolume& mask, int max_iters,
     const int ny[6] = {0, 0, -1, 1, 0, 0};
     const int nz[6] = {0, 0, 0, 0, -1, 1};
 
+    // Each voxel's next label depends only on the previous iteration, so the
+    // expensive propagation pass can be split into independent Z slabs. The
+    // live mask is not touched until all iterations finish, keeping this safe
+    // for both UI front ends and preserving deterministic results.
+    const unsigned hardware = std::thread::hardware_concurrency();
+    const unsigned requested = hardware == 0 ? 2u : hardware;
+    const unsigned worker_count = box < 65536
+                                      ? 1u
+                                      : std::max(1u, std::min<unsigned>(requested,
+                                                                          static_cast<unsigned>(bd)));
+
     for (int iter = 0; iter < max_iters; ++iter) {
         next_lbl = cur_lbl; // unattacked voxels keep their current owner
         next_str = cur_str;
-        bool changed = false;
-        for (int z = 0; z < bd; ++z) {
-            for (int y = 0; y < bh; ++y) {
-                for (int x = 0; x < bw; ++x) {
-                    const std::size_t bi = bidx(x, y, z);
-                    const float hu_a = hu[bi];
-                    float best_str = cur_str[bi];
-                    std::uint8_t best_lbl = cur_lbl[bi];
-                    for (int k = 0; k < 6; ++k) {
-                        const int ax = x + nx[k], ay = y + ny[k], az = z + nz[k];
-                        if (ax < 0 || ay < 0 || az < 0 || ax >= bw || ay >= bh ||
-                            az >= bd) {
-                            continue;
-                        }
-                        const std::size_t ni = bidx(ax, ay, az);
-                        if (cur_str[ni] <= 0.0f || cur_lbl[ni] == 0) continue;
-                        const float g =
-                            1.0f - std::fabs(hu_a - hu[ni]) / denom;
-                        if (g <= 0.0f) continue;
-                        const float attack = cur_str[ni] * g;
-                        // Strict '>' means a seed at strength 1 can never be
-                        // overwritten, so painted strokes are preserved.
-                        if (attack > best_str) {
-                            best_str = attack;
-                            best_lbl = cur_lbl[ni];
+        std::vector<std::thread> workers;
+        std::vector<unsigned char> changed_by_worker(worker_count, 0);
+        workers.reserve(worker_count);
+        for (unsigned worker = 0; worker < worker_count; ++worker) {
+            const int z_begin = static_cast<int>((static_cast<std::size_t>(bd) * worker) /
+                                                 worker_count);
+            const int z_end = static_cast<int>((static_cast<std::size_t>(bd) * (worker + 1)) /
+                                               worker_count);
+            workers.emplace_back([&, worker, z_begin, z_end] {
+                bool changed = false;
+                for (int z = z_begin; z < z_end; ++z) {
+                    for (int y = 0; y < bh; ++y) {
+                        for (int x = 0; x < bw; ++x) {
+                            const std::size_t bi = bidx(x, y, z);
+                            const float hu_a = hu[bi];
+                            float best_str = cur_str[bi];
+                            std::uint8_t best_lbl = cur_lbl[bi];
+                            for (int k = 0; k < 6; ++k) {
+                                const int ax = x + nx[k], ay = y + ny[k], az = z + nz[k];
+                                if (ax < 0 || ay < 0 || az < 0 || ax >= bw || ay >= bh ||
+                                    az >= bd) {
+                                    continue;
+                                }
+                                const std::size_t ni = bidx(ax, ay, az);
+                                if (cur_str[ni] <= 0.0f || cur_lbl[ni] == 0) continue;
+                                const float g =
+                                    1.0f - std::fabs(hu_a - hu[ni]) / denom;
+                                if (g <= 0.0f) continue;
+                                const float attack = cur_str[ni] * g;
+                                // Strict '>' means a seed at strength 1 can never be
+                                // overwritten, so painted strokes are preserved.
+                                if (attack > best_str) {
+                                    best_str = attack;
+                                    best_lbl = cur_lbl[ni];
+                                }
+                            }
+                            if (best_lbl != cur_lbl[bi]) changed = true;
+                            next_lbl[bi] = best_lbl;
+                            next_str[bi] = best_str;
                         }
                     }
-                    if (best_lbl != cur_lbl[bi]) changed = true;
-                    next_lbl[bi] = best_lbl;
-                    next_str[bi] = best_str;
                 }
-            }
+                changed_by_worker[worker] = changed ? 1 : 0;
+            });
         }
+        for (auto& worker : workers) worker.join();
         cur_lbl.swap(next_lbl);
         cur_str.swap(next_str);
-        if (!changed) break;
+        if (std::none_of(changed_by_worker.begin(), changed_by_worker.end(),
+                         [](unsigned char changed) { return changed != 0; })) break;
     }
 
     // Write winners back into the live mask; count relabelled voxels.
