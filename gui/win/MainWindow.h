@@ -123,6 +123,7 @@ private:
     void refreshCanvas();
     void refreshSliders();
     void refreshVolumeInfo();
+    void refreshVolumeTexture();
     void rebuildSegmentList();
     void rebuildExportSegmentList();
     void updateSegmentCounts();
@@ -193,6 +194,7 @@ private:
     QCheckBox* scissorModeCheck_ = nullptr;
     QComboBox* scissorEraseCombo_ = nullptr;
     QCheckBox* scissorActiveOnlyCheck_ = nullptr;
+    QCheckBox* volumeRenderCheck_ = nullptr;
 
     // Export controls.
     QWidget* exportSegContainer_ = nullptr;

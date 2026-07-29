@@ -549,6 +549,15 @@ QWidget* MainWindow::buildThreeDPanel() {
     v->addWidget(new QLabel("Build a 3D surface from the segmentation mask using "
                             "marching cubes."));
 
+    volumeRenderCheck_ = new QCheckBox("Enable volume rendering");
+    volumeRenderCheck_->setToolTip(
+        "Ray-march the normalized scan texture in the 3D pane.");
+    connect(volumeRenderCheck_, &QCheckBox::toggled, this, [this](bool on) {
+        if (meshView_) meshView_->setVolumeRendering(on);
+        if (on) refreshVolumeTexture();
+    });
+    v->addWidget(volumeRenderCheck_);
+
     auto* qualBox = section("Quality");
     auto* smoothRow = new QHBoxLayout;
     smoothRow->addWidget(new QLabel("Smoothing"));
@@ -1031,6 +1040,7 @@ void MainWindow::adoptLoadedVolume(const LoadResult& r) {
     if (markupPlaceCheck_) markupPlaceCheck_->setChecked(false);
 
     setStatus(QString::fromStdString(status));
+    refreshVolumeTexture();
     refreshAll();
     meshView_->clearMeshes();
     meshInfoLabel_->setText("No surface yet.");
@@ -1062,7 +1072,25 @@ void MainWindow::onWindowLevelDragged(float dLevel, float dWindow) {
     st_.level = std::clamp(st_.level + dLevel, -4000.0f, 4000.0f);
     st_.window = std::clamp(st_.window + dWindow, 1.0f, 8000.0f);
     updateWlControls();
+    if (volumeRenderCheck_ && volumeRenderCheck_->isChecked())
+        refreshVolumeTexture();
     refreshCanvas();
+}
+
+void MainWindow::refreshVolumeTexture() {
+    LumenVolume* v = st_.volume;
+    if (!v || !meshView_) return;
+    int w = 0, h = 0, d = 0;
+    const unsigned char* data = lumen_extract_volume_texture(
+        v, st_.level, st_.window, 256, &w, &h, &d);
+    if (!data || w <= 0 || h <= 0 || d <= 0) {
+        meshView_->clearVolumeTexture();
+        return;
+    }
+    float sx = 1, sy = 1, sz = 1;
+    lumen_spacing(v, &sx, &sy, &sz);
+    std::vector<unsigned char> copy(data, data + size_t(w) * size_t(h) * size_t(d));
+    meshView_->setVolumeTexture(std::move(copy), w, h, d, sx, sy, sz);
 }
 
 void MainWindow::onFocusPicked(int x, int y, int z) {

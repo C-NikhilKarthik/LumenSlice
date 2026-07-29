@@ -53,6 +53,53 @@ void main() {
     fragColor = vec4(col, 1.0);
 }
 )";
+
+const char* kVolumeVertexShader = R"(#version 330 core
+layout(location = 0) in vec3 inPos;
+uniform mat4 uMvp;
+uniform vec3 uVolumeMin;
+uniform vec3 uVolumeExtent;
+out vec3 vTexCoord;
+void main() {
+    vTexCoord = inPos;
+    gl_Position = uMvp * vec4(uVolumeMin + inPos * uVolumeExtent, 1.0);
+}
+)";
+
+const char* kVolumeFragmentShader = R"(#version 330 core
+in vec3 vTexCoord;
+out vec4 fragColor;
+uniform sampler3D uVolume;
+uniform vec3 uCamera;
+uniform float uStep;
+uniform float uDensity;
+
+void main() {
+    vec3 ray = normalize(vTexCoord - uCamera);
+    vec3 invRay = 1.0 / max(abs(ray), vec3(0.00001)) * sign(ray);
+    vec3 t0 = (vec3(0.0) - vTexCoord) * invRay;
+    vec3 t1 = (vec3(1.0) - vTexCoord) * invRay;
+    float entry = max(max(min(t0.x, t1.x), min(t0.y, t1.y)), min(t0.z, t1.z));
+    float exit = min(min(max(t0.x, t1.x), max(t0.y, t1.y)), max(t0.z, t1.z));
+    if (exit <= max(entry, 0.0)) discard;
+
+    vec3 p = vTexCoord + ray * max(entry, 0.0);
+    float travelled = max(entry, 0.0);
+    vec4 accum = vec4(0.0);
+    for (int i = 0; i < 512 && travelled < exit && accum.a < 0.98; ++i) {
+        float scalar = texture(uVolume, clamp(p, 0.0, 1.0)).r;
+        float a = smoothstep(0.18, 0.72, scalar) * uDensity;
+        vec3 colour = vec3(scalar * 0.75 + 0.25, scalar * 0.88 + 0.12, 1.0);
+        a *= 1.0 - accum.a;
+        accum.rgb += colour * a;
+        accum.a += a;
+        p += ray * uStep;
+        travelled += uStep;
+    }
+    if (accum.a < 0.01) discard;
+    fragColor = accum;
+}
+)";
 }  // namespace
 
 MeshView::MeshView(QWidget* parent) : QOpenGLWidget(parent) {
@@ -72,7 +119,11 @@ MeshView::~MeshView() {
         makeCurrent();
         vbo_.destroy();
         ibo_.destroy();
+        volumeVbo_.destroy();
+        volumeIbo_.destroy();
+        volumeTexture_.destroy();
         vao_.destroy();
+        volumeVao_.destroy();
         doneCurrent();
     }
 }
@@ -184,6 +235,42 @@ void MeshView::zoomBy(float factor) {
     update();
 }
 
+void MeshView::setVolumeTexture(std::vector<unsigned char> voxels, int width,
+                                int height, int depth, float sx, float sy,
+                                float sz) {
+    pendingVolume_ = std::move(voxels);
+    volumeWidth_ = width;
+    volumeHeight_ = height;
+    volumeDepth_ = depth;
+    volumeSpacing_[0] = sx > 0 ? sx : 1.0f;
+    volumeSpacing_[1] = sy > 0 ? sy : 1.0f;
+    volumeSpacing_[2] = sz > 0 ? sz : 1.0f;
+    volumeTexturePending_ = true;
+    if (glReady_) {
+        makeCurrent();
+        uploadVolumeTexture();
+        doneCurrent();
+    }
+    update();
+}
+
+void MeshView::clearVolumeTexture() {
+    pendingVolume_.clear();
+    volumeWidth_ = volumeHeight_ = volumeDepth_ = 0;
+    volumeTexturePending_ = false;
+    if (glReady_) {
+        makeCurrent();
+        volumeTexture_.destroy();
+        doneCurrent();
+    }
+    update();
+}
+
+void MeshView::setVolumeRendering(bool on) {
+    volumeRendering_ = on;
+    update();
+}
+
 void MeshView::saveSnapshot() {
     const QImage img = grabFramebuffer();
     const QString path = QFileDialog::getSaveFileName(
@@ -202,12 +289,66 @@ void MeshView::initializeGL() {
     program_.addShaderFromSourceCode(QOpenGLShader::Vertex, kVertexShader);
     program_.addShaderFromSourceCode(QOpenGLShader::Fragment, kFragmentShader);
     program_.link();
+    volumeProgram_.addShaderFromSourceCode(QOpenGLShader::Vertex,
+                                           kVolumeVertexShader);
+    volumeProgram_.addShaderFromSourceCode(QOpenGLShader::Fragment,
+                                           kVolumeFragmentShader);
+    volumeProgram_.link();
 
     vao_.create();
     vbo_.create();
     ibo_.create();
+    volumeVao_.create();
+    volumeVbo_.create();
+    volumeIbo_.create();
     glReady_ = true;
     if (pendingUpload_) uploadPending();
+    if (volumeTexturePending_) uploadVolumeTexture();
+}
+
+void MeshView::uploadVolumeTexture() {
+    if (!volumeTexturePending_ || pendingVolume_.empty() || volumeWidth_ <= 0 ||
+        volumeHeight_ <= 0 || volumeDepth_ <= 0) return;
+    volumeTexturePending_ = false;
+    volumeTexture_.destroy();
+    volumeTexture_.setFormat(QOpenGLTexture::R8_UNorm);
+    volumeTexture_.setSize(volumeWidth_, volumeHeight_, volumeDepth_);
+    volumeTexture_.setMinMagFilters(QOpenGLTexture::Linear,
+                                    QOpenGLTexture::Linear);
+    volumeTexture_.setWrapMode(QOpenGLTexture::ClampToEdge);
+    volumeTexture_.allocateStorage(QOpenGLTexture::Red, QOpenGLTexture::UInt8);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    volumeTexture_.setData(QOpenGLTexture::Red, QOpenGLTexture::UInt8,
+                           pendingVolume_.data());
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+
+    const float vertices[] = {
+        0,0,0, 1,0,0, 1,1,0, 0,1,0, 0,0,1, 1,0,1, 1,1,1, 0,1,1,
+    };
+    const unsigned int indices[] = {
+        0,1,2, 2,3,0, 4,6,5, 6,4,7, 0,4,5, 5,1,0,
+        3,2,6, 6,7,3, 0,3,7, 7,4,0, 1,5,6, 6,2,1,
+    };
+    volumeVao_.bind();
+    volumeVbo_.bind();
+    volumeVbo_.allocate(vertices, sizeof(vertices));
+    volumeIbo_.bind();
+    volumeIbo_.allocate(indices, sizeof(indices));
+    volumeProgram_.bind();
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), nullptr);
+    volumeProgram_.release();
+    volumeVao_.release();
+    pendingVolume_.shrink_to_fit();
+    if (totalIndices_ == 0) {
+        center_[0] = 0.5f * volumeWidth_ * volumeSpacing_[0];
+        center_[1] = 0.5f * volumeHeight_ * volumeSpacing_[1];
+        center_[2] = 0.5f * volumeDepth_ * volumeSpacing_[2];
+        radius_ = 0.5f * std::max({volumeWidth_ * volumeSpacing_[0],
+                                   volumeHeight_ * volumeSpacing_[1],
+                                   volumeDepth_ * volumeSpacing_[2]});
+        resetView();
+    }
 }
 
 void MeshView::setMeshes(std::vector<MeshPiece> pieces) {
@@ -304,6 +445,38 @@ void MeshView::paintGL() {
     const QMatrix4x4 proj = projMatrix();
     const QMatrix4x4 view = viewMatrix();
     lastMvp_ = proj * view;
+
+    if (volumeRendering_ && volumeTexture_.isCreated()) {
+        const QVector3D extent(float(volumeWidth_) * volumeSpacing_[0],
+                               float(volumeHeight_) * volumeSpacing_[1],
+                               float(volumeDepth_) * volumeSpacing_[2]);
+        const QVector3D camera = view.inverted().map(QVector3D(0, 0, 0));
+        const QVector3D cameraTex(camera.x() / std::max(extent.x(), 0.001f),
+                                   camera.y() / std::max(extent.y(), 0.001f),
+                                   camera.z() / std::max(extent.z(), 0.001f));
+        glDisable(GL_DEPTH_TEST);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glEnable(GL_CULL_FACE);
+        glCullFace(GL_FRONT);
+        volumeProgram_.bind();
+        volumeProgram_.setUniformValue("uMvp", lastMvp_);
+        volumeProgram_.setUniformValue("uVolumeMin", QVector3D(0, 0, 0));
+        volumeProgram_.setUniformValue("uVolumeExtent", extent);
+        volumeProgram_.setUniformValue("uCamera", cameraTex);
+        volumeProgram_.setUniformValue("uStep", 1.0f / 256.0f);
+        volumeProgram_.setUniformValue("uDensity", 0.08f);
+        volumeTexture_.bind(0);
+        volumeProgram_.setUniformValue("uVolume", 0);
+        volumeVao_.bind();
+        glDrawElements(GL_TRIANGLES, 36, GL_UNSIGNED_INT, nullptr);
+        volumeVao_.release();
+        volumeTexture_.release();
+        volumeProgram_.release();
+        glDisable(GL_CULL_FACE);
+        glDisable(GL_BLEND);
+        glEnable(GL_DEPTH_TEST);
+    }
 
     if (totalIndices_ > 0) {
         glEnable(GL_DEPTH_TEST);

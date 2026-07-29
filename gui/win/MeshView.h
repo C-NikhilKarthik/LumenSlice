@@ -17,6 +17,7 @@
 #include <QOpenGLBuffer>
 #include <QOpenGLFunctions_3_3_Core>
 #include <QOpenGLShaderProgram>
+#include <QOpenGLTexture>
 #include <QOpenGLVertexArrayObject>
 #include <QPoint>
 #include <QPointF>
@@ -50,6 +51,12 @@ public:
     void setMeshes(std::vector<MeshPiece> pieces);
     void clearMeshes() { setMeshes({}); }
     bool hasMesh() const { return totalIndices_ > 0; }
+
+    // Upload a normalized R8 scalar volume for the optional ray-march pass.
+    void setVolumeTexture(std::vector<unsigned char> voxels, int width, int height,
+                          int depth, float sx, float sy, float sz);
+    void clearVolumeTexture();
+    void setVolumeRendering(bool on);
 
     // The model-view-projection matrix used for the last frame, exposed for
     // screen-space operations (the scissor lasso). Equals proj*view; its
@@ -93,6 +100,7 @@ private:
     };
 
     void uploadPending();
+    void uploadVolumeTexture();
     void buildToolbar();
     void positionToolbar();
     void drawGnomon(class QPainter& p);
@@ -102,10 +110,17 @@ private:
     QMatrix4x4 projMatrix() const;
 
     QOpenGLShaderProgram program_;
+    QOpenGLShaderProgram volumeProgram_;
     QOpenGLVertexArrayObject vao_;
+    QOpenGLVertexArrayObject volumeVao_;
     QOpenGLBuffer vbo_{QOpenGLBuffer::VertexBuffer};
     QOpenGLBuffer ibo_{QOpenGLBuffer::IndexBuffer};
+    QOpenGLBuffer volumeVbo_{QOpenGLBuffer::VertexBuffer};
+    QOpenGLBuffer volumeIbo_{QOpenGLBuffer::IndexBuffer};
+    QOpenGLTexture volumeTexture_{QOpenGLTexture::Target3D};
     bool glReady_ = false;
+    bool volumeTexturePending_ = false;
+    bool volumeRendering_ = false;
 
     // Concatenated CPU-side buffers (setMeshes may run before the context exists).
     std::vector<float> pendingInterleaved_;
@@ -115,6 +130,10 @@ private:
 
     std::vector<DrawRange> ranges_;
     int totalIndices_ = 0;
+
+    std::vector<unsigned char> pendingVolume_;
+    int volumeWidth_ = 0, volumeHeight_ = 0, volumeDepth_ = 0;
+    float volumeSpacing_[3] = {1, 1, 1};
 
     // Camera: orbit rotation (world -> view) + distance, orbiting the mesh centre.
     float center_[3] = {0, 0, 0};
