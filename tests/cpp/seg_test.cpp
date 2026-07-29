@@ -5,6 +5,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
 #include <map>
 #include <memory>
 #include <utility>
@@ -234,9 +235,11 @@ static void test_stl() {
     Mesh mesh;
     const int tris = marching_cubes(mask.data(), 12, 12, 12, 1, 1, 1, 0, 1, mesh);
 
-    const char* path = "/tmp/lumenslice_segtest.stl";
-    CHECK(write_binary_stl(mesh, path) == 0, "STL writes OK");
-    std::FILE* fp = std::fopen(path, "rb");
+    const std::filesystem::path path =
+        std::filesystem::temp_directory_path() / "lumenslice_segtest.stl";
+    const std::string path_string = path.string();
+    CHECK(write_binary_stl(mesh, path_string.c_str()) == 0, "STL writes OK");
+    std::FILE* fp = std::fopen(path_string.c_str(), "rb");
     CHECK(fp != nullptr, "STL file exists");
     if (fp != nullptr) {
         std::fseek(fp, 0, SEEK_END);
@@ -244,6 +247,8 @@ static void test_stl() {
         std::fclose(fp);
         CHECK(size == 84 + 50L * tris, "STL size == 84 + 50 * triangles");
     }
+    std::error_code cleanup_error;
+    std::filesystem::remove(path, cleanup_error);
     CHECK(write_binary_stl(mesh, "/no/such/dir/x.stl") != 0, "bad path errors");
 }
 
