@@ -9,6 +9,7 @@
 
 #include <QImage>
 #include <QPoint>
+#include <QPointF>
 #include <QRect>
 #include <QWidget>
 
@@ -22,6 +23,8 @@ public:
     SliceView(int axis, ViewState* state, QWidget* parent = nullptr);
 
     int axis() const { return axis_; }
+    // Reset zoom/pan back to fit-to-pane (e.g. when a new volume loads).
+    void resetZoom();
 
 signals:
     // Mouse wheel changed this axis' slice index (already clamped).
@@ -53,7 +56,10 @@ protected:
     void leaveEvent(QEvent*) override;
 
 private:
-    // Geometry of the drawn slice image inside the widget (aspect-preserving).
+    // Aspect-preserving fit rect for the slice image (zoom-independent base).
+    QRect baseRect(int imgW, int imgH) const;
+    // The base rect after applying this pane's zoom + pan — the rect actually
+    // drawn into and hit-tested against.
     QRect imageRect(int imgW, int imgH) const;
     // Map a widget point to a slice-pixel (returns false if outside the image).
     bool widgetToPixel(const QPoint& p, int imgW, int imgH, int* px, int* py) const;
@@ -62,8 +68,12 @@ private:
     ViewState* st_;
 
     // Drag bookkeeping.
-    enum class Drag { None, WindowLevel, Brush } drag_ = Drag::None;
+    enum class Drag { None, WindowLevel, Brush, Pan } drag_ = Drag::None;
     QPoint dragStart_;
+
+    // Per-pane zoom (>= 1 = fit) about the cursor, and pan offset in widget pixels.
+    double zoom_ = 1.0;
+    QPointF panPx_{0.0, 0.0};
     int lastImgW_ = 0, lastImgH_ = 0;  // cached from the last paint for hit-testing
     bool hovering_ = false;
     QPoint hoverPos_;

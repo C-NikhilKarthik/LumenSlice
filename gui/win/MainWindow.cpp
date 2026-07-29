@@ -991,6 +991,8 @@ void MainWindow::onLoadReady() {
     st_.focus[2] = d / 2;
     for (int axis = 0; axis < 3; ++axis)
         st_.sliceIndex[axis] = lumen_slice_count(v, axis) / 2;
+    for (SliceView* pane : panes_)
+        if (pane) pane->resetZoom();  // start each pane fit-to-view
 
     // Metadata JSON (two-call: size, then fill).
     metaJson_.clear();

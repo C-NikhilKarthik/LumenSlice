@@ -44,7 +44,7 @@ SliceView::SliceView(int axis, ViewState* state, QWidget* parent)
     setFocusPolicy(Qt::StrongFocus);
 }
 
-QRect SliceView::imageRect(int imgW, int imgH) const {
+QRect SliceView::baseRect(int imgW, int imgH) const {
     LumenVolume* v = st_->volume;
     float sx = 1, sy = 1, sz = 1;
     if (v) lumen_spacing(v, &sx, &sy, &sz);
@@ -68,6 +68,24 @@ QRect SliceView::imageRect(int imgW, int imgH) const {
     const int x = 4 + int((availW - rw) / 2.0);
     const int y = kTitleH + 4 + int((availH - rh) / 2.0);
     return QRect(x, y, int(rw), int(rh));
+}
+
+// The base fit rect scaled by this pane's zoom about its centre, then panned.
+QRect SliceView::imageRect(int imgW, int imgH) const {
+    const QRect base = baseRect(imgW, imgH);
+    if (!base.isValid()) return base;
+    const double zw = base.width() * zoom_;
+    const double zh = base.height() * zoom_;
+    const QPointF c = base.center();
+    const double x = c.x() - zw / 2.0 + panPx_.x();
+    const double y = c.y() - zh / 2.0 + panPx_.y();
+    return QRect(int(x), int(y), int(zw), int(zh));
+}
+
+void SliceView::resetZoom() {
+    zoom_ = 1.0;
+    panPx_ = QPointF(0, 0);
+    update();
 }
 
 bool SliceView::widgetToPixel(const QPoint& p, int imgW, int imgH, int* px,
@@ -277,6 +295,32 @@ void SliceView::paintEvent(QPaintEvent*) {
 void SliceView::wheelEvent(QWheelEvent* e) {
     LumenVolume* v = st_->volume;
     if (!v) return;
+
+    // Ctrl + wheel = zoom about the cursor; plain wheel scrolls slices. Factors
+    // 0.8 / 1.25 are reciprocal so zoom in then out round-trips exactly.
+    if (e->modifiers() & Qt::ControlModifier) {
+        const QRect r0 = imageRect(lastImgW_, lastImgH_);
+        if (r0.isValid() && r0.width() > 0 && r0.height() > 0) {
+            const QPointF m = e->position();
+            const double fx = (m.x() - r0.left()) / r0.width();
+            const double fy = (m.y() - r0.top()) / r0.height();
+            const double factor = (e->angleDelta().y() > 0) ? 1.25 : 0.8;
+            const double newZoom = std::clamp(zoom_ * factor, 1.0, 8.0);
+            const QRect base = baseRect(lastImgW_, lastImgH_);
+            const QPointF c = base.center();
+            const double zw = base.width() * newZoom;
+            const double zh = base.height() * newZoom;
+            zoom_ = newZoom;
+            // Keep the image fraction under the cursor fixed on screen.
+            panPx_.setX((m.x() - fx * zw) - (c.x() - zw / 2.0));
+            panPx_.setY((m.y() - fy * zh) - (c.y() - zh / 2.0));
+            if (zoom_ <= 1.0001) panPx_ = QPointF(0, 0);  // snap back to fit
+            update();
+        }
+        e->accept();
+        return;
+    }
+
     const int count = lumen_slice_count(v, axis_);
     if (count <= 0) return;
     const int step = (e->angleDelta().y() > 0) ? -1 : 1;
@@ -291,6 +335,12 @@ void SliceView::mousePressEvent(QMouseEvent* e) {
     const int index = st_->sliceIndex[axis_];
     dragStart_ = e->pos();
     shiftArmed_ = false;  // disarm crosshair-follow until a fresh plain move
+
+    // Alt + left-drag pans the zoomed image.
+    if (e->button() == Qt::LeftButton && (e->modifiers() & Qt::AltModifier)) {
+        drag_ = Drag::Pan;
+        return;
+    }
 
     const bool focusChord =
         (e->button() == Qt::MiddleButton) ||
@@ -383,6 +433,14 @@ void SliceView::mouseMoveEvent(QMouseEvent* e) {
     }
     LumenVolume* v = st_->volume;
     if (!v) return;
+
+    if (drag_ == Drag::Pan) {
+        const QPoint d = e->pos() - dragStart_;
+        dragStart_ = e->pos();
+        panPx_ += QPointF(d);
+        update();
+        return;
+    }
 
     if (drag_ == Drag::WindowLevel) {
         const QPoint d = e->pos() - dragStart_;
