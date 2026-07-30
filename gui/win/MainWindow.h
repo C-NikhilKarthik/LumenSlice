@@ -56,6 +56,7 @@ public:
 protected:
     void dragEnterEvent(QDragEnterEvent*) override;
     void dropEvent(QDropEvent*) override;
+    void resizeEvent(QResizeEvent*) override;
 
 private slots:
     void openFolder();
@@ -133,6 +134,8 @@ private:
     void updateUndoRedo();
     void updateWlControls();
     void setStatus(const QString& text);
+    void showBusy(const QString& text);  // empty text hides the busy overlay
+    void positionBusy();
     void showMetadataInspector();
     QColor nextSegmentColor() const;
 
@@ -148,6 +151,8 @@ private:
     SliceView* panes_[3] = {nullptr, nullptr, nullptr};
     QSlider* sliders_[3] = {nullptr, nullptr, nullptr};
     MeshView* meshView_ = nullptr;
+    QWidget* quadBoard_ = nullptr;
+    QLabel* loadingOverlay_ = nullptr;
 
     // Panels.
     QStackedWidget* panels_ = nullptr;
@@ -161,8 +166,7 @@ private:
     QLabel* patientLabel_ = nullptr;
     QDoubleSpinBox* levelSpin_ = nullptr;
     QDoubleSpinBox* windowSpin_ = nullptr;
-    QSlider* levelSlider_ = nullptr;
-    QSlider* windowSlider_ = nullptr;
+    RangeSlider* wlRange_ = nullptr;
     QCheckBox* crosshairCheck_ = nullptr;
 
     // Segment controls.
@@ -227,6 +231,7 @@ private:
     // Mesh generation (off-thread, per-segment colored surfaces).
     QFutureWatcher<int> meshWatcher_;
     bool generating_ = false;
+    bool autoMesh3D_ = false;  // opt-in: rebuild surface after each edit
     QTimer meshRefreshTimer_;
     bool meshRefreshPending_ = false;
     QElapsedTimer paintRefreshClock_;

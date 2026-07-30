@@ -16,6 +16,9 @@
 #include <QFormLayout>
 #include <QGridLayout>
 #include <QGroupBox>
+#include <QIcon>
+#include <QPainter>
+#include <QPixmap>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QJsonArray>
@@ -50,7 +53,7 @@
 namespace lumenwin {
 
 namespace {
-constexpr int kPanelWidth = 340;
+constexpr int kPanelWidth = 366;
 
 // Distinct default segment colours, cycled as segments are added.
 const QColor kPalette[] = {
@@ -77,6 +80,24 @@ void finishPanel(QScrollArea* scroll, QWidget* page) {
 }
 QVBoxLayout* body(QGroupBox* box) {
     return qobject_cast<QVBoxLayout*>(box->layout());
+}
+
+// Render a text glyph into a crisp QIcon so rail/toolbar buttons show a proper
+// sized icon rather than tiny inline text.
+QIcon glyphIcon(const QString& glyph, int px, QColor color) {
+    const int s = px + 8;
+    QPixmap pm(s, s);
+    pm.fill(Qt::transparent);
+    QPainter p(&pm);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    p.setRenderHint(QPainter::TextAntialiasing, true);
+    QFont f = p.font();
+    f.setPixelSize(px);
+    p.setFont(f);
+    p.setPen(color);
+    p.drawText(pm.rect(), Qt::AlignCenter, glyph);
+    p.end();
+    return QIcon(pm);
 }
 
 // Make a segment name safe to use as a filename stem.
@@ -148,10 +169,10 @@ MainWindow::MainWindow() {
 // ---------------------------------------------------------------------------
 QWidget* MainWindow::buildTabRail() {
     auto* rail = new QWidget;
-    rail->setFixedWidth(72);
+    rail->setFixedWidth(84);
     rail->setStyleSheet("background:#141519;");
     auto* v = new QVBoxLayout(rail);
-    v->setContentsMargins(10, 14, 10, 14);
+    v->setContentsMargins(12, 14, 12, 14);
     v->setSpacing(8);
 
     struct R { const char* glyph; const char* label; };
@@ -160,11 +181,15 @@ QWidget* MainWindow::buildTabRail() {
     auto* group = new QButtonGroup(this);
     for (int i = 0; i < 5; ++i) {
         auto* b = new QToolButton;
-        b->setText(QString("%1\n%2").arg(items[i].glyph, items[i].label));
+        b->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+        b->setIcon(glyphIcon(items[i].glyph, 30, QColor(0xe9, 0xec, 0xf3)));
+        b->setIconSize(QSize(30, 30));
+        b->setText(items[i].label);
         b->setCheckable(true);
-        b->setFixedSize(52, 52);
+        b->setFixedSize(60, 62);
         b->setStyleSheet(
-            "QToolButton{color:#a7adba;border:none;border-radius:12px;font-size:11px;}"
+            "QToolButton{color:#a7adba;border:none;border-radius:12px;font-size:12px;"
+            "padding-top:4px;}"
             "QToolButton:hover{background:#22252d;color:#e7e9ef;}"
             "QToolButton:checked{background:#4f7cf0;color:white;}");
         group->addButton(b, i);
@@ -219,29 +244,28 @@ QWidget* MainWindow::buildVisualizePanel() {
     v->addWidget(metaBox);
 
     auto* wlBox = section("Window / Level (HU)");
-    body(wlBox)->addWidget(
-        new QLabel("Drag on a slice to adjust, or set exact values here."));
+    body(wlBox)->addWidget(new QLabel(
+        "Drag the two handles to set the visible HU window (low … high), drag on "
+        "a slice, or type exact Level / Window values."));
     levelSpin_ = new QDoubleSpinBox;
     levelSpin_->setRange(-4000, 4000);
     levelSpin_->setDecimals(0);
     windowSpin_ = new QDoubleSpinBox;
     windowSpin_->setRange(1, 8000);
     windowSpin_->setDecimals(0);
-    levelSlider_ = new QSlider(Qt::Horizontal);
-    levelSlider_->setRange(-4000, 4000);
-    windowSlider_ = new QSlider(Qt::Horizontal);
-    windowSlider_->setRange(1, 8000);
 
-    auto* levelRow = new QHBoxLayout;
-    levelRow->addWidget(new QLabel("Level"));
-    levelRow->addWidget(levelSpin_);
-    body(wlBox)->addLayout(levelRow);
-    body(wlBox)->addWidget(levelSlider_);
-    auto* windowRow = new QHBoxLayout;
-    windowRow->addWidget(new QLabel("Window"));
-    windowRow->addWidget(windowSpin_);
-    body(wlBox)->addLayout(windowRow);
-    body(wlBox)->addWidget(windowSlider_);
+    auto* spinRow = new QHBoxLayout;
+    spinRow->addWidget(new QLabel("Level"));
+    spinRow->addWidget(levelSpin_);
+    spinRow->addWidget(new QLabel("Window"));
+    spinRow->addWidget(windowSpin_);
+    body(wlBox)->addLayout(spinRow);
+
+    // Combined two-thumb HU window slider: low..high maps to level=(lo+hi)/2,
+    // window=hi-lo.
+    wlRange_ = new RangeSlider;
+    wlRange_->setBounds(-1024, 3072);
+    body(wlBox)->addWidget(wlRange_);
 
     auto setWL = [this](float lvl, float win) {
         st_.level = std::clamp(lvl, -4000.0f, 4000.0f);
@@ -253,10 +277,15 @@ QWidget* MainWindow::buildVisualizePanel() {
             [this, setWL](double d) { setWL(float(d), st_.window); });
     connect(windowSpin_, &QDoubleSpinBox::valueChanged, this,
             [this, setWL](double d) { setWL(st_.level, float(d)); });
-    connect(levelSlider_, &QSlider::valueChanged, this,
-            [this, setWL](int i) { setWL(float(i), st_.window); });
-    connect(windowSlider_, &QSlider::valueChanged, this,
-            [this, setWL](int i) { setWL(st_.level, float(i)); });
+    connect(wlRange_, &RangeSlider::rangeChanged, this,
+            [this](double lo, double hi) {
+                st_.level = float((lo + hi) / 2.0);
+                st_.window = std::max(1.0f, float(hi - lo));
+                QSignalBlocker b1(levelSpin_), b2(windowSpin_);
+                levelSpin_->setValue(st_.level);
+                windowSpin_->setValue(st_.window);
+                refreshCanvas();
+            });
 
     auto* presets = new QHBoxLayout;
     struct P { const char* name; float l, w; };
@@ -585,6 +614,14 @@ QWidget* MainWindow::buildThreeDPanel() {
     connect(generateBtn_, &QPushButton::clicked, this,
             &MainWindow::generateMesh);
     v->addWidget(generateBtn_);
+
+    auto* autoMeshCheck = new QCheckBox("Live-update 3D on edits");
+    autoMeshCheck->setToolTip(
+        "Rebuild the surface automatically after each segmentation edit. Off by "
+        "default — it can be slow on large scans.");
+    connect(autoMeshCheck, &QCheckBox::toggled, this,
+            [this](bool on) { autoMesh3D_ = on; });
+    v->addWidget(autoMeshCheck);
 
     auto* meshBox = section("Mesh");
     meshInfoLabel_ = new QLabel("No surface yet.");
@@ -935,7 +972,41 @@ QWidget* MainWindow::buildQuad() {
     quadLayout_->setRowStretch(1, 1);
     quadLayout_->setColumnStretch(0, 1);
     quadLayout_->setColumnStretch(1, 1);
+
+    // Centered "busy" overlay for long operations (folder load / mesh generate).
+    quadBoard_ = board;
+    loadingOverlay_ = new QLabel(board);
+    loadingOverlay_->setAlignment(Qt::AlignCenter);
+    loadingOverlay_->setStyleSheet(
+        "background:rgba(16,18,24,225);color:#e7e9ef;border:1px solid #3a4150;"
+        "border-radius:14px;padding:18px 30px;font-size:15px;font-weight:600;");
+    loadingOverlay_->hide();
     return board;
+}
+
+void MainWindow::showBusy(const QString& text) {
+    if (!loadingOverlay_) return;
+    if (text.isEmpty()) {
+        loadingOverlay_->hide();
+        return;
+    }
+    loadingOverlay_->setText(text);
+    loadingOverlay_->adjustSize();
+    positionBusy();
+    loadingOverlay_->show();
+    loadingOverlay_->raise();
+}
+
+void MainWindow::positionBusy() {
+    if (!loadingOverlay_ || !quadBoard_ || loadingOverlay_->isHidden()) return;
+    const QSize s = loadingOverlay_->size();
+    loadingOverlay_->move((quadBoard_->width() - s.width()) / 2,
+                          (quadBoard_->height() - s.height()) / 2);
+}
+
+void MainWindow::resizeEvent(QResizeEvent* e) {
+    QMainWindow::resizeEvent(e);
+    positionBusy();
 }
 
 // Double-click maximizes a cell (hides the other three); double-click again
@@ -975,6 +1046,7 @@ void MainWindow::loadPath(const QString& path) {
     if (loading_) return;
     loading_ = true;
     setStatus(QString("Loading %1 …").arg(path));
+    showBusy("Loading DICOM…");
     // Ingestion (recursive crawl + decode) runs off the UI thread so a large
     // series never freezes the window; the volume is adopted back on the UI thread.
     loadWatcher_.setFuture(QtConcurrent::run([path]() -> LoadResult {
@@ -987,6 +1059,7 @@ void MainWindow::loadPath(const QString& path) {
 
 void MainWindow::onLoadReady() {
     loading_ = false;
+    showBusy("");
     const LoadResult r = loadWatcher_.result();
     if (!r.volume) {
         setStatus(QString("Could not load: %1").arg(r.message));
@@ -1342,13 +1415,18 @@ void MainWindow::generateMesh() {
     generateBtn_->setEnabled(false);
     generateBtn_->setText("Generating…");
     exportStlBtn_->setEnabled(false);
+    showBusy("Generating 3D surface…");
     meshPieces_.clear();
     pendingSegIndex_ = 0;
     startNextMeshSegment();
 }
 
 void MainWindow::scheduleMeshRefresh() {
-    if (!st_.volume) return;
+    // Auto-regenerating the surface after every edit means a full marching-cubes
+    // pass (on a real CT, seconds of work) on each paint stroke or threshold tick,
+    // which quickly makes the app crawl. Only do it when the user opted in AND a
+    // surface already exists; otherwise the 3D view updates on an explicit Generate.
+    if (!st_.volume || !autoMesh3D_ || !meshView_ || !meshView_->hasMesh()) return;
     meshRefreshPending_ = true;
     meshRefreshTimer_.start();
 }
@@ -1409,6 +1487,7 @@ void MainWindow::onMeshReady() {
 
 void MainWindow::finishMeshGeneration() {
     generating_ = false;
+    showBusy("");
     generateBtn_->setText("Generate / Update 3D");
     long tris = 0, verts = 0;
     for (const auto& p : meshPieces_) {
@@ -1603,6 +1682,10 @@ void MainWindow::refreshVolumeInfo() {
     lumen_hu_range(v, &lo, &hi);
     huLabel_->setText(QString("%1 … %2").arg(lo, 0, 'f', 0).arg(hi, 0, 'f', 0));
     if (threshSlider_) threshSlider_->setBounds(lo, hi);
+    if (wlRange_) {
+        wlRange_->setBounds(lo, hi);
+        updateWlControls();  // reflect current level/window on the new bounds
+    }
 
     // Curated patient/study summary from the meta JSON.
     QStringList lines;
@@ -1784,12 +1867,12 @@ void MainWindow::updateUndoRedo() {
 }
 
 void MainWindow::updateWlControls() {
-    const QSignalBlocker b1(levelSpin_), b2(windowSpin_), b3(levelSlider_),
-        b4(windowSlider_);
+    const QSignalBlocker b1(levelSpin_), b2(windowSpin_), b3(wlRange_);
     levelSpin_->setValue(st_.level);
     windowSpin_->setValue(st_.window);
-    levelSlider_->setValue(int(st_.level));
-    windowSlider_->setValue(int(st_.window));
+    if (wlRange_)
+        wlRange_->setValues(st_.level - st_.window / 2.0,
+                            st_.level + st_.window / 2.0);
 }
 
 void MainWindow::setStatus(const QString& text) {

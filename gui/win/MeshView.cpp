@@ -141,8 +141,8 @@ void MeshView::buildToolbar() {
         b->setText(text);
         b->setToolTip(tip);
         b->setStyleSheet(
-            "QToolButton{color:#e2e4ea;padding:3px 8px;border:none;font-size:13px;}"
-            "QToolButton:hover{background:rgba(255,255,255,32);border-radius:4px;}"
+            "QToolButton{color:#e6e8ee;padding:5px 10px;border:none;font-size:16px;}"
+            "QToolButton:hover{background:rgba(255,255,255,32);border-radius:5px;}"
             "QToolButton::menu-indicator{image:none;}");
         h->addWidget(b);
         return b;
