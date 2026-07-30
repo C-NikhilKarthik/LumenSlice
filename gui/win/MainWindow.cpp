@@ -627,7 +627,7 @@ QWidget* MainWindow::buildThreeDPanel() {
     smoothRow->addWidget(new QLabel("Smoothing"));
     smoothingSpin_ = new QSpinBox;
     smoothingSpin_->setRange(0, 5);
-    smoothingSpin_->setValue(1);
+    smoothingSpin_->setValue(2);  // smoother default surface (less voxel-blocky)
     smoothRow->addWidget(smoothingSpin_);
     body(qualBox)->addLayout(smoothRow);
     auto* resRow = new QHBoxLayout;
@@ -1448,12 +1448,12 @@ int MainWindow::effectiveDownsample() const {
     // safety floor on labelled voxels — a small/medium segment renders at the user's
     // chosen resolution (Full by default), and only a genuinely huge segmentation is
     // coarsened to avoid an out-of-memory mesh.
+    // Only override the user's choice for a pathologically huge segmentation
+    // (nearly the whole scan) to avoid an out-of-memory mesh; any normal segment
+    // renders at the chosen resolution (Full = highest quality).
     if (st_.volume) {
         const long labelled = lumen_seg_count(st_.volume);
-        if (labelled > 300'000'000L)
-            down = std::max(down, 3);
-        else if (labelled > 120'000'000L)
-            down = std::max(down, 2);
+        if (labelled > 350'000'000L) down = std::max(down, 2);
     }
     return std::max(1, down);
 }

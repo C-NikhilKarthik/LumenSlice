@@ -186,6 +186,9 @@ void MeshView::buildToolbar() {
         emit scissorModeChanged(on);
     });
 
+    connect(mk("⛶", "Maximize / restore this view"), &QToolButton::clicked, this,
+            [this] { emit doubleClicked(); });
+
     toolbar_->adjustSize();
 }
 

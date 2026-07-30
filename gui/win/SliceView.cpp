@@ -71,8 +71,10 @@ void SliceView::buildZoomBar() {
             [this] { zoomStep(1.25); });
     connect(mk("−", "Zoom out"), &QToolButton::clicked, this,
             [this] { zoomStep(0.8); });
-    connect(mk("⤢", "Reset zoom"), &QToolButton::clicked, this,
+    connect(mk("⟲", "Reset zoom"), &QToolButton::clicked, this,
             &SliceView::resetZoom);
+    connect(mk("⛶", "Maximize / restore this view"), &QToolButton::clicked, this,
+            [this] { emit doubleClicked(); });
     zoomBar_->adjustSize();
 }
 
