@@ -158,6 +158,10 @@ MainWindow::MainWindow() {
     meshRefreshTimer_.setInterval(180);
     connect(&meshRefreshTimer_, &QTimer::timeout, this,
             &MainWindow::onAutoMeshRefresh);
+    countsTimer_.setSingleShot(true);
+    countsTimer_.setInterval(160);
+    connect(&countsTimer_, &QTimer::timeout, this,
+            &MainWindow::recomputeSegmentCounts);
 
     selectTab(0);
     refreshAll();
@@ -1421,6 +1425,23 @@ void MainWindow::generateMesh() {
     startNextMeshSegment();
 }
 
+int MainWindow::effectiveDownsample() const {
+    int down = resolutionCombo_ ? resolutionCombo_->currentData().toInt() : 1;
+    if (st_.volume) {
+        int w = 0, h = 0, d = 0;
+        lumen_dims(st_.volume, &w, &h, &d);
+        const double voxels = double(w) * h * d;
+        // Marching cubes at full resolution on a huge scan produces an enormous
+        // mesh (millions of triangles) that can exhaust memory; floor the coarsening
+        // by volume size so a large series still surfaces without crashing.
+        if (voxels > 150e6)
+            down = std::max(down, 3);
+        else if (voxels > 40e6)
+            down = std::max(down, 2);
+    }
+    return std::max(1, down);
+}
+
 void MainWindow::scheduleMeshRefresh() {
     // Auto-regenerating the surface after every edit means a full marching-cubes
     // pass (on a real CT, seconds of work) on each paint stroke or threshold tick,
@@ -1447,7 +1468,7 @@ void MainWindow::startNextMeshSegment() {
     const int id = pendingSegIds_[pendingSegIndex_];
     lumen_mesh_snapshot_label(v, id);  // UI thread: copy just this segment's mask
     const int smooth = smoothingSpin_->value();
-    const int down = resolutionCombo_->currentData().toInt();
+    const int down = effectiveDownsample();
     // Marching cubes on a worker thread (touches only the snapshot + mesh).
     meshWatcher_.setFuture(QtConcurrent::run(
         [v, smooth, down] { return lumen_mesh_generate(v, smooth, down); }));
@@ -1562,7 +1583,7 @@ void MainWindow::exportStl() {
     }
 
     const int smooth = smoothingSpin_->value();
-    const int down = resolutionCombo_->currentData().toInt();
+    const int down = effectiveDownsample();
 
     if (oneFilePerSegCheck_->isChecked()) {
         // One STL per segment into a chosen directory.
@@ -1801,6 +1822,13 @@ void MainWindow::rebuildSegmentList() {
 }
 
 void MainWindow::updateSegmentCounts() {
+    // The per-label histogram is a full-volume scan (~0.9 s on a 465M-voxel CT).
+    // Running it synchronously after every edit froze the UI; coalesce rapid edits
+    // and recompute once they settle.
+    countsTimer_.start();
+}
+
+void MainWindow::recomputeSegmentCounts() {
     LumenVolume* v = st_.volume;
     if (!v) {
         if (totalVoxelsLabel_) totalVoxelsLabel_->setText("Total voxels: 0");

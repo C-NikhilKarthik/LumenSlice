@@ -118,6 +118,7 @@ private:
     // generate -> readback per visible non-empty segment, worker off the UI thread).
     void startNextMeshSegment();
     void finishMeshGeneration();
+    int effectiveDownsample() const;  // coarsen mesh on very large volumes
     void scheduleMeshRefresh();
 
     // Refresh helpers.
@@ -130,7 +131,8 @@ private:
     void refreshVolumeTexture();
     void rebuildSegmentList();
     void rebuildExportSegmentList();
-    void updateSegmentCounts();
+    void updateSegmentCounts();      // debounced: schedules recompute
+    void recomputeSegmentCounts();   // the actual full-volume histogram scan
     void updateUndoRedo();
     void updateWlControls();
     void setStatus(const QString& text);
@@ -234,6 +236,7 @@ private:
     bool autoMesh3D_ = false;  // opt-in: rebuild surface after each edit
     QTimer meshRefreshTimer_;
     bool meshRefreshPending_ = false;
+    QTimer countsTimer_;  // debounces the full-volume segment histogram
     QElapsedTimer paintRefreshClock_;
     bool brushStrokeActive_ = false;
     std::vector<int> pendingSegIds_;
