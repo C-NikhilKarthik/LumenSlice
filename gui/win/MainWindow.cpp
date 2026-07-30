@@ -178,6 +178,17 @@ MainWindow::MainWindow() {
         updateUndoRedo();
         scheduleMeshRefresh();
     });
+    // Throttle slice repaints while wheel-scrolling (see onSliceScrolled).
+    scrollThrottle_.setSingleShot(true);
+    scrollThrottle_.setInterval(55);
+    connect(&scrollThrottle_, &QTimer::timeout, this, [this] {
+        if (!scrollDirty_) return;
+        scrollDirty_ = false;
+        for (int i = 0; i < 3; ++i)
+            if (panes_[i] && panes_[i]->axis() == lastScrollAxis_)
+                panes_[i]->update();
+        scrollThrottle_.start();  // keep coalescing if more ticks arrive
+    });
 
     selectTab(0);
     refreshAll();
@@ -1161,15 +1172,23 @@ void MainWindow::selectTab(int tab) {
 
 void MainWindow::onSliceScrolled(int axis, int index) {
     st_.sliceIndex[axis] = index;
-    // Only the scrolled plane changed — repaint just that pane (repainting all
-    // three would re-extract the expensive coronal/sagittal reformats every tick
-    // and make wheel-scroll stutter on large volumes).
+    // Update the slider immediately (cheap). The repaint re-extracts the slice
+    // (a coronal/sagittal reformat is tens of ms, far worse under memory paging),
+    // so throttle it: at most one extraction per ~55 ms, dropping intermediate
+    // frames, so a fast wheel-scroll can't queue up extractions and freeze.
     for (int i = 0; i < 3; ++i)
         if (panes_[i] && panes_[i]->axis() == axis) {
             QSignalBlocker b(sliders_[i]);
             sliders_[i]->setValue(index);
-            panes_[i]->update();
         }
+    lastScrollAxis_ = axis;
+    if (scrollThrottle_.isActive()) {
+        scrollDirty_ = true;
+        return;
+    }
+    for (int i = 0; i < 3; ++i)
+        if (panes_[i] && panes_[i]->axis() == axis) panes_[i]->update();
+    scrollThrottle_.start();
 }
 
 void MainWindow::onWindowLevelDragged(float dLevel, float dWindow) {
@@ -1425,16 +1444,15 @@ void MainWindow::generateMesh() {
 
 int MainWindow::effectiveDownsample() const {
     int down = resolutionCombo_ ? resolutionCombo_->currentData().toInt() : 1;
+    // The mesh is built over the *labelled* region, not the whole scan, so base the
+    // safety floor on labelled voxels — a small/medium segment renders at the user's
+    // chosen resolution (Full by default), and only a genuinely huge segmentation is
+    // coarsened to avoid an out-of-memory mesh.
     if (st_.volume) {
-        int w = 0, h = 0, d = 0;
-        lumen_dims(st_.volume, &w, &h, &d);
-        const double voxels = double(w) * h * d;
-        // Marching cubes at full resolution on a huge scan produces an enormous
-        // mesh (millions of triangles) that can exhaust memory; floor the coarsening
-        // by volume size so a large series still surfaces without crashing.
-        if (voxels > 150e6)
+        const long labelled = lumen_seg_count(st_.volume);
+        if (labelled > 300'000'000L)
             down = std::max(down, 3);
-        else if (voxels > 40e6)
+        else if (labelled > 120'000'000L)
             down = std::max(down, 2);
     }
     return std::max(1, down);

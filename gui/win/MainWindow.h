@@ -243,6 +243,9 @@ private:
     bool meshRefreshPending_ = false;
     QTimer countsTimer_;  // debounces the full-volume segment histogram
     QFutureWatcher<void> heavyWatcher_;  // async mask ops (grow-from-seeds, refine)
+    QTimer scrollThrottle_;  // caps slice re-extraction rate during wheel-scroll
+    int lastScrollAxis_ = -1;
+    bool scrollDirty_ = false;
     QElapsedTimer paintRefreshClock_;
     bool brushStrokeActive_ = false;
     std::vector<int> pendingSegIds_;
