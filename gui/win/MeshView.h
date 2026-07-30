@@ -78,7 +78,9 @@ public:
 signals:
     // A lasso was closed (>= 3 points); points are in widget pixels (y-down).
     void scissorFinished(const QList<QPointF>& poly);
-    void doubleClicked();  // toggle pane maximize
+    void doubleClicked();          // toggle pane maximize
+    void generateRequested();      // toolbar "Generate" pressed
+    void scissorModeChanged(bool on);  // toolbar scissor toggle changed
 
 public slots:
     void resetView();                    // reframe to bounds + default orientation
@@ -153,6 +155,7 @@ private:
 
     QMatrix4x4 lastMvp_;
     QWidget* toolbar_ = nullptr;
+    class QToolButton* scissorBtn_ = nullptr;
 
     // Scissor lasso.
     bool scissorMode_ = false;

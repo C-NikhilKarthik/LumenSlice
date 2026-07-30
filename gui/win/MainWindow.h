@@ -12,6 +12,7 @@
 #include <QPointF>
 #include <QTimer>
 #include <QString>
+#include <functional>
 #include <vector>
 
 #include "BridgeVolume.h"
@@ -56,6 +57,7 @@ public:
 protected:
     void dragEnterEvent(QDragEnterEvent*) override;
     void dropEvent(QDropEvent*) override;
+    void resizeEvent(QResizeEvent*) override;
 
 private slots:
     void openFolder();
@@ -117,6 +119,11 @@ private:
     // generate -> readback per visible non-empty segment, worker off the UI thread).
     void startNextMeshSegment();
     void finishMeshGeneration();
+    int effectiveDownsample() const;  // coarsen mesh on very large volumes
+    // Run a mask-mutating op on a worker thread with a busy overlay (snapshots undo
+    // first). Keeps heavy ops (grow-from-seeds, refine) from freezing the UI on
+    // large volumes.
+    void runMaskOp(const QString& busyText, std::function<void()> op);
     void scheduleMeshRefresh();
 
     // Refresh helpers.
@@ -129,10 +136,13 @@ private:
     void refreshVolumeTexture();
     void rebuildSegmentList();
     void rebuildExportSegmentList();
-    void updateSegmentCounts();
+    void updateSegmentCounts();      // debounced: schedules recompute
+    void recomputeSegmentCounts();   // the actual full-volume histogram scan
     void updateUndoRedo();
     void updateWlControls();
     void setStatus(const QString& text);
+    void showBusy(const QString& text);  // empty text hides the busy overlay
+    void positionBusy();
     void showMetadataInspector();
     QColor nextSegmentColor() const;
 
@@ -148,6 +158,8 @@ private:
     SliceView* panes_[3] = {nullptr, nullptr, nullptr};
     QSlider* sliders_[3] = {nullptr, nullptr, nullptr};
     MeshView* meshView_ = nullptr;
+    QWidget* quadBoard_ = nullptr;
+    QLabel* loadingOverlay_ = nullptr;
 
     // Panels.
     QStackedWidget* panels_ = nullptr;
@@ -161,8 +173,7 @@ private:
     QLabel* patientLabel_ = nullptr;
     QDoubleSpinBox* levelSpin_ = nullptr;
     QDoubleSpinBox* windowSpin_ = nullptr;
-    QSlider* levelSlider_ = nullptr;
-    QSlider* windowSlider_ = nullptr;
+    RangeSlider* wlRange_ = nullptr;
     QCheckBox* crosshairCheck_ = nullptr;
 
     // Segment controls.
@@ -227,8 +238,14 @@ private:
     // Mesh generation (off-thread, per-segment colored surfaces).
     QFutureWatcher<int> meshWatcher_;
     bool generating_ = false;
+    bool autoMesh3D_ = false;  // opt-in: rebuild surface after each edit
     QTimer meshRefreshTimer_;
     bool meshRefreshPending_ = false;
+    QTimer countsTimer_;  // debounces the full-volume segment histogram
+    QFutureWatcher<void> heavyWatcher_;  // async mask ops (grow-from-seeds, refine)
+    QTimer scrollThrottle_;  // caps slice re-extraction rate during wheel-scroll
+    int lastScrollAxis_ = -1;
+    bool scrollDirty_ = false;
     QElapsedTimer paintRefreshClock_;
     bool brushStrokeActive_ = false;
     std::vector<int> pendingSegIds_;

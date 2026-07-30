@@ -52,6 +52,10 @@ struct ViewState {
     bool markupPlacing = false;
     MarkupModel* markups = nullptr;   // borrowed, for slice-overlay drawing
 
+    // A heavy mask operation is running on a worker thread; slice views skip the
+    // segmentation-mask overlay so they don't read the mask while it is mutated.
+    bool busy = false;
+
     bool hasVolume() const { return volume != nullptr; }
 };
 

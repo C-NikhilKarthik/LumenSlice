@@ -16,6 +16,9 @@
 #include <QFormLayout>
 #include <QGridLayout>
 #include <QGroupBox>
+#include <QIcon>
+#include <QPainter>
+#include <QPixmap>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QJsonArray>
@@ -50,7 +53,7 @@
 namespace lumenwin {
 
 namespace {
-constexpr int kPanelWidth = 340;
+constexpr int kPanelWidth = 366;
 
 // Distinct default segment colours, cycled as segments are added.
 const QColor kPalette[] = {
@@ -77,6 +80,24 @@ void finishPanel(QScrollArea* scroll, QWidget* page) {
 }
 QVBoxLayout* body(QGroupBox* box) {
     return qobject_cast<QVBoxLayout*>(box->layout());
+}
+
+// Render a text glyph into a crisp QIcon so rail/toolbar buttons show a proper
+// sized icon rather than tiny inline text.
+QIcon glyphIcon(const QString& glyph, int px, QColor color) {
+    const int s = px + 8;
+    QPixmap pm(s, s);
+    pm.fill(Qt::transparent);
+    QPainter p(&pm);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    p.setRenderHint(QPainter::TextAntialiasing, true);
+    QFont f = p.font();
+    f.setPixelSize(px);
+    p.setFont(f);
+    p.setPen(color);
+    p.drawText(pm.rect(), Qt::AlignCenter, glyph);
+    p.end();
+    return QIcon(pm);
 }
 
 // Make a segment name safe to use as a filename stem.
@@ -133,10 +154,41 @@ MainWindow::MainWindow() {
             &MainWindow::onLoadReady);
     connect(meshView_, &MeshView::scissorFinished, this,
             &MainWindow::onScissorFinished);
+    connect(meshView_, &MeshView::generateRequested, this,
+            &MainWindow::generateMesh);
+    connect(meshView_, &MeshView::scissorModeChanged, this, [this](bool on) {
+        if (scissorModeCheck_ && scissorModeCheck_->isChecked() != on) {
+            QSignalBlocker b(scissorModeCheck_);
+            scissorModeCheck_->setChecked(on);
+        }
+    });
     meshRefreshTimer_.setSingleShot(true);
     meshRefreshTimer_.setInterval(180);
     connect(&meshRefreshTimer_, &QTimer::timeout, this,
             &MainWindow::onAutoMeshRefresh);
+    countsTimer_.setSingleShot(true);
+    countsTimer_.setInterval(160);
+    connect(&countsTimer_, &QTimer::timeout, this,
+            &MainWindow::recomputeSegmentCounts);
+    connect(&heavyWatcher_, &QFutureWatcher<void>::finished, this, [this] {
+        st_.busy = false;
+        showBusy("");
+        refreshCanvas();
+        updateSegmentCounts();
+        updateUndoRedo();
+        scheduleMeshRefresh();
+    });
+    // Throttle slice repaints while wheel-scrolling (see onSliceScrolled).
+    scrollThrottle_.setSingleShot(true);
+    scrollThrottle_.setInterval(55);
+    connect(&scrollThrottle_, &QTimer::timeout, this, [this] {
+        if (!scrollDirty_) return;
+        scrollDirty_ = false;
+        for (int i = 0; i < 3; ++i)
+            if (panes_[i] && panes_[i]->axis() == lastScrollAxis_)
+                panes_[i]->update();
+        scrollThrottle_.start();  // keep coalescing if more ticks arrive
+    });
 
     selectTab(0);
     refreshAll();
@@ -148,11 +200,11 @@ MainWindow::MainWindow() {
 // ---------------------------------------------------------------------------
 QWidget* MainWindow::buildTabRail() {
     auto* rail = new QWidget;
-    rail->setFixedWidth(72);
+    rail->setFixedWidth(92);
     rail->setStyleSheet("background:#141519;");
     auto* v = new QVBoxLayout(rail);
-    v->setContentsMargins(10, 14, 10, 14);
-    v->setSpacing(8);
+    v->setContentsMargins(12, 16, 12, 16);
+    v->setSpacing(10);
 
     struct R { const char* glyph; const char* label; };
     const R items[] = {{"◧", "View"}, {"✎", "Seg"}, {"◈", "3D"},
@@ -160,11 +212,15 @@ QWidget* MainWindow::buildTabRail() {
     auto* group = new QButtonGroup(this);
     for (int i = 0; i < 5; ++i) {
         auto* b = new QToolButton;
-        b->setText(QString("%1\n%2").arg(items[i].glyph, items[i].label));
+        b->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+        b->setIcon(glyphIcon(items[i].glyph, 36, QColor(0xe9, 0xec, 0xf3)));
+        b->setIconSize(QSize(36, 36));
+        b->setText(items[i].label);
         b->setCheckable(true);
-        b->setFixedSize(52, 52);
+        b->setFixedSize(68, 70);
         b->setStyleSheet(
-            "QToolButton{color:#a7adba;border:none;border-radius:12px;font-size:11px;}"
+            "QToolButton{color:#aeb4c1;border:none;border-radius:14px;font-size:12px;"
+            "padding-top:5px;}"
             "QToolButton:hover{background:#22252d;color:#e7e9ef;}"
             "QToolButton:checked{background:#4f7cf0;color:white;}");
         group->addButton(b, i);
@@ -219,29 +275,28 @@ QWidget* MainWindow::buildVisualizePanel() {
     v->addWidget(metaBox);
 
     auto* wlBox = section("Window / Level (HU)");
-    body(wlBox)->addWidget(
-        new QLabel("Drag on a slice to adjust, or set exact values here."));
+    body(wlBox)->addWidget(new QLabel(
+        "Drag the two handles to set the visible HU window (low … high), drag on "
+        "a slice, or type exact Level / Window values."));
     levelSpin_ = new QDoubleSpinBox;
     levelSpin_->setRange(-4000, 4000);
     levelSpin_->setDecimals(0);
     windowSpin_ = new QDoubleSpinBox;
     windowSpin_->setRange(1, 8000);
     windowSpin_->setDecimals(0);
-    levelSlider_ = new QSlider(Qt::Horizontal);
-    levelSlider_->setRange(-4000, 4000);
-    windowSlider_ = new QSlider(Qt::Horizontal);
-    windowSlider_->setRange(1, 8000);
 
-    auto* levelRow = new QHBoxLayout;
-    levelRow->addWidget(new QLabel("Level"));
-    levelRow->addWidget(levelSpin_);
-    body(wlBox)->addLayout(levelRow);
-    body(wlBox)->addWidget(levelSlider_);
-    auto* windowRow = new QHBoxLayout;
-    windowRow->addWidget(new QLabel("Window"));
-    windowRow->addWidget(windowSpin_);
-    body(wlBox)->addLayout(windowRow);
-    body(wlBox)->addWidget(windowSlider_);
+    auto* spinRow = new QHBoxLayout;
+    spinRow->addWidget(new QLabel("Level"));
+    spinRow->addWidget(levelSpin_);
+    spinRow->addWidget(new QLabel("Window"));
+    spinRow->addWidget(windowSpin_);
+    body(wlBox)->addLayout(spinRow);
+
+    // Combined two-thumb HU window slider: low..high maps to level=(lo+hi)/2,
+    // window=hi-lo.
+    wlRange_ = new RangeSlider;
+    wlRange_->setBounds(-1024, 3072);
+    body(wlBox)->addWidget(wlRange_);
 
     auto setWL = [this](float lvl, float win) {
         st_.level = std::clamp(lvl, -4000.0f, 4000.0f);
@@ -253,10 +308,15 @@ QWidget* MainWindow::buildVisualizePanel() {
             [this, setWL](double d) { setWL(float(d), st_.window); });
     connect(windowSpin_, &QDoubleSpinBox::valueChanged, this,
             [this, setWL](double d) { setWL(st_.level, float(d)); });
-    connect(levelSlider_, &QSlider::valueChanged, this,
-            [this, setWL](int i) { setWL(float(i), st_.window); });
-    connect(windowSlider_, &QSlider::valueChanged, this,
-            [this, setWL](int i) { setWL(st_.level, float(i)); });
+    connect(wlRange_, &RangeSlider::rangeChanged, this,
+            [this](double lo, double hi) {
+                st_.level = float((lo + hi) / 2.0);
+                st_.window = std::max(1.0f, float(hi - lo));
+                QSignalBlocker b1(levelSpin_), b2(windowSpin_);
+                levelSpin_->setValue(st_.level);
+                windowSpin_->setValue(st_.window);
+                refreshCanvas();
+            });
 
     auto* presets = new QHBoxLayout;
     struct P { const char* name; float l, w; };
@@ -567,7 +627,7 @@ QWidget* MainWindow::buildThreeDPanel() {
     smoothRow->addWidget(new QLabel("Smoothing"));
     smoothingSpin_ = new QSpinBox;
     smoothingSpin_->setRange(0, 5);
-    smoothingSpin_->setValue(1);
+    smoothingSpin_->setValue(2);  // smoother default surface (less voxel-blocky)
     smoothRow->addWidget(smoothingSpin_);
     body(qualBox)->addLayout(smoothRow);
     auto* resRow = new QHBoxLayout;
@@ -585,6 +645,14 @@ QWidget* MainWindow::buildThreeDPanel() {
     connect(generateBtn_, &QPushButton::clicked, this,
             &MainWindow::generateMesh);
     v->addWidget(generateBtn_);
+
+    auto* autoMeshCheck = new QCheckBox("Live-update 3D on edits");
+    autoMeshCheck->setToolTip(
+        "Rebuild the surface automatically after each segmentation edit. Off by "
+        "default — it can be slow on large scans.");
+    connect(autoMeshCheck, &QCheckBox::toggled, this,
+            [this](bool on) { autoMesh3D_ = on; });
+    v->addWidget(autoMeshCheck);
 
     auto* meshBox = section("Mesh");
     meshInfoLabel_ = new QLabel("No surface yet.");
@@ -935,7 +1003,41 @@ QWidget* MainWindow::buildQuad() {
     quadLayout_->setRowStretch(1, 1);
     quadLayout_->setColumnStretch(0, 1);
     quadLayout_->setColumnStretch(1, 1);
+
+    // Centered "busy" overlay for long operations (folder load / mesh generate).
+    quadBoard_ = board;
+    loadingOverlay_ = new QLabel(board);
+    loadingOverlay_->setAlignment(Qt::AlignCenter);
+    loadingOverlay_->setStyleSheet(
+        "background:rgba(16,18,24,225);color:#e7e9ef;border:1px solid #3a4150;"
+        "border-radius:14px;padding:18px 30px;font-size:15px;font-weight:600;");
+    loadingOverlay_->hide();
     return board;
+}
+
+void MainWindow::showBusy(const QString& text) {
+    if (!loadingOverlay_) return;
+    if (text.isEmpty()) {
+        loadingOverlay_->hide();
+        return;
+    }
+    loadingOverlay_->setText(text);
+    loadingOverlay_->adjustSize();
+    positionBusy();
+    loadingOverlay_->show();
+    loadingOverlay_->raise();
+}
+
+void MainWindow::positionBusy() {
+    if (!loadingOverlay_ || !quadBoard_ || loadingOverlay_->isHidden()) return;
+    const QSize s = loadingOverlay_->size();
+    loadingOverlay_->move((quadBoard_->width() - s.width()) / 2,
+                          (quadBoard_->height() - s.height()) / 2);
+}
+
+void MainWindow::resizeEvent(QResizeEvent* e) {
+    QMainWindow::resizeEvent(e);
+    positionBusy();
 }
 
 // Double-click maximizes a cell (hides the other three); double-click again
@@ -975,6 +1077,7 @@ void MainWindow::loadPath(const QString& path) {
     if (loading_) return;
     loading_ = true;
     setStatus(QString("Loading %1 …").arg(path));
+    showBusy("Loading DICOM…");
     // Ingestion (recursive crawl + decode) runs off the UI thread so a large
     // series never freezes the window; the volume is adopted back on the UI thread.
     loadWatcher_.setFuture(QtConcurrent::run([path]() -> LoadResult {
@@ -987,6 +1090,7 @@ void MainWindow::loadPath(const QString& path) {
 
 void MainWindow::onLoadReady() {
     loading_ = false;
+    showBusy("");
     const LoadResult r = loadWatcher_.result();
     if (!r.volume) {
         setStatus(QString("Could not load: %1").arg(r.message));
@@ -1068,12 +1172,23 @@ void MainWindow::selectTab(int tab) {
 
 void MainWindow::onSliceScrolled(int axis, int index) {
     st_.sliceIndex[axis] = index;
-    if (sliders_[0]) {
-        const int col = axis;  // axes are stored 0..2 in order
-        QSignalBlocker b(sliders_[col]);
-        sliders_[col]->setValue(index);
+    // Update the slider immediately (cheap). The repaint re-extracts the slice
+    // (a coronal/sagittal reformat is tens of ms, far worse under memory paging),
+    // so throttle it: at most one extraction per ~55 ms, dropping intermediate
+    // frames, so a fast wheel-scroll can't queue up extractions and freeze.
+    for (int i = 0; i < 3; ++i)
+        if (panes_[i] && panes_[i]->axis() == axis) {
+            QSignalBlocker b(sliders_[i]);
+            sliders_[i]->setValue(index);
+        }
+    lastScrollAxis_ = axis;
+    if (scrollThrottle_.isActive()) {
+        scrollDirty_ = true;
+        return;
     }
-    refreshCanvas();
+    for (int i = 0; i < 3; ++i)
+        if (panes_[i] && panes_[i]->axis() == axis) panes_[i]->update();
+    scrollThrottle_.start();
 }
 
 void MainWindow::onWindowLevelDragged(float dLevel, float dWindow) {
@@ -1200,92 +1315,71 @@ void MainWindow::applyThreshold() {
 void MainWindow::applyOtsu() {
     LumenVolume* v = st_.volume;
     if (!v || lumen_seg_active(v) == 0) return;
-    const float t = lumen_seg_otsu(v);
-    float lo = 0, hi = 0;
-    lumen_hu_range(v, &lo, &hi);
-    threshSlider_->setValues(t, hi);
-    threshLabel_->setText(
-        QString("Low %1  —  High %2 HU").arg(qRound(t)).arg(qRound(hi)));
+    // Otsu + threshold are both full-volume passes; run off the UI thread.
+    runMaskOp("Auto-threshold (Otsu)…", [v] {
+        const float t = lumen_seg_otsu(v);
+        float lo = 0, hi = 0;
+        lumen_hu_range(v, &lo, &hi);
+        lumen_seg_threshold(v, t, hi);
+    });
+}
+
+void MainWindow::runMaskOp(const QString& busyText, std::function<void()> op) {
+    LumenVolume* v = st_.volume;
+    if (!v || st_.busy || heavyWatcher_.isRunning()) return;
     lumen_seg_push_undo(v);
     updateUndoRedo();
-    applyThreshold();
+    st_.busy = true;
+    showBusy(busyText);
+    refreshCanvas();  // repaint hides the mask overlay (busy) before the mutation
+    QCoreApplication::processEvents();  // ensure the overlay is on screen
+    heavyWatcher_.setFuture(QtConcurrent::run(std::move(op)));
 }
 
 void MainWindow::refineGrow() {
     LumenVolume* v = st_.volume;
     if (!v || lumen_seg_active(v) == 0) return;
-    lumen_seg_push_undo(v);
-    lumen_seg_grow(v, 1);
-    updateUndoRedo();
-    refreshCanvas();
-    updateSegmentCounts();
-    scheduleMeshRefresh();
+    runMaskOp("Growing…", [v] { lumen_seg_grow(v, 1); });
 }
 
 void MainWindow::refineShrink() {
     LumenVolume* v = st_.volume;
     if (!v || lumen_seg_active(v) == 0) return;
-    lumen_seg_push_undo(v);
-    lumen_seg_shrink(v, 1);
-    updateUndoRedo();
-    refreshCanvas();
-    updateSegmentCounts();
-    scheduleMeshRefresh();
+    runMaskOp("Shrinking…", [v] { lumen_seg_shrink(v, 1); });
 }
 
 void MainWindow::refineHollow() {
     LumenVolume* v = st_.volume;
     if (!v || lumen_seg_active(v) == 0) return;
-    lumen_seg_push_undo(v);
-    lumen_seg_hollow(v, 1);
-    updateUndoRedo();
-    refreshCanvas();
-    updateSegmentCounts();
-    scheduleMeshRefresh();
+    runMaskOp("Hollowing…", [v] { lumen_seg_hollow(v, 1); });
 }
 
 void MainWindow::refineSmooth() {
     LumenVolume* v = st_.volume;
     if (!v || lumen_seg_active(v) == 0) return;
-    lumen_seg_push_undo(v);
-    lumen_seg_smooth(v, 1);
-    updateUndoRedo();
-    refreshCanvas();
-    updateSegmentCounts();
-    scheduleMeshRefresh();
+    runMaskOp("Smoothing…", [v] { lumen_seg_smooth(v, 1); });
 }
 
 void MainWindow::keepLargest() {
     LumenVolume* v = st_.volume;
     if (!v || lumen_seg_active(v) == 0) return;
-    lumen_seg_push_undo(v);
-    lumen_seg_keep_largest(v);
-    updateUndoRedo();
-    refreshCanvas();
-    updateSegmentCounts();
-    scheduleMeshRefresh();
+    runMaskOp("Keeping largest component…", [v] { lumen_seg_keep_largest(v); });
 }
 
 void MainWindow::removeSmallIslands() {
     LumenVolume* v = st_.volume;
     if (!v || lumen_seg_active(v) == 0 || !removeSmallSpin_) return;
-    lumen_seg_push_undo(v);
-    lumen_seg_remove_small(v, removeSmallSpin_->value());
-    updateUndoRedo();
-    refreshCanvas();
-    updateSegmentCounts();
-    scheduleMeshRefresh();
+    const long minV = removeSmallSpin_->value();
+    runMaskOp("Removing small islands…",
+              [v, minV] { lumen_seg_remove_small(v, minV); });
 }
 
 void MainWindow::growFromSeeds() {
     LumenVolume* v = st_.volume;
     if (!v) return;
-    lumen_seg_push_undo(v);
-    lumen_seg_grow_from_seeds(v, seedItersSlider_->value());
-    updateUndoRedo();
-    refreshCanvas();
-    updateSegmentCounts();
-    scheduleMeshRefresh();
+    const int iters = seedItersSlider_->value();
+    runMaskOp("Growing from seeds…",
+              [v, iters] { lumen_seg_grow_from_seeds(v, iters); });
 }
 
 void MainWindow::clearActive() {
@@ -1342,13 +1436,34 @@ void MainWindow::generateMesh() {
     generateBtn_->setEnabled(false);
     generateBtn_->setText("Generating…");
     exportStlBtn_->setEnabled(false);
+    showBusy("Generating 3D surface…");
     meshPieces_.clear();
     pendingSegIndex_ = 0;
     startNextMeshSegment();
 }
 
+int MainWindow::effectiveDownsample() const {
+    int down = resolutionCombo_ ? resolutionCombo_->currentData().toInt() : 1;
+    // The mesh is built over the *labelled* region, not the whole scan, so base the
+    // safety floor on labelled voxels — a small/medium segment renders at the user's
+    // chosen resolution (Full by default), and only a genuinely huge segmentation is
+    // coarsened to avoid an out-of-memory mesh.
+    // Only override the user's choice for a pathologically huge segmentation
+    // (nearly the whole scan) to avoid an out-of-memory mesh; any normal segment
+    // renders at the chosen resolution (Full = highest quality).
+    if (st_.volume) {
+        const long labelled = lumen_seg_count(st_.volume);
+        if (labelled > 350'000'000L) down = std::max(down, 2);
+    }
+    return std::max(1, down);
+}
+
 void MainWindow::scheduleMeshRefresh() {
-    if (!st_.volume) return;
+    // Auto-regenerating the surface after every edit means a full marching-cubes
+    // pass (on a real CT, seconds of work) on each paint stroke or threshold tick,
+    // which quickly makes the app crawl. Only do it when the user opted in AND a
+    // surface already exists; otherwise the 3D view updates on an explicit Generate.
+    if (!st_.volume || !autoMesh3D_ || !meshView_ || !meshView_->hasMesh()) return;
     meshRefreshPending_ = true;
     meshRefreshTimer_.start();
 }
@@ -1369,7 +1484,7 @@ void MainWindow::startNextMeshSegment() {
     const int id = pendingSegIds_[pendingSegIndex_];
     lumen_mesh_snapshot_label(v, id);  // UI thread: copy just this segment's mask
     const int smooth = smoothingSpin_->value();
-    const int down = resolutionCombo_->currentData().toInt();
+    const int down = effectiveDownsample();
     // Marching cubes on a worker thread (touches only the snapshot + mesh).
     meshWatcher_.setFuture(QtConcurrent::run(
         [v, smooth, down] { return lumen_mesh_generate(v, smooth, down); }));
@@ -1409,6 +1524,7 @@ void MainWindow::onMeshReady() {
 
 void MainWindow::finishMeshGeneration() {
     generating_ = false;
+    showBusy("");
     generateBtn_->setText("Generate / Update 3D");
     long tris = 0, verts = 0;
     for (const auto& p : meshPieces_) {
@@ -1483,7 +1599,7 @@ void MainWindow::exportStl() {
     }
 
     const int smooth = smoothingSpin_->value();
-    const int down = resolutionCombo_->currentData().toInt();
+    const int down = effectiveDownsample();
 
     if (oneFilePerSegCheck_->isChecked()) {
         // One STL per segment into a chosen directory.
@@ -1603,6 +1719,10 @@ void MainWindow::refreshVolumeInfo() {
     lumen_hu_range(v, &lo, &hi);
     huLabel_->setText(QString("%1 … %2").arg(lo, 0, 'f', 0).arg(hi, 0, 'f', 0));
     if (threshSlider_) threshSlider_->setBounds(lo, hi);
+    if (wlRange_) {
+        wlRange_->setBounds(lo, hi);
+        updateWlControls();  // reflect current level/window on the new bounds
+    }
 
     // Curated patient/study summary from the meta JSON.
     QStringList lines;
@@ -1718,6 +1838,13 @@ void MainWindow::rebuildSegmentList() {
 }
 
 void MainWindow::updateSegmentCounts() {
+    // The per-label histogram is a full-volume scan (~0.9 s on a 465M-voxel CT).
+    // Running it synchronously after every edit froze the UI; coalesce rapid edits
+    // and recompute once they settle.
+    countsTimer_.start();
+}
+
+void MainWindow::recomputeSegmentCounts() {
     LumenVolume* v = st_.volume;
     if (!v) {
         if (totalVoxelsLabel_) totalVoxelsLabel_->setText("Total voxels: 0");
@@ -1784,12 +1911,12 @@ void MainWindow::updateUndoRedo() {
 }
 
 void MainWindow::updateWlControls() {
-    const QSignalBlocker b1(levelSpin_), b2(windowSpin_), b3(levelSlider_),
-        b4(windowSlider_);
+    const QSignalBlocker b1(levelSpin_), b2(windowSpin_), b3(wlRange_);
     levelSpin_->setValue(st_.level);
     windowSpin_->setValue(st_.window);
-    levelSlider_->setValue(int(st_.level));
-    windowSlider_->setValue(int(st_.window));
+    if (wlRange_)
+        wlRange_->setValues(st_.level - st_.window / 2.0,
+                            st_.level + st_.window / 2.0);
 }
 
 void MainWindow::setStatus(const QString& text) {

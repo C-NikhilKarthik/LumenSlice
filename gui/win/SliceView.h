@@ -24,6 +24,10 @@ public:
 
     int axis() const { return axis_; }
 
+public slots:
+    void zoomStep(double factor);  // zoom around the pane centre
+    void resetZoom();
+
 signals:
     // Mouse wheel changed this axis' slice index (already clamped).
     void sliceScrolled(int axis, int newIndex);
@@ -50,15 +54,19 @@ protected:
     void mouseReleaseEvent(QMouseEvent*) override;
     void mouseDoubleClickEvent(QMouseEvent*) override;
     void leaveEvent(QEvent*) override;
+    void resizeEvent(QResizeEvent*) override;
 
 private:
     // Geometry of the drawn slice image inside the widget (aspect-preserving).
     QRect imageRect(int imgW, int imgH) const;
     // Map a widget point to a slice-pixel (returns false if outside the image).
     bool widgetToPixel(const QPoint& p, int imgW, int imgH, int* px, int* py) const;
+    void buildZoomBar();
+    void positionZoomBar();
 
     int axis_;
     ViewState* st_;
+    QWidget* zoomBar_ = nullptr;
 
     // Drag bookkeeping.
     enum class Drag { None, WindowLevel, Brush } drag_ = Drag::None;
