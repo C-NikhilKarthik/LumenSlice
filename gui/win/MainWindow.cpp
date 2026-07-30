@@ -154,6 +154,14 @@ MainWindow::MainWindow() {
             &MainWindow::onLoadReady);
     connect(meshView_, &MeshView::scissorFinished, this,
             &MainWindow::onScissorFinished);
+    connect(meshView_, &MeshView::generateRequested, this,
+            &MainWindow::generateMesh);
+    connect(meshView_, &MeshView::scissorModeChanged, this, [this](bool on) {
+        if (scissorModeCheck_ && scissorModeCheck_->isChecked() != on) {
+            QSignalBlocker b(scissorModeCheck_);
+            scissorModeCheck_->setChecked(on);
+        }
+    });
     meshRefreshTimer_.setSingleShot(true);
     meshRefreshTimer_.setInterval(180);
     connect(&meshRefreshTimer_, &QTimer::timeout, this,
@@ -162,6 +170,14 @@ MainWindow::MainWindow() {
     countsTimer_.setInterval(160);
     connect(&countsTimer_, &QTimer::timeout, this,
             &MainWindow::recomputeSegmentCounts);
+    connect(&heavyWatcher_, &QFutureWatcher<void>::finished, this, [this] {
+        st_.busy = false;
+        showBusy("");
+        refreshCanvas();
+        updateSegmentCounts();
+        updateUndoRedo();
+        scheduleMeshRefresh();
+    });
 
     selectTab(0);
     refreshAll();
@@ -173,11 +189,11 @@ MainWindow::MainWindow() {
 // ---------------------------------------------------------------------------
 QWidget* MainWindow::buildTabRail() {
     auto* rail = new QWidget;
-    rail->setFixedWidth(84);
+    rail->setFixedWidth(92);
     rail->setStyleSheet("background:#141519;");
     auto* v = new QVBoxLayout(rail);
-    v->setContentsMargins(12, 14, 12, 14);
-    v->setSpacing(8);
+    v->setContentsMargins(12, 16, 12, 16);
+    v->setSpacing(10);
 
     struct R { const char* glyph; const char* label; };
     const R items[] = {{"◧", "View"}, {"✎", "Seg"}, {"◈", "3D"},
@@ -186,14 +202,14 @@ QWidget* MainWindow::buildTabRail() {
     for (int i = 0; i < 5; ++i) {
         auto* b = new QToolButton;
         b->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
-        b->setIcon(glyphIcon(items[i].glyph, 30, QColor(0xe9, 0xec, 0xf3)));
-        b->setIconSize(QSize(30, 30));
+        b->setIcon(glyphIcon(items[i].glyph, 36, QColor(0xe9, 0xec, 0xf3)));
+        b->setIconSize(QSize(36, 36));
         b->setText(items[i].label);
         b->setCheckable(true);
-        b->setFixedSize(60, 62);
+        b->setFixedSize(68, 70);
         b->setStyleSheet(
-            "QToolButton{color:#a7adba;border:none;border-radius:12px;font-size:12px;"
-            "padding-top:4px;}"
+            "QToolButton{color:#aeb4c1;border:none;border-radius:14px;font-size:12px;"
+            "padding-top:5px;}"
             "QToolButton:hover{background:#22252d;color:#e7e9ef;}"
             "QToolButton:checked{background:#4f7cf0;color:white;}");
         group->addButton(b, i);
@@ -1145,12 +1161,15 @@ void MainWindow::selectTab(int tab) {
 
 void MainWindow::onSliceScrolled(int axis, int index) {
     st_.sliceIndex[axis] = index;
-    if (sliders_[0]) {
-        const int col = axis;  // axes are stored 0..2 in order
-        QSignalBlocker b(sliders_[col]);
-        sliders_[col]->setValue(index);
-    }
-    refreshCanvas();
+    // Only the scrolled plane changed — repaint just that pane (repainting all
+    // three would re-extract the expensive coronal/sagittal reformats every tick
+    // and make wheel-scroll stutter on large volumes).
+    for (int i = 0; i < 3; ++i)
+        if (panes_[i] && panes_[i]->axis() == axis) {
+            QSignalBlocker b(sliders_[i]);
+            sliders_[i]->setValue(index);
+            panes_[i]->update();
+        }
 }
 
 void MainWindow::onWindowLevelDragged(float dLevel, float dWindow) {
@@ -1277,92 +1296,71 @@ void MainWindow::applyThreshold() {
 void MainWindow::applyOtsu() {
     LumenVolume* v = st_.volume;
     if (!v || lumen_seg_active(v) == 0) return;
-    const float t = lumen_seg_otsu(v);
-    float lo = 0, hi = 0;
-    lumen_hu_range(v, &lo, &hi);
-    threshSlider_->setValues(t, hi);
-    threshLabel_->setText(
-        QString("Low %1  —  High %2 HU").arg(qRound(t)).arg(qRound(hi)));
+    // Otsu + threshold are both full-volume passes; run off the UI thread.
+    runMaskOp("Auto-threshold (Otsu)…", [v] {
+        const float t = lumen_seg_otsu(v);
+        float lo = 0, hi = 0;
+        lumen_hu_range(v, &lo, &hi);
+        lumen_seg_threshold(v, t, hi);
+    });
+}
+
+void MainWindow::runMaskOp(const QString& busyText, std::function<void()> op) {
+    LumenVolume* v = st_.volume;
+    if (!v || st_.busy || heavyWatcher_.isRunning()) return;
     lumen_seg_push_undo(v);
     updateUndoRedo();
-    applyThreshold();
+    st_.busy = true;
+    showBusy(busyText);
+    refreshCanvas();  // repaint hides the mask overlay (busy) before the mutation
+    QCoreApplication::processEvents();  // ensure the overlay is on screen
+    heavyWatcher_.setFuture(QtConcurrent::run(std::move(op)));
 }
 
 void MainWindow::refineGrow() {
     LumenVolume* v = st_.volume;
     if (!v || lumen_seg_active(v) == 0) return;
-    lumen_seg_push_undo(v);
-    lumen_seg_grow(v, 1);
-    updateUndoRedo();
-    refreshCanvas();
-    updateSegmentCounts();
-    scheduleMeshRefresh();
+    runMaskOp("Growing…", [v] { lumen_seg_grow(v, 1); });
 }
 
 void MainWindow::refineShrink() {
     LumenVolume* v = st_.volume;
     if (!v || lumen_seg_active(v) == 0) return;
-    lumen_seg_push_undo(v);
-    lumen_seg_shrink(v, 1);
-    updateUndoRedo();
-    refreshCanvas();
-    updateSegmentCounts();
-    scheduleMeshRefresh();
+    runMaskOp("Shrinking…", [v] { lumen_seg_shrink(v, 1); });
 }
 
 void MainWindow::refineHollow() {
     LumenVolume* v = st_.volume;
     if (!v || lumen_seg_active(v) == 0) return;
-    lumen_seg_push_undo(v);
-    lumen_seg_hollow(v, 1);
-    updateUndoRedo();
-    refreshCanvas();
-    updateSegmentCounts();
-    scheduleMeshRefresh();
+    runMaskOp("Hollowing…", [v] { lumen_seg_hollow(v, 1); });
 }
 
 void MainWindow::refineSmooth() {
     LumenVolume* v = st_.volume;
     if (!v || lumen_seg_active(v) == 0) return;
-    lumen_seg_push_undo(v);
-    lumen_seg_smooth(v, 1);
-    updateUndoRedo();
-    refreshCanvas();
-    updateSegmentCounts();
-    scheduleMeshRefresh();
+    runMaskOp("Smoothing…", [v] { lumen_seg_smooth(v, 1); });
 }
 
 void MainWindow::keepLargest() {
     LumenVolume* v = st_.volume;
     if (!v || lumen_seg_active(v) == 0) return;
-    lumen_seg_push_undo(v);
-    lumen_seg_keep_largest(v);
-    updateUndoRedo();
-    refreshCanvas();
-    updateSegmentCounts();
-    scheduleMeshRefresh();
+    runMaskOp("Keeping largest component…", [v] { lumen_seg_keep_largest(v); });
 }
 
 void MainWindow::removeSmallIslands() {
     LumenVolume* v = st_.volume;
     if (!v || lumen_seg_active(v) == 0 || !removeSmallSpin_) return;
-    lumen_seg_push_undo(v);
-    lumen_seg_remove_small(v, removeSmallSpin_->value());
-    updateUndoRedo();
-    refreshCanvas();
-    updateSegmentCounts();
-    scheduleMeshRefresh();
+    const long minV = removeSmallSpin_->value();
+    runMaskOp("Removing small islands…",
+              [v, minV] { lumen_seg_remove_small(v, minV); });
 }
 
 void MainWindow::growFromSeeds() {
     LumenVolume* v = st_.volume;
     if (!v) return;
-    lumen_seg_push_undo(v);
-    lumen_seg_grow_from_seeds(v, seedItersSlider_->value());
-    updateUndoRedo();
-    refreshCanvas();
-    updateSegmentCounts();
-    scheduleMeshRefresh();
+    const int iters = seedItersSlider_->value();
+    runMaskOp("Growing from seeds…",
+              [v, iters] { lumen_seg_grow_from_seeds(v, iters); });
 }
 
 void MainWindow::clearActive() {

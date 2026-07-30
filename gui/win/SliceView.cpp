@@ -1,11 +1,15 @@
 #include "SliceView.h"
 
+#include <QHBoxLayout>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
 #include <QPaintEvent>
+#include <QResizeEvent>
+#include <QToolButton>
 #include <QWheelEvent>
 #include <algorithm>
+#include <cmath>
 #include <cmath>
 
 #include "MarkupModel.h"
@@ -44,6 +48,57 @@ SliceView::SliceView(int axis, ViewState* state, QWidget* parent)
     setMinimumSize(160, 160);
     setAttribute(Qt::WA_OpaquePaintEvent, true);
     setFocusPolicy(Qt::StrongFocus);
+    buildZoomBar();
+}
+
+void SliceView::buildZoomBar() {
+    zoomBar_ = new QWidget(this);
+    zoomBar_->setStyleSheet("background:rgba(18,20,26,180);border-radius:6px;");
+    auto* h = new QHBoxLayout(zoomBar_);
+    h->setContentsMargins(4, 2, 4, 2);
+    h->setSpacing(1);
+    auto mk = [&](const QString& t, const QString& tip) {
+        auto* b = new QToolButton(zoomBar_);
+        b->setText(t);
+        b->setToolTip(tip);
+        b->setStyleSheet(
+            "QToolButton{color:#e6e8ee;border:none;padding:2px 7px;font-size:16px;}"
+            "QToolButton:hover{background:rgba(255,255,255,32);border-radius:4px;}");
+        h->addWidget(b);
+        return b;
+    };
+    connect(mk("+", "Zoom in"), &QToolButton::clicked, this,
+            [this] { zoomStep(1.25); });
+    connect(mk("−", "Zoom out"), &QToolButton::clicked, this,
+            [this] { zoomStep(0.8); });
+    connect(mk("⤢", "Reset zoom"), &QToolButton::clicked, this,
+            &SliceView::resetZoom);
+    zoomBar_->adjustSize();
+}
+
+void SliceView::positionZoomBar() {
+    if (!zoomBar_) return;
+    zoomBar_->adjustSize();
+    zoomBar_->move(width() - zoomBar_->width() - 8, 6);
+    zoomBar_->raise();
+}
+
+void SliceView::resizeEvent(QResizeEvent* e) {
+    QWidget::resizeEvent(e);
+    positionZoomBar();
+}
+
+void SliceView::zoomStep(double factor) {
+    zoomAnchor_ = QPoint(width() / 2, height() / 2);
+    zoom_ = std::clamp(zoom_ * factor, 1.0, 8.0);
+    if (zoom_ <= 1.0) pan_ = QPointF(0, 0);
+    update();
+}
+
+void SliceView::resetZoom() {
+    zoom_ = 1.0;
+    pan_ = QPointF(0, 0);
+    update();
 }
 
 QRect SliceView::imageRect(int imgW, int imgH) const {
@@ -160,7 +215,7 @@ void SliceView::paintEvent(QPaintEvent*) {
     painter.drawImage(target, cachedSlice_);
 
     // Colored mask overlay (premultiplied RGBA, transparent where unlabelled).
-    if (st_->showOverlay) {
+    if (st_->showOverlay && !st_->busy) {
         const unsigned long long revision = lumen_seg_revision(v);
         if (!overlayCacheValid_ || cachedVolume_ != v ||
             cachedOverlayIndex_ != index || cachedOverlayRevision_ != revision) {

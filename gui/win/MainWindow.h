@@ -12,6 +12,7 @@
 #include <QPointF>
 #include <QTimer>
 #include <QString>
+#include <functional>
 #include <vector>
 
 #include "BridgeVolume.h"
@@ -119,6 +120,10 @@ private:
     void startNextMeshSegment();
     void finishMeshGeneration();
     int effectiveDownsample() const;  // coarsen mesh on very large volumes
+    // Run a mask-mutating op on a worker thread with a busy overlay (snapshots undo
+    // first). Keeps heavy ops (grow-from-seeds, refine) from freezing the UI on
+    // large volumes.
+    void runMaskOp(const QString& busyText, std::function<void()> op);
     void scheduleMeshRefresh();
 
     // Refresh helpers.
@@ -237,6 +242,7 @@ private:
     QTimer meshRefreshTimer_;
     bool meshRefreshPending_ = false;
     QTimer countsTimer_;  // debounces the full-volume segment histogram
+    QFutureWatcher<void> heavyWatcher_;  // async mask ops (grow-from-seeds, refine)
     QElapsedTimer paintRefreshClock_;
     bool brushStrokeActive_ = false;
     std::vector<int> pendingSegIds_;

@@ -9,6 +9,7 @@
 #include <QPainter>
 #include <QPolygonF>
 #include <QResizeEvent>
+#include <QSignalBlocker>
 #include <QSurfaceFormat>
 #include <QToolButton>
 #include <QVector3D>
@@ -169,8 +170,21 @@ void MeshView::buildToolbar() {
     }
     views->setMenu(menu);
 
-    connect(mk("⤓ PNG", "Save a PNG snapshot"), &QToolButton::clicked, this,
+    connect(mk("⤓", "Save a PNG snapshot"), &QToolButton::clicked, this,
             &MeshView::saveSnapshot);
+
+    // Generate the surface and toggle the scissor cut straight from the 3D view.
+    connect(mk("⬡", "Generate / update the 3D surface"), &QToolButton::clicked,
+            this, [this] { emit generateRequested(); });
+    scissorBtn_ = mk("✂", "Scissor: draw a loop to cut the surface");
+    scissorBtn_->setCheckable(true);
+    scissorBtn_->setStyleSheet(
+        scissorBtn_->styleSheet() +
+        "QToolButton:checked{background:#4f7cf0;color:white;border-radius:5px;}");
+    connect(scissorBtn_, &QToolButton::toggled, this, [this](bool on) {
+        setScissorMode(on);
+        emit scissorModeChanged(on);
+    });
 
     toolbar_->adjustSize();
 }
@@ -628,6 +642,10 @@ void MeshView::setScissorMode(bool on) {
     lassoActive_ = false;
     lasso_.clear();
     setCursor(on ? Qt::CrossCursor : Qt::ArrowCursor);
+    if (scissorBtn_ && scissorBtn_->isChecked() != on) {
+        QSignalBlocker b(scissorBtn_);
+        scissorBtn_->setChecked(on);
+    }
     update();
 }
 
