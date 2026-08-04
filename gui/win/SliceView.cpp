@@ -291,7 +291,8 @@ void SliceView::paintEvent(QPaintEvent*) {
         painter.drawEllipse(QPointF(hoverPos_), rr, rr);
     }
 
-    // Markup dots for defining points that lie on this slice (+ pending points).
+    // Slicer-style markup representation: draw completed line/plane geometry when
+    // its defining points lie on this slice, with measurements in physical units.
     if (st_->markups) {
         painter.setRenderHint(QPainter::Antialiasing, true);
         auto drawDot = [&](const std::array<int, 3>& vp, const QColor& col,
@@ -310,6 +311,131 @@ void SliceView::paintEvent(QPaintEvent*) {
             const QColor col = st_->markups->color(m);
             for (const auto& vp : m.voxels)
                 if (MarkupModel::onSlice(vp, axis_, index)) drawDot(vp, col, true);
+            if (m.voxels.size() >= 2) {
+                const float slice = float(index);
+                int volumeD = 0;
+                lumen_dims(v, nullptr, nullptr, &volumeD);
+                auto coord = [this](const QVector3D& p) {
+                    return axis_ == LUMEN_AXIS_AXIAL
+                               ? p.z()
+                               : (axis_ == LUMEN_AXIS_CORONAL ? p.y() : p.x());
+                };
+                auto projectVoxel = [&](const QVector3D& p) {
+                    const float px = axis_ == LUMEN_AXIS_AXIAL ? p.x() :
+                                     (axis_ == LUMEN_AXIS_CORONAL ? p.x() : p.y());
+                    const float py = axis_ == LUMEN_AXIS_AXIAL
+                                         ? p.y()
+                                         : float(volumeD - 1) - p.z();
+                    return QPointF(target.left() + (px + 0.5f) / w * target.width(),
+                                   target.top() + (py + 0.5f) / h * target.height());
+                };
+                auto addIntersection = [](std::vector<QVector3D>& out,
+                                           const QVector3D& p) {
+                    for (const auto& existing : out)
+                        if ((existing - p).lengthSquared() < 0.0001f) return;
+                    out.push_back(p);
+                };
+                std::vector<QVector3D> intersections;
+                auto edge = [&](const QVector3D& a, const QVector3D& b) {
+                    const float da = coord(a) - slice, db = coord(b) - slice;
+                    if (std::abs(da) < 0.001f) { addIntersection(intersections, a); return; }
+                    if (std::abs(db) < 0.001f) { addIntersection(intersections, b); return; }
+                    if (da * db < 0.0f) {
+                        addIntersection(intersections, a + (b - a) * (da / (da - db)));
+                    }
+                };
+                const auto point = [](const std::array<int, 3>& p) {
+                    return QVector3D(float(p[0]), float(p[1]), float(p[2]));
+                };
+                if (m.kind == MarkupModel::Kind::Line) {
+                    edge(point(m.voxels[0]), point(m.voxels[1]));
+                } else if (m.kind == MarkupModel::Kind::Plane && m.voxels.size() >= 3) {
+                    edge(point(m.voxels[0]), point(m.voxels[1]));
+                    edge(point(m.voxels[1]), point(m.voxels[2]));
+                    edge(point(m.voxels[2]), point(m.voxels[0]));
+                }
+                std::vector<QPointF> pts;
+                for (const auto& hit : intersections) pts.push_back(projectVoxel(hit));
+                painter.setPen(QPen(col, 2));
+                if (m.kind == MarkupModel::Kind::Line && pts.size() == 2) {
+                    painter.drawLine(pts[0], pts[1]);
+                } else if (m.kind == MarkupModel::Kind::Plane && pts.size() == 3) {
+                    QPolygonF polygon;
+                    for (const auto& pt : pts) polygon << pt;
+                    painter.setBrush(QColor(col.red(), col.green(), col.blue(), 45));
+                    painter.drawPolygon(polygon);
+                } else if (pts.size() == 2) {
+                    painter.drawLine(pts[0], pts[1]);
+                }
+                painter.setBrush(col);
+                for (const auto& pt : pts) painter.drawEllipse(pt, 3.5, 3.5);
+                const QString measurement = st_->markups->measurementText(m);
+                if (!measurement.isEmpty() && !pts.empty()) {
+                    const QPointF anchor = pts.front();
+                    painter.setPen(Qt::white);
+                    painter.setBrush(QColor(0, 0, 0, 170));
+                    painter.drawRoundedRect(QRectF(anchor.x() + 8, anchor.y() - 18,
+                                                   measurement.size() * 7 + 12, 18), 5, 5);
+                    painter.drawText(QRectF(anchor.x() + 14, anchor.y() - 17,
+                                            measurement.size() * 7, 16),
+                                     Qt::AlignLeft | Qt::AlignVCenter, measurement);
+                }
+            }
+        }
+        // Slicer-style rubber-band geometry from the last pending point to the
+        // current pointer. Project it into every orthogonal pane so the preview
+        // remains visible while the next point is being positioned.
+        if (st_->markupPlacing && !st_->markups->pending().empty() && hovering_) {
+            int px = 0, py = 0;
+            if (widgetToPixel(hoverPos_, w, h, &px, &py)) {
+                int x = 0, y = 0, z = 0;
+                lumen_slice_pixel_to_voxel(v, axis_, index, px, py, &x, &y, &z);
+                std::vector<std::array<int, 3>> previewVoxels;
+                const auto& pending = st_->markups->pending();
+                const auto kind = st_->markups->kind();
+                if (kind == MarkupModel::Kind::Plane && pending.size() >= 2) {
+                    previewVoxels.push_back(pending[0]);
+                    previewVoxels.push_back(pending[1]);
+                } else {
+                    previewVoxels.push_back(pending.back());
+                }
+                previewVoxels.push_back({x, y, z});
+                std::vector<QPointF> preview;
+                auto addPreviewPoint = [&](const std::array<int, 3>& vp) {
+                    int qx = 0, qy = 0;
+                    lumen_voxel_to_slice_pixel(v, axis_, vp[0], vp[1], vp[2], &qx, &qy);
+                    preview.emplace_back(target.left() + (qx + 0.5) / w * target.width(),
+                                         target.top() + (qy + 0.5) / h * target.height());
+                };
+                for (const auto& vp : previewVoxels) addPreviewPoint(vp);
+                const QColor previewColor = st_->markups->pendingColor();
+                painter.setPen(QPen(previewColor, 1.5, Qt::DashLine));
+                painter.setBrush(Qt::NoBrush);
+                if (preview.size() >= 2 && (kind == MarkupModel::Kind::Line ||
+                                             preview.size() < 3)) {
+                    painter.drawLine(preview[preview.size() - 2], preview.back());
+                } else if (kind == MarkupModel::Kind::Plane && preview.size() == 3) {
+                    QPolygonF polygon;
+                    for (const auto& pt : preview) polygon << pt;
+                    painter.setBrush(QColor(previewColor.red(), previewColor.green(),
+                                            previewColor.blue(), 18));
+                    painter.drawPolygon(polygon);
+                }
+                if (preview.size() >= 2) {
+                    const QString measurement = st_->markups->liveLineMeasurementText(
+                        previewVoxels[previewVoxels.size() - 2], previewVoxels.back());
+                    const QPointF a = preview[preview.size() - 2];
+                    const QPointF b = preview.back();
+                    const QPointF center = (a + b) * 0.5;
+                    painter.setPen(Qt::white);
+                    painter.setBrush(QColor(0, 0, 0, 150));
+                    painter.drawRoundedRect(QRectF(center.x() - 42, center.y() - 20,
+                                                   measurement.size() * 7 + 12, 18), 5, 5);
+                    painter.drawText(QRectF(center.x() - 36, center.y() - 19,
+                                            measurement.size() * 7, 16),
+                                     Qt::AlignLeft | Qt::AlignVCenter, measurement);
+                }
+            }
         }
         const QColor pc = st_->markups->pendingColor();
         for (const auto& vp : st_->markups->pending())
@@ -475,8 +601,10 @@ void SliceView::mouseMoveEvent(QMouseEvent* e) {
         return;
     }
     if (drag_ == Drag::None) {
-        if (st_->segmentInteractive &&
+        if (st_->markupPlacing ||
+            (st_->segmentInteractive &&
             (st_->tool == Tool::Paint || st_->tool == Tool::Erase))
+        )
             update();  // redraw the ring at the new position
         return;
     }

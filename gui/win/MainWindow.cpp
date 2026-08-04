@@ -873,6 +873,12 @@ void MainWindow::rebuildMarkupList() {
         auto* kind = new QLabel(MarkupModel::title(m.kind));
         kind->setStyleSheet("color:#8a8f9a;");
         h->addWidget(kind);
+        const QString measurement = markups_.measurementText(m);
+        if (!measurement.isEmpty()) {
+            auto* measure = new QLabel(measurement);
+            measure->setStyleSheet("color:#8a8f9a;font-size:10px;");
+            h->addWidget(measure);
+        }
 
         auto* del = new QToolButton;
         del->setText("✕");

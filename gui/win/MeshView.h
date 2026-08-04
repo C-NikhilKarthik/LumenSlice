@@ -25,6 +25,7 @@
 #include <vector>
 
 class QWidget;
+class QToolButton;
 
 namespace lumenwin {
 
@@ -155,7 +156,7 @@ private:
 
     QMatrix4x4 lastMvp_;
     QWidget* toolbar_ = nullptr;
-    class QToolButton* scissorBtn_ = nullptr;
+    QToolButton* scissorBtn_ = nullptr;
 
     // Scissor lasso.
     bool scissorMode_ = false;

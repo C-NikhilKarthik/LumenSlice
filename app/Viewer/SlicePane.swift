@@ -1,4 +1,5 @@
 import SwiftUI
+import simd
 
 // One orthographic plane: the window/levelled HU image, an optional colored mask
 // overlay, the shared crosshair, a slice scrubber, and the interaction layer.
@@ -107,7 +108,7 @@ struct SlicePane: View {
                     OrientationLabels(axis: axis, rect: display)
                 }
                 brushRing(fitted: display)
-                markupDots(container: container, aspect: aspect)
+                markupGeometry(container: container, aspect: aspect)
             }
             .clipShape(RoundedRectangle(cornerRadius: 10))
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -159,26 +160,21 @@ struct SlicePane: View {
         }
     }
 
-    // Dots for markup defining points (and any in-progress points) that lie on the
-    // slice currently shown in this pane. Placement happens here; this is the 2D
-    // echo of what the 3D pane draws.
-    @ViewBuilder private func markupDots(container: CGSize, aspect: CGFloat) -> some View {
+    // Slicer-style slice representation: control points are shown when they lie
+    // on the current plane, while a line/plane is clipped to that plane. This
+    // keeps the representation useful even when its points were placed on other
+    // orthogonal panes.
+    @ViewBuilder private func markupGeometry(container: CGSize, aspect: CGFloat) -> some View {
         ForEach(markup.markups) { m in
-            ForEach(Array(m.voxels.enumerated()), id: \.offset) { _, v in
-                if m.visible, markup.onCurrentSlice(v, axis: axis),
-                   let pt = markupPoint(voxel: v, container: container, aspect: aspect) {
-                    Circle()
-                        .fill(markup.color(m))
-                        .frame(width: 9, height: 9)
-                        .overlay(Circle().strokeBorder(.white, lineWidth: 1))
-                        .position(pt)
-                        .allowsHitTesting(false)
-                }
-            }
+            if m.visible { representation(m, container: container, aspect: aspect) }
         }
+        pendingPreview(container: container, aspect: aspect)
+        // Pending control points retain their dots while the dashed representation
+        // follows the pointer during placement.
         ForEach(Array(markup.pending.enumerated()), id: \.offset) { _, v in
             if markup.onCurrentSlice(v, axis: axis),
-               let pt = markupPoint(voxel: v, container: container, aspect: aspect) {
+               let pt = markupPoint(voxel: SIMD3<Float>(Float(v.x), Float(v.y), Float(v.z)),
+                                    container: container, aspect: aspect) {
                 // The in-progress point, filled in the colour the finished markup will
                 // take (with a white ring for contrast on any tissue).
                 Circle()
@@ -191,11 +187,138 @@ struct SlicePane: View {
         }
     }
 
-    private func markupPoint(voxel v: SIMD3<Int>, container: CGSize,
+    @ViewBuilder private func pendingPreview(container: CGSize, aspect: CGFloat) -> some View {
+        if markup.placing, !markup.pending.isEmpty,
+           let cursor = pendingCursorVoxel(container: container) {
+            // During placement this is a rubber-band preview. Project the
+            // world-space points into every orthogonal pane, rather than
+            // clipping to the pane's current slice; otherwise the preview
+            // disappears from the two non-active views.
+            let previewVoxels = markup.kind == .plane && markup.pending.count >= 2
+                ? Array(markup.pending.prefix(2)) + [cursor]
+                : [markup.pending[0], cursor]
+            let projected = previewVoxels.compactMap {
+                markupPoint(voxel: SIMD3<Float>(Float($0.x), Float($0.y), Float($0.z)),
+                            container: container, aspect: aspect)
+            }
+            let edgeStart = projected.dropLast().last
+            let edgeEnd = projected.last
+            if markup.kind == .plane, projected.count == 3 {
+                PolygonShape(points: projected)
+                    .fill(markup.pendingColor.opacity(0.06))
+                    .overlay(PolygonShape(points: projected)
+                        .stroke(markup.pendingColor.opacity(0.55),
+                                style: StrokeStyle(lineWidth: 1.5, dash: [5, 4])))
+                    .allowsHitTesting(false)
+            } else if projected.count >= 2 {
+                Path { path in
+                    path.move(to: projected[projected.count - 2])
+                    path.addLine(to: projected[projected.count - 1])
+                }
+                .stroke(markup.pendingColor.opacity(0.65),
+                        style: StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
+                .allowsHitTesting(false)
+            }
+            if let start = edgeStart, let end = edgeEnd {
+                Text(markup.liveLineMeasurementText(from: markup.pending.last!, to: cursor))
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.white.opacity(0.9))
+                    .padding(.horizontal, 5).padding(.vertical, 3)
+                    .background(.black.opacity(0.58), in: Capsule())
+                    .position(x: (start.x + end.x) * 0.5,
+                              y: (start.y + end.y) * 0.5 - 14)
+                    .allowsHitTesting(false)
+            }
+        }
+    }
+
+    private func pendingCursorVoxel(container: CGSize) -> SIMD3<Int>? {
+        guard let pointer, let (px, py) = pixel(at: pointer, container: container) else {
+            return nil
+        }
+        return model.voxel(onAxis: axis, px: px, py: py)
+    }
+
+    @ViewBuilder private func representation(_ m: MarkupModel.Markup,
+                                              container: CGSize, aspect: CGFloat) -> some View {
+        let points = sliceIntersections(kind: m.kind, voxels: m.voxels)
+        let projected = points.compactMap {
+            markupPoint(voxel: $0, container: container, aspect: aspect)
+        }
+        ForEach(Array(m.voxels.enumerated()), id: \.offset) { _, v in
+            if markup.onCurrentSlice(v, axis: axis),
+               let pt = markupPoint(voxel: SIMD3<Float>(v), container: container, aspect: aspect) {
+                Circle().fill(markup.color(m)).frame(width: 9, height: 9)
+                    .overlay(Circle().strokeBorder(.white, lineWidth: 1))
+                    .position(pt).allowsHitTesting(false)
+            }
+        }
+        ForEach(Array(projected.enumerated()), id: \.offset) { _, pt in
+            Circle().fill(markup.color(m)).frame(width: 7, height: 7)
+                .overlay(Circle().strokeBorder(.white, lineWidth: 1))
+                .position(pt).allowsHitTesting(false)
+        }
+        if m.kind == .plane, m.voxels.allSatisfy({ markup.onCurrentSlice($0, axis: axis) }),
+           projected.count == 3 {
+            PolygonShape(points: projected)
+                .fill(markup.color(m).opacity(0.18))
+                .overlay(PolygonShape(points: projected).stroke(markup.color(m), lineWidth: 2))
+                .allowsHitTesting(false)
+        } else if projected.count >= 2 {
+            Path { path in
+                path.move(to: projected[0])
+                path.addLine(to: projected[1])
+            }
+            .stroke(markup.color(m), style: StrokeStyle(lineWidth: 2, dash: [6, 4]))
+            .allowsHitTesting(false)
+        }
+        if let label = markup.measurementText(m), let center = projected.first {
+            Text(label).font(.caption2.monospacedDigit()).foregroundStyle(.white)
+                .padding(.horizontal, 5).padding(.vertical, 3)
+                .background(.black.opacity(0.65), in: Capsule())
+                .position(x: center.x + 38, y: center.y - 14)
+                .allowsHitTesting(false)
+        }
+    }
+
+    private func sliceIntersections(kind: MarkupModel.Kind,
+                                    voxels: [SIMD3<Int>]) -> [SIMD3<Float>] {
+        let pts = voxels.map {
+            SIMD3<Float>(Float($0.x), Float($0.y), Float($0.z))
+        }
+        guard pts.count >= 2 else { return [] }
+        let slice = Float(model.sliceIndex[axis])
+        func coord(_ p: SIMD3<Float>) -> Float {
+            axis == 0 ? p.z : (axis == 1 ? p.y : p.x)
+        }
+        func edge(_ a: SIMD3<Float>, _ b: SIMD3<Float>) -> SIMD3<Float>? {
+            let da = coord(a) - slice, db = coord(b) - slice
+            if abs(da) < 0.001 { return a }
+            if abs(db) < 0.001 { return b }
+            guard da * db < 0 else { return nil }
+            let t = da / (da - db)
+            return a + (b - a) * t
+        }
+        let pairs: [(Int, Int)] = kind == .line ? [(0, 1)] : [(0, 1), (1, 2), (2, 0)]
+        var result: [SIMD3<Float>] = []
+        for (a, b) in pairs where a < pts.count && b < pts.count {
+            if let hit = edge(pts[a], pts[b]), !result.contains(where: { simd_length($0 - hit) < 0.001 }) {
+                result.append(hit)
+            }
+        }
+        return result
+    }
+
+    private func markupPoint(voxel v: SIMD3<Float>, container: CGSize,
                              aspect: CGFloat) -> CGPoint? {
-        guard let img = model.images[axis],
-              let c = model.slicePixel(onAxis: axis, voxel: v) else { return nil }
-        return SliceCoordinates.point(forPixel: c.px, c.py, container: container,
+        guard let img = model.images[axis] else { return nil }
+        let px: CGFloat, py: CGFloat
+        switch axis {
+        case 0: px = CGFloat(v.x); py = CGFloat(v.y)
+        case 1: px = CGFloat(v.x); py = CGFloat(model.depth - 1) - CGFloat(v.z)
+        default: px = CGFloat(v.y); py = CGFloat(model.depth - 1) - CGFloat(v.z)
+        }
+        return SliceCoordinates.point(forPixel: px, py, container: container,
                                       imageWidth: img.width, imageHeight: img.height,
                                       aspect: aspect, zoom: zoom, anchor: zoomAnchor,
                                       pan: pan)
@@ -275,6 +398,19 @@ struct SlicePane: View {
         guard let (px, py) = pixel(at: point, container: container) else { return }
         seg.paintStroke(axis: axis, from: lastPaintPixel, to: (px, py))
         lastPaintPixel = (px, py)
+    }
+}
+
+private struct PolygonShape: Shape {
+    let points: [CGPoint]
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        guard let first = points.first else { return path }
+        path.move(to: first)
+        for point in points.dropFirst() { path.addLine(to: point) }
+        path.closeSubpath()
+        return path
     }
 }
 

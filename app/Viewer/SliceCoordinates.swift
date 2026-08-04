@@ -96,4 +96,22 @@ enum SliceCoordinates {
         return CGPoint(x: rect.minX + u * rect.width,
                        y: rect.minY + v * rect.height)
     }
+
+    static func point(forPixel px: CGFloat, _ py: CGFloat,
+                      container: CGSize,
+                      imageWidth: Int,
+                      imageHeight: Int,
+                      aspect: CGFloat,
+                      padding: CGFloat = 8,
+                      zoom: CGFloat = 1, anchor: CGPoint = .zero,
+                      pan: CGSize = .zero) -> CGPoint? {
+        guard imageWidth > 0, imageHeight > 0,
+              let rect = fittedRect(container: container, aspect: aspect,
+                                    padding: padding, zoom: zoom,
+                                    anchor: anchor, pan: pan) else { return nil }
+        let u = (px + 0.5) / CGFloat(imageWidth)
+        let v = (py + 0.5) / CGFloat(imageHeight)
+        return CGPoint(x: rect.minX + u * rect.width,
+                       y: rect.minY + v * rect.height)
+    }
 }

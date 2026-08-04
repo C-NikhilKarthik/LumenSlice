@@ -609,6 +609,16 @@ void MeshView::drawMarkups(QPainter& p) {
             p.drawLine(pts[0], pts[1]);
         }
         for (const QPointF& s : pts) dot(s, col, 4.5);
+        const QString measurement = markups_->measurementText(m);
+        if (!measurement.isEmpty()) {
+            p.setPen(Qt::white);
+            p.setBrush(QColor(0, 0, 0, 170));
+            const QPointF anchor = pts.front() + QPointF(8, -8);
+            p.drawRoundedRect(QRectF(anchor, QSizeF(measurement.size() * 7 + 12, 18)), 5, 5);
+            p.drawText(QRectF(anchor + QPointF(6, 1),
+                              QSizeF(measurement.size() * 7, 16)),
+                       Qt::AlignLeft | Qt::AlignVCenter, measurement);
+        }
     }
     // In-progress (pending) points.
     const QColor pc = markups_->pendingColor();

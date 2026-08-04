@@ -151,9 +151,16 @@ private struct MarkupRow: View {
                 .onSubmit { commit() }
         .onChange(of: focused) { _, f in if !f { commit() } }
             Spacer(minLength: 4)
-            Text(m.kind.title)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+            VStack(alignment: .trailing, spacing: 1) {
+                Text(m.kind.title)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                if let measurement = markup.measurementText(m) {
+                    Text(measurement)
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+            }
             Button {
                 markup.remove(m.id)
             } label: {

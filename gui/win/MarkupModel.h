@@ -11,6 +11,7 @@
 #include <QVector3D>
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <vector>
 
 namespace lumenwin {
@@ -118,6 +119,25 @@ public:
     QVector3D mm(const std::array<int, 3>& v) const {
         return QVector3D(v[0] * sx_, v[1] * sy_, v[2] * sz_);
     }
+    QString measurementText(const Markup& m) const {
+        if (m.voxels.size() < 2) return {};
+        if (m.kind == Kind::Line) {
+            const double d = (mm(m.voxels[1]) - mm(m.voxels[0])).length();
+            return QString("Length %1 mm").arg(formatMeasurement(d));
+        }
+        if (m.kind == Kind::Plane && m.voxels.size() >= 3) {
+            const QVector3D a = mm(m.voxels[1]) - mm(m.voxels[0]);
+            const QVector3D b = mm(m.voxels[2]) - mm(m.voxels[0]);
+            const double area = 0.5 * QVector3D::crossProduct(a, b).length();
+            return QString("Area %1 mm²").arg(formatMeasurement(area));
+        }
+        return {};
+    }
+    QString liveLineMeasurementText(const std::array<int, 3>& from,
+                                    const std::array<int, 3>& to) const {
+        const double d = (mm(to) - mm(from)).length();
+        return QString("Length %1 mm").arg(formatMeasurement(d));
+    }
     // Whether a voxel lies on the current slice of `axis`.
     static bool onSlice(const std::array<int, 3>& v, int axis, int sliceIndex) {
         const int idx = axis == 0 ? v[2] : (axis == 1 ? v[1] : v[0]);
@@ -125,6 +145,12 @@ public:
     }
 
 private:
+    static QString formatMeasurement(double value) {
+        if (value >= 100.0) return QString::number(value, 'f', 0);
+        if (value >= 10.0) return QString::number(value, 'f', 1);
+        return QString::number(value, 'f', 2);
+    }
+
     static int wrap(int i) {
         const int n = int(palette().size());
         return ((i % n) + n) % n;

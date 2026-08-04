@@ -152,6 +152,46 @@ final class MarkupModel: ObservableObject {
 
     func color(_ m: Markup) -> Color { Self.paletteColor(m.colorIndex) }
 
+    // Measurements are always computed in physical space. The voxel positions
+    // remain the source of truth, but spacing converts them to millimetres so a
+    // line is not reported in pixels and a plane remains correct for anisotropic
+    // scans.
+    func measurementText(_ m: Markup) -> String? {
+        let pts = m.voxels.map { SIMD3<Float>(Float($0.x) * volume.spacing.x,
+                                               Float($0.y) * volume.spacing.y,
+                                               Float($0.z) * volume.spacing.z) }
+        switch m.kind {
+        case .point:
+            return nil
+        case .line where pts.count >= 2:
+            let d = simd_length(pts[1] - pts[0])
+            return "Length \(Self.format(d)) mm"
+        case .plane where pts.count >= 3:
+            let area = simd_length(simd_cross(pts[1] - pts[0], pts[2] - pts[0])) * 0.5
+            return "Area \(Self.format(area)) mm²"
+        default:
+            return nil
+        }
+    }
+
+    // Live placement measurement: before a markup is committed, show the
+    // physical distance from the last placed point to the cursor.
+    func liveLineMeasurementText(from: SIMD3<Int>, to: SIMD3<Int>) -> String {
+        let a = SIMD3<Float>(Float(from.x) * volume.spacing.x,
+                             Float(from.y) * volume.spacing.y,
+                             Float(from.z) * volume.spacing.z)
+        let b = SIMD3<Float>(Float(to.x) * volume.spacing.x,
+                             Float(to.y) * volume.spacing.y,
+                             Float(to.z) * volume.spacing.z)
+        return "Length \(Self.format(simd_length(b - a))) mm"
+    }
+
+    private static func format(_ value: Float) -> String {
+        if value >= 100 { return String(format: "%.0f", value) }
+        if value >= 10 { return String(format: "%.1f", value) }
+        return String(format: "%.2f", value)
+    }
+
     // MARK: - Geometry helpers
 
     // Voxel -> millimetre world position (matches marching-cubes vertices).
