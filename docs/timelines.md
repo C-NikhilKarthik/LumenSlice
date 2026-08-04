@@ -26,9 +26,9 @@
 - **Objective:** Establish the foundational cross-platform build system and display real DICOM imagery slices on screen.
 - **Deliverables:**
   - Configure top-level CMake systems to target Ninja build setups on Windows, Linux, and macOS.
-  - Boot a Sokol frame canvas rendering the required 3-button immediate toolbar layout.
+  - Boot the native platform shell and render the required workspace controls.
   - Map raw directory targets, parsing pixel data into continuous 1D float arrays.
-  - Set up dynamic GPU texture updating pipelines via `sg_update_image` handling full 3-axes scrolling lookups in real-time.
+  - Set up dynamic slice rendering pipelines handling full 3-axis scrolling in real time.
 
 ## Week 3–4: In-Memory Mask Processing Stack
 
@@ -45,7 +45,7 @@
 - **Deliverables:**
   - Embed a single-header Marching Cubes extraction pipeline.
   - Convert the 3D active mask grid into index-aligned array vectors containing native vertices and surface normal configurations.
-  - Write standard Sokol shader pipeline containers to render polygon assets with crisp Phong depth components.
+  - Connect the generated mesh to the native 3D view with crisp shaded rendering.
   - Bind spatial mouse adjustments to drive viewport scaling, rotational configurations, and tracking offsets.
 
 ## Week 7–8: Refining Filters, STL Exporter & Multi-OS CI Locking
@@ -54,5 +54,4 @@
 - **Deliverables:**
   - Add 3D neighborhood median filtering and dilation/erosion passes to eliminate noise and fill internal hollow air gaps.
   - Code the fast binary structural STL data exporter.
-  - Implement an embedded SQLite layer to automatically log patient processing sessions.
   - Integrate automated GitHub Actions workflows running automated MSVC, Apple Clang, and GCC compiler tests to lock down long-term open-source development stability.

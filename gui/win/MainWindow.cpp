@@ -513,43 +513,6 @@ QWidget* MainWindow::buildSegmentPanel() {
     });
     st_.tool = Tool::Threshold;
 
-    // Refine.
-    auto* refineBox = section("Refine");
-    auto* refineRow = new QHBoxLayout;
-    auto* shrinkBtn = new QPushButton("Shrink");
-    auto* growBtn = new QPushButton("Grow");
-    connect(shrinkBtn, &QPushButton::clicked, this, &MainWindow::refineShrink);
-    connect(growBtn, &QPushButton::clicked, this, &MainWindow::refineGrow);
-    refineRow->addWidget(shrinkBtn);
-    refineRow->addWidget(growBtn);
-    body(refineBox)->addLayout(refineRow);
-    auto* hollowBtn = new QPushButton("Hollow (1 voxel)");
-    connect(hollowBtn, &QPushButton::clicked, this, &MainWindow::refineHollow);
-    body(refineBox)->addWidget(hollowBtn);
-    auto* smoothBtn = new QPushButton("Smooth edges");
-    connect(smoothBtn, &QPushButton::clicked, this, &MainWindow::refineSmooth);
-    body(refineBox)->addWidget(smoothBtn);
-    v->addWidget(refineBox);
-
-    // Island cleanup. Keep the same operations and defaults as the macOS
-    // segmentation model; the implementation remains in the shared core.
-    auto* islandsBox = section("Islands");
-    auto* keepBtn = new QPushButton("Keep largest island");
-    connect(keepBtn, &QPushButton::clicked, this, &MainWindow::keepLargest);
-    body(islandsBox)->addWidget(keepBtn);
-    auto* removeRow = new QHBoxLayout;
-    removeSmallSpin_ = new QSpinBox;
-    removeSmallSpin_->setRange(1, 1000000000);
-    removeSmallSpin_->setValue(50);
-    removeRow->addWidget(new QLabel("Remove below voxels:"));
-    removeRow->addWidget(removeSmallSpin_);
-    auto* removeBtn = new QPushButton("Remove small islands");
-    connect(removeBtn, &QPushButton::clicked, this,
-            &MainWindow::removeSmallIslands);
-    removeRow->addWidget(removeBtn);
-    body(islandsBox)->addLayout(removeRow);
-    v->addWidget(islandsBox);
-
     // Grow from seeds.
     auto* seedsBox = section("Grow from seeds");
     body(seedsBox)->addWidget(new QLabel(
@@ -947,7 +910,8 @@ QWidget* MainWindow::buildQuad() {
     quadLayout_->setSpacing(8);
     const int axes[3] = {LUMEN_AXIS_AXIAL, LUMEN_AXIS_CORONAL,
                          LUMEN_AXIS_SAGITTAL};
-    const int cellPos[4][2] = {{0, 0}, {0, 1}, {1, 0}, {1, 1}};
+    // Match macOS: Axial + 3D on top, Coronal + Sagittal below.
+    const int cellPos[4][2] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
 
     for (int i = 0; i < 3; ++i) {
         auto* cell = new QWidget;
@@ -1040,6 +1004,35 @@ void MainWindow::resizeEvent(QResizeEvent* e) {
     positionBusy();
 }
 
+// The dedicated 3D tab uses the same MeshView as the quad, but expands it to
+// the full canvas while keeping the mesh state and controls shared.
+void MainWindow::setThreeDTabLayout(bool dedicated) {
+    if (!quadLayout_ || !quadCells_[3]) return;
+
+    maximized_ = -1;
+    quadLayout_->removeWidget(quadCells_[3]);
+    if (dedicated) {
+        for (int i = 0; i < 3; ++i)
+            if (quadCells_[i]) quadCells_[i]->hide();
+        quadLayout_->addWidget(quadCells_[3], 0, 0, 2, 2);
+        quadCells_[3]->show();
+    } else {
+        const int pos[4][2] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+        for (int i = 0; i < 3; ++i) {
+            if (!quadCells_[i]) continue;
+            quadLayout_->removeWidget(quadCells_[i]);
+            quadLayout_->addWidget(quadCells_[i], pos[i][0], pos[i][1]);
+            quadCells_[i]->show();
+        }
+        quadLayout_->addWidget(quadCells_[3], pos[3][0], pos[3][1]);
+        quadCells_[3]->show();
+    }
+    quadLayout_->setRowStretch(0, 1);
+    quadLayout_->setRowStretch(1, 1);
+    quadLayout_->setColumnStretch(0, 1);
+    quadLayout_->setColumnStretch(1, 1);
+}
+
 // Double-click maximizes a cell (hides the other three); double-click again
 // restores the 2x2 grid.
 void MainWindow::toggleMaximize(int cell) {
@@ -1049,7 +1042,7 @@ void MainWindow::toggleMaximize(int cell) {
             quadCells_[i]->setVisible(maximized_ == -1 || maximized_ == i);
 
     // Collapse the empty row/column so the maximized cell fills the canvas.
-    const int pos[4][2] = {{0, 0}, {0, 1}, {1, 0}, {1, 1}};
+    const int pos[4][2] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
     if (maximized_ == -1) {
         quadLayout_->setRowStretch(0, 1);
         quadLayout_->setRowStretch(1, 1);
@@ -1163,6 +1156,7 @@ void MainWindow::selectTab(int tab) {
     panels_->setCurrentIndex(tab);
     // Segment tab enables canvas tool interactions; others keep left-drag = W/L.
     st_.segmentInteractive = (tab == 1);
+    setThreeDTabLayout(tab == 2);
     // Markup placement is only active on the Markups tab with the toggle on.
     st_.markupPlacing = (tab == 4) && markups_.placing();
     if (tab == 3) rebuildExportSegmentList();  // reflect current segments/names
@@ -1171,6 +1165,10 @@ void MainWindow::selectTab(int tab) {
 }
 
 void MainWindow::onSliceScrolled(int axis, int index) {
+    if (axis < 0 || axis >= 3 || !st_.volume) return;
+    const int count = lumen_slice_count(st_.volume, axis);
+    if (count <= 0) return;
+    index = std::clamp(index, 0, count - 1);
     st_.sliceIndex[axis] = index;
     // Update the slider immediately (cheap). The repaint re-extracts the slice
     // (a coronal/sagittal reformat is tens of ms, far worse under memory paging),
@@ -1334,44 +1332,6 @@ void MainWindow::runMaskOp(const QString& busyText, std::function<void()> op) {
     refreshCanvas();  // repaint hides the mask overlay (busy) before the mutation
     QCoreApplication::processEvents();  // ensure the overlay is on screen
     heavyWatcher_.setFuture(QtConcurrent::run(std::move(op)));
-}
-
-void MainWindow::refineGrow() {
-    LumenVolume* v = st_.volume;
-    if (!v || lumen_seg_active(v) == 0) return;
-    runMaskOp("Growing…", [v] { lumen_seg_grow(v, 1); });
-}
-
-void MainWindow::refineShrink() {
-    LumenVolume* v = st_.volume;
-    if (!v || lumen_seg_active(v) == 0) return;
-    runMaskOp("Shrinking…", [v] { lumen_seg_shrink(v, 1); });
-}
-
-void MainWindow::refineHollow() {
-    LumenVolume* v = st_.volume;
-    if (!v || lumen_seg_active(v) == 0) return;
-    runMaskOp("Hollowing…", [v] { lumen_seg_hollow(v, 1); });
-}
-
-void MainWindow::refineSmooth() {
-    LumenVolume* v = st_.volume;
-    if (!v || lumen_seg_active(v) == 0) return;
-    runMaskOp("Smoothing…", [v] { lumen_seg_smooth(v, 1); });
-}
-
-void MainWindow::keepLargest() {
-    LumenVolume* v = st_.volume;
-    if (!v || lumen_seg_active(v) == 0) return;
-    runMaskOp("Keeping largest component…", [v] { lumen_seg_keep_largest(v); });
-}
-
-void MainWindow::removeSmallIslands() {
-    LumenVolume* v = st_.volume;
-    if (!v || lumen_seg_active(v) == 0 || !removeSmallSpin_) return;
-    const long minV = removeSmallSpin_->value();
-    runMaskOp("Removing small islands…",
-              [v, minV] { lumen_seg_remove_small(v, minV); });
 }
 
 void MainWindow::growFromSeeds() {

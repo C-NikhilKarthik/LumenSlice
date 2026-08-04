@@ -78,12 +78,6 @@ private slots:
     void addSegment();
     void applyThreshold();
     void applyOtsu();
-    void refineGrow();
-    void refineShrink();
-    void refineHollow();
-    void refineSmooth();
-    void keepLargest();
-    void removeSmallIslands();
     void growFromSeeds();
     void undo();
     void redo();
@@ -110,6 +104,7 @@ private:
     QWidget* buildMarkupPanel();
     QWidget* buildQuad();
     void toggleMaximize(int cell);
+    void setThreeDTabLayout(bool dedicated);
     void rebuildMarkupList();
     void updateMarkupPaletteSelection();
     void updateMarkupPending();
@@ -121,7 +116,7 @@ private:
     void finishMeshGeneration();
     int effectiveDownsample() const;  // coarsen mesh on very large volumes
     // Run a mask-mutating op on a worker thread with a busy overlay (snapshots undo
-    // first). Keeps heavy ops (grow-from-seeds, refine) from freezing the UI on
+    // first). Keeps heavy ops (grow-from-seeds) from freezing the UI on
     // large volumes.
     void runMaskOp(const QString& busyText, std::function<void()> op);
     void scheduleMeshRefresh();
@@ -194,7 +189,6 @@ private:
     QLabel* seedItersLabel_ = nullptr;
     QLabel* seedGateLabel_ = nullptr;
     QPushButton* growSeedsBtn_ = nullptr;
-    QSpinBox* removeSmallSpin_ = nullptr;
     QPushButton* undoBtn_ = nullptr;
     QPushButton* redoBtn_ = nullptr;
     QCheckBox* overlayCheck_ = nullptr;
@@ -242,7 +236,7 @@ private:
     QTimer meshRefreshTimer_;
     bool meshRefreshPending_ = false;
     QTimer countsTimer_;  // debounces the full-volume segment histogram
-    QFutureWatcher<void> heavyWatcher_;  // async mask ops (grow-from-seeds, refine)
+    QFutureWatcher<void> heavyWatcher_;  // async grow-from-seeds mask operation
     QTimer scrollThrottle_;  // caps slice re-extraction rate during wheel-scroll
     int lastScrollAxis_ = -1;
     bool scrollDirty_ = false;

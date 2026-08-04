@@ -337,14 +337,22 @@ void SliceView::wheelEvent(QWheelEvent* e) {
     if (!v) return;
     const int count = lumen_slice_count(v, axis_);
     if (count <= 0) return;
+    // Normalize high-resolution and regular wheels like the macOS catcher.
     const QPoint pixel = e->pixelDelta();
     const QPoint angle = e->angleDelta();
-    const double delta = pixel.y() != 0 ? pixel.y() : (angle.y() / 12.0);
+    const double delta = pixel.y() != 0
+                             ? double(pixel.y())
+                             : double(angle.y()) / 12.0;
+    if (delta == 0.0) {
+        e->accept();
+        return;
+    }
     wheelAccum_ += delta;
     while (std::abs(wheelAccum_) >= 10.0) {
-        const int step = wheelAccum_ > 0 ? -1 : 1;
-        wheelAccum_ -= step > 0 ? 10.0 : -10.0;
-        const int next = std::clamp(st_->sliceIndex[axis_] + step, 0, count - 1);
+        const int step = wheelAccum_ > 0 ? 1 : -1;
+        wheelAccum_ -= step * 10.0;
+        const int current = std::clamp(st_->sliceIndex[axis_], 0, count - 1);
+        const int next = std::clamp(current + step, 0, count - 1);
         if (next != st_->sliceIndex[axis_]) emit sliceScrolled(axis_, next);
     }
     e->accept();

@@ -15,9 +15,9 @@ The core that reads DICOM, extracts slices, and edits masks knows nothing about
 windows, gestures, or SwiftUI. The UI knows nothing about C++ types. That
 separation is a deliberate rule (see `docs/agent.md` and
 [`docs/engineering/ARCHITECTURE.md`](../engineering/ARCHITECTURE.md)), and it exists
-so that either side can change without dragging the other along: the same C++ core
-was built for a Sokol/ImGui shell and now drives a SwiftUI shell without a single
-edit to the core (see the "Architecture note" in [`README.md`](../../README.md)).
+so that either side can change without dragging the other along: the same
+platform-neutral C++ core drives native SwiftUI and Qt shells without requiring
+changes to the core (see the "Architecture note" in [`README.md`](../../README.md)).
 
 The catch is that Swift cannot call C++ directly. So there is a thin middle layer,
 a pure-C bridge, that both sides can speak. It is the only place the two worlds

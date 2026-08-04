@@ -86,7 +86,7 @@ struct LumenSliceApp: App {
             // Cmd-Z drops the last placed markup point (or the last committed markup);
             // everywhere else it drives the segmentation RLE snapshot stack the
             // sidebar buttons use, so every mask edit (threshold, grow, paint, erase,
-            // refine, grow-from-seeds, scissor, clear) is reversible from the
+            // grow-from-seeds, scissor, clear) is reversible from the
             // keyboard. Menu items gray out when there is nothing to undo/redo. The
             // App observes its models + selectedTab, so these rebuild as state
             // changes. (Markups has no redo.)

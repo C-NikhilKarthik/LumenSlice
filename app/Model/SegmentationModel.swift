@@ -70,7 +70,6 @@ final class SegmentationModel: ObservableObject {
     @Published var thresholdHi: Float = 3000
     @Published var tolerance: Float = 120
     @Published var brushRadius: Int = 12          // slice pixels
-    @Published var removeSmallMin: Int = 50       // islands cutoff (voxels)
     @Published var growSeedIters: Int = 25        // grow-from-seeds passes
     @Published var showOverlay = true { didSet { refreshAllOverlays() } }
 
@@ -384,21 +383,6 @@ final class SegmentationModel: ObservableObject {
 
     func endStroke() { didMutateMask() }
 
-    func keepLargest() {
-        guard let h = volume.handle, activeID > 0 else { return }
-        lumen_seg_push_undo(h)
-        thresholdNeedsUndoCapture = true
-        if lumen_seg_keep_largest(h) > 0 { didMutateMask() } else { refreshUndoState() }
-    }
-
-    func removeSmall() {
-        guard let h = volume.handle, activeID > 0 else { return }
-        lumen_seg_push_undo(h)
-        thresholdNeedsUndoCapture = true
-        if lumen_seg_remove_small(h, Int(removeSmallMin)) > 0 { didMutateMask() }
-        else { refreshUndoState() }
-    }
-
     // Competitive grow-cut from the current multi-label seeds. Runs over the seeds'
     // bounding box in the C++ core; the whole mask is one undo step. Slower than the
     // other ops (bounded by seed extent × iterations), but capped by growSeedIters.
@@ -435,18 +419,6 @@ final class SegmentationModel: ObservableObject {
         if cleared > 0 { didMutateMask(); return true }
         refreshUndoState()
         return false
-    }
-
-    func growMargin() { applyMorphology { lumen_seg_grow($0, 1) } }
-    func shrinkMargin() { applyMorphology { lumen_seg_shrink($0, 1) } }
-    func hollow() { applyMorphology { lumen_seg_hollow($0, 1) } }
-    func smooth() { applyMorphology { lumen_seg_smooth($0, 1) } }
-
-    private func applyMorphology(_ op: (OpaquePointer) -> Int) {
-        guard let h = volume.handle, activeID > 0 else { return }
-        lumen_seg_push_undo(h)
-        thresholdNeedsUndoCapture = true
-        if op(h) > 0 { didMutateMask() } else { refreshUndoState() }
     }
 
     func clearActive() {

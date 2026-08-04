@@ -1,8 +1,8 @@
 import SwiftUI
 
 // Segment-tab controls: a multi-segment list (colour / visibility / name / active),
-// the active tool (threshold / grow / paint / erase) with its tuning, island
-// cleanup, and undo/redo. Threshold is live (debounced); grow seeds on a click;
+// the active tool (threshold / grow / paint / erase) with its tuning and
+// undo/redo. Threshold is live (debounced); grow seeds on a click;
 // paint/erase drag a brush in the canvas.
 struct SegmentControls: View {
     @EnvironmentObject var model: VolumeModel
@@ -20,7 +20,6 @@ struct SegmentControls: View {
                 segmentsSection
                 toolSection
                 toolDetailSection
-                refineSection
                 growSeedsSection
                 editSection
             }
@@ -172,37 +171,6 @@ struct SegmentControls: View {
                        in: 1...80, step: 1)
             }
         }
-    }
-
-    // MARK: - Refine (margin + smooth)
-
-    private var refineSection: some View {
-        Section("Refine") {
-            Text("Grow/shrink the active segment by one voxel, or smooth its edges.")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-            HStack(spacing: 8) {
-                Button { seg.shrinkMargin() } label: {
-                    Label("Shrink", systemImage: "minus.magnifyingglass")
-                        .frame(maxWidth: .infinity)
-                }
-                Button { seg.growMargin() } label: {
-                    Label("Grow", systemImage: "plus.magnifyingglass")
-                        .frame(maxWidth: .infinity)
-                }
-            }
-            Button { seg.hollow() } label: {
-                Label("Hollow (1 voxel)", systemImage: "circle.dotted")
-                    .frame(maxWidth: .infinity)
-            }
-            Button { seg.smooth() } label: {
-                Label("Smooth edges", systemImage: "wand.and.rays")
-                    .frame(maxWidth: .infinity)
-            }
-        }
-        .disabled(seg.activeID == 0)
-        .buttonStyle(.bordered)
-        .controlSize(.small)
     }
 
     // MARK: - Grow from seeds

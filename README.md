@@ -6,7 +6,7 @@ Built with a minimalist game-engine philosophy, LumenSlice eliminates the heavy 
 
 ## Core Features
 
-- **Zero-Bloat Architecture:** Powered by Sokol and Dear ImGui — no heavy Qt or VTK/ITK framework overhead.
+- **Native platform shells:** SwiftUI/SceneKit on macOS and Qt 6/OpenGLWidgets on Windows, sharing the same C++ core.
 - **Contiguous 3D Voxel Buffering:** Volumetric data tracks through tightly packed linear memory for rapid computing passes.
 - **Real-time Tri-Axis Views:** Instantly inspect, scroll, and contrast-adjust Axial, Coronal, and Sagittal slice dimensions using highly responsive texture pipelines.
 - **Multi-Threaded Segmentation:** Harness multi-threaded CPU routines for fast threshold calculations, interactive 3D paint tools, and seed-growing operations.
@@ -17,11 +17,9 @@ Built with a minimalist game-engine philosophy, LumenSlice eliminates the heavy 
 
 | Concern                        | Library                                                                  |
 | ------------------------------ | ------------------------------------------------------------------------ |
-| Graphics context handling      | `sokol_app.h` / `sokol_gfx.h` (Metal, DirectX11/12, OpenGL 3.3+, Vulkan) |
-| Immediate GUI controls         | Dear ImGui (`sokol_imgui.h`)                                             |
+| macOS UI and 3D view           | SwiftUI and SceneKit                                                    |
+| Windows UI and 3D view         | Qt 6 Widgets and OpenGLWidgets                                          |
 | DICOM input operations         | Minimized DCMTK parsing core (`dcmdata`)                                 |
-| Linear transformation routines | Eigen (header-only math engine)                                          |
-| Session cache systems          | SQLite (serverless, file-based)                                          |
 
 ## Documentation
 
@@ -52,10 +50,8 @@ xcode-select --install   # if not already installed
 brew install dcmtk
 ```
 
-> The future Windows/Linux cross-platform targets will use the C++/CMake/Ninja
-> toolchain described in [`docs/timelines.md`](docs/timelines.md). Windows now
-> has a native Win32 shell that reuses the same C++ core; the richer SwiftUI
-> shell remains the macOS front-end.
+> The Windows target uses the C++/CMake/Ninja toolchain and Qt 6 shell described
+> in the project documentation; the macOS target uses the SwiftUI shell.
 
 ### 2. Build & Run (Phase 1 — macOS, SwiftUI shell)
 
@@ -237,17 +233,11 @@ Release — download it from the Releases page.
 Caveat: the bundle targets the **build host's architecture** (Apple Silicon →
 arm64; an Intel Mac can't run it).
 
-### Architecture note (SwiftUI shell)
+### Architecture note
 
-The original blueprint specified a Sokol + Dear ImGui shell for a single
-cross-platform binary. Phase 1 instead uses a **SwiftUI** front-end for a cleaner,
-fully-native macOS look. Crucially, this only swaps the _presentation layer_: the
-data-oriented C++ core (`src/core`, `src/io`, `src/visualization`) is untouched
-and stays UI-agnostic per [`docs/agent.md`](docs/agent.md) §1, exposed to Swift
-through a thin C API (`src/bridge`). The Sokol/ImGui path can be revived for the
-Windows/Linux targets in the weeks 7–8 cross-platform work without changing the
-core. (`docs/context.md` and the stack table above still describe the original
-Sokol plan and will be reconciled as cross-platform work resumes.)
+The macOS SwiftUI shell and Windows Qt shell are presentation layers over the
+same data-oriented C++ core (`src/core`, `src/io`, `src/visualization`), exposed to
+Swift and the Windows UI through the thin C bridge in `src/bridge`.
 
 ## License
 
