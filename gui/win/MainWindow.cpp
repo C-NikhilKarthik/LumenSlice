@@ -36,6 +36,7 @@
 #include <QSpinBox>
 #include <QStackedWidget>
 #include <QStatusBar>
+#include <QStyle>
 #include <QStringList>
 #include <QTableWidget>
 #include <QTimer>
@@ -80,24 +81,6 @@ void finishPanel(QScrollArea* scroll, QWidget* page) {
 }
 QVBoxLayout* body(QGroupBox* box) {
     return qobject_cast<QVBoxLayout*>(box->layout());
-}
-
-// Render a text glyph into a crisp QIcon so rail/toolbar buttons show a proper
-// sized icon rather than tiny inline text.
-QIcon glyphIcon(const QString& glyph, int px, QColor color) {
-    const int s = px + 8;
-    QPixmap pm(s, s);
-    pm.fill(Qt::transparent);
-    QPainter p(&pm);
-    p.setRenderHint(QPainter::Antialiasing, true);
-    p.setRenderHint(QPainter::TextAntialiasing, true);
-    QFont f = p.font();
-    f.setPixelSize(px);
-    p.setFont(f);
-    p.setPen(color);
-    p.drawText(pm.rect(), Qt::AlignCenter, glyph);
-    p.end();
-    return QIcon(pm);
 }
 
 // Make a segment name safe to use as a filename stem.
@@ -206,15 +189,20 @@ QWidget* MainWindow::buildTabRail() {
     v->setContentsMargins(12, 16, 12, 16);
     v->setSpacing(10);
 
-    struct R { const char* glyph; const char* label; };
-    const R items[] = {{"◧", "View"}, {"✎", "Seg"}, {"◈", "3D"},
-                       {"⤓", "Save"}, {"⌖", "Mark"}};
+    struct R { QStyle::StandardPixmap icon; const char* label; };
+    const R items[] = {
+        {QStyle::SP_FileDialogDetailedView, "Visualize"},
+        {QStyle::SP_DialogApplyButton, "Segment"},
+        {QStyle::SP_ComputerIcon, "3D"},
+        {QStyle::SP_DialogSaveButton, "Export"},
+        {QStyle::SP_FileDialogInfoView, "Markups"},
+    };
     auto* group = new QButtonGroup(this);
     for (int i = 0; i < 5; ++i) {
         auto* b = new QToolButton;
         b->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
-        b->setIcon(glyphIcon(items[i].glyph, 36, QColor(0xe9, 0xec, 0xf3)));
-        b->setIconSize(QSize(36, 36));
+        b->setIcon(style()->standardIcon(items[i].icon));
+        b->setIconSize(QSize(28, 28));
         b->setText(items[i].label);
         b->setCheckable(true);
         b->setFixedSize(68, 70);
@@ -1724,6 +1712,12 @@ void MainWindow::rebuildSegmentList() {
     for (int i = 0; i < count; ++i) {
         const int id = lumen_seg_segment_id_at(v, i);
         auto* row = new QWidget;
+        row->setObjectName("segmentRow");
+        row->setStyleSheet(id == active
+                               ? "QWidget#segmentRow{background:#283b66;border:1px solid #4f7cf0;"
+                                 "border-radius:6px;}"
+                               : "QWidget#segmentRow{background:transparent;border:1px solid transparent;"
+                                 "border-radius:6px;}");
         auto* h = new QHBoxLayout(row);
         h->setContentsMargins(2, 2, 2, 2);
         h->setSpacing(4);
@@ -1736,6 +1730,28 @@ void MainWindow::rebuildSegmentList() {
             refreshCanvas();
         });
         h->addWidget(vis);
+
+        // Explicit active-segment selection. The highlighted row and check icon
+        // make this behave like the macOS segment list instead of the old
+        // ambiguous trailing dot.
+        auto* activeBtn = new QToolButton;
+        activeBtn->setIcon(style()->standardIcon(QStyle::SP_DialogApplyButton));
+        activeBtn->setIconSize(QSize(16, 16));
+        activeBtn->setFixedSize(24, 24);
+        activeBtn->setCheckable(true);
+        activeBtn->setChecked(id == active);
+        activeBtn->setAutoRaise(true);
+        activeBtn->setToolTip("Select active segment");
+        activeBtn->setStyleSheet(
+            "QToolButton{border:1px solid transparent;border-radius:5px;padding:2px;}"
+            "QToolButton:checked{background:#4f7cf0;border-color:#79a0ff;}"
+            "QToolButton:!checked{opacity:0.55;}");
+        connect(activeBtn, &QToolButton::clicked, this, [this, id] {
+            if (st_.volume) lumen_seg_set_active(st_.volume, id);
+            rebuildSegmentList();
+            updateSegmentCounts();
+        });
+        h->addWidget(activeBtn);
 
         // Colour swatch.
         int r = 0, g = 0, b = 0;
@@ -1774,22 +1790,11 @@ void MainWindow::rebuildSegmentList() {
         segCountLabels_[id] = cnt;
         h->addWidget(cnt);
 
-        // Active toggle.
-        auto* activeBtn = new QToolButton;
-        activeBtn->setText("●");
-        activeBtn->setCheckable(true);
-        activeBtn->setChecked(id == active);
-        activeBtn->setToolTip("Set active");
-        connect(activeBtn, &QToolButton::clicked, this, [this, id] {
-            lumen_seg_set_active(st_.volume, id);
-            rebuildSegmentList();
-            updateSegmentCounts();
-        });
-        h->addWidget(activeBtn);
-
         // Delete.
         auto* del = new QToolButton;
-        del->setText("✕");
+        del->setIcon(style()->standardIcon(QStyle::SP_TrashIcon));
+        del->setIconSize(QSize(16, 16));
+        del->setToolTip("Delete segment");
         connect(del, &QToolButton::clicked, this, [this, id] {
             lumen_seg_remove(st_.volume, id);
             segNames_.remove(id);
