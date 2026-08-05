@@ -177,9 +177,9 @@ struct SegmentControls: View {
 
     private var growSeedsSection: some View {
         Section("Grow from seeds") {
-            Text("With the Paint tool, dab a seed inside two or more segments — one "
-                 + "per structure plus a background — then click Grow. Growth only "
-                 + "happens when you click; nothing grows while you paint.")
+            Text("Paint a seed in each region with a different segment. Initialize "
+                 + "a preview, inspect the result through the slices, then apply it "
+                 + "or cancel and add more seeds.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
             VStack(alignment: .leading, spacing: 4) {
@@ -191,8 +191,21 @@ struct SegmentControls: View {
                         .monospacedDigit()
                 }
                 Slider(value: Binding(get: { Double(seg.growSeedIters) },
-                                      set: { seg.growSeedIters = Int($0) }),
+                       set: { seg.growSeedIters = Int($0) }),
                        in: 5...100, step: 1)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("Seed locality")
+                    Spacer()
+                    Text(String(format: "%.1f", seg.growSeedLocality))
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                Slider(value: $seg.growSeedLocality, in: 0...10, step: 0.1)
+                Text("Higher values keep growth closer to the painted seeds.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
             // Gate exactly like Slicer: at least two segments must carry seeds.
             if !seg.canGrowFromSeeds {
@@ -202,15 +215,28 @@ struct SegmentControls: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
-            Button {
-                seg.growFromSeeds()
-            } label: {
-                Label("Grow from seeds", systemImage: "aqi.medium")
-                    .frame(maxWidth: .infinity)
+            if seg.growPreviewActive {
+                HStack(spacing: 8) {
+                    Button { seg.applyGrowPreview() } label: {
+                        Label("Apply", systemImage: "checkmark.circle.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    Button { seg.cancelGrowPreview() } label: {
+                        Label("Cancel", systemImage: "xmark.circle")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                }
+            } else {
+                Button { seg.initializeGrowPreview() } label: {
+                    Label("Initialize preview", systemImage: "sparkles")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .disabled(!seg.canGrowFromSeeds)
             }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .disabled(!seg.canGrowFromSeeds)
         }
     }
 

@@ -6,6 +6,7 @@
 #include <QPainterPath>
 #include <QPaintEvent>
 #include <QResizeEvent>
+#include <QStyle>
 #include <QToolButton>
 #include <QWheelEvent>
 #include <algorithm>
@@ -57,9 +58,10 @@ void SliceView::buildZoomBar() {
     auto* h = new QHBoxLayout(zoomBar_);
     h->setContentsMargins(4, 2, 4, 2);
     h->setSpacing(1);
-    auto mk = [&](const QString& t, const QString& tip) {
+    auto mk = [&](QStyle::StandardPixmap icon, const QString& tip) {
         auto* b = new QToolButton(zoomBar_);
-        b->setText(t);
+        b->setIcon(style()->standardIcon(icon));
+        b->setIconSize(QSize(16, 16));
         b->setToolTip(tip);
         b->setStyleSheet(
             "QToolButton{color:#e6e8ee;border:none;padding:2px 7px;font-size:16px;}"
@@ -67,13 +69,13 @@ void SliceView::buildZoomBar() {
         h->addWidget(b);
         return b;
     };
-    connect(mk("+", "Zoom in"), &QToolButton::clicked, this,
+    connect(mk(QStyle::SP_ArrowUp, "Zoom in"), &QToolButton::clicked, this,
             [this] { zoomStep(1.25); });
-    connect(mk("−", "Zoom out"), &QToolButton::clicked, this,
+    connect(mk(QStyle::SP_ArrowDown, "Zoom out"), &QToolButton::clicked, this,
             [this] { zoomStep(0.8); });
-    connect(mk("⟲", "Reset zoom"), &QToolButton::clicked, this,
+    connect(mk(QStyle::SP_BrowserReload, "Reset zoom"), &QToolButton::clicked, this,
             &SliceView::resetZoom);
-    connect(mk("⛶", "Maximize / restore this view"), &QToolButton::clicked, this,
+    connect(mk(QStyle::SP_TitleBarMaxButton, "Maximize / restore this view"), &QToolButton::clicked, this,
             [this] { emit doubleClicked(); });
     zoomBar_->adjustSize();
 }
@@ -461,6 +463,18 @@ void SliceView::paintEvent(QPaintEvent*) {
 void SliceView::wheelEvent(QWheelEvent* e) {
     LumenVolume* v = st_->volume;
     if (!v) return;
+    if (e->modifiers() & Qt::ControlModifier) {
+        const QPoint delta = e->angleDelta().isNull() ? e->pixelDelta() : e->angleDelta();
+        const double amount = delta.y() != 0 ? double(delta.y()) / 120.0 : double(delta.x()) / 120.0;
+        if (amount != 0.0) {
+            zoomAnchor_ = e->position().toPoint();
+            zoom_ = std::clamp(zoom_ * std::pow(1.15, amount), 1.0, 8.0);
+            if (zoom_ <= 1.0) pan_ = QPointF(0, 0);
+            update();
+        }
+        e->accept();
+        return;
+    }
     const int count = lumen_slice_count(v, axis_);
     if (count <= 0) return;
     // Normalize high-resolution and regular wheels like the macOS catcher.

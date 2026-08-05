@@ -154,6 +154,13 @@ MainWindow::MainWindow() {
     connect(&countsTimer_, &QTimer::timeout, this,
             &MainWindow::recomputeSegmentCounts);
     connect(&heavyWatcher_, &QFutureWatcher<void>::finished, this, [this] {
+        if (growPreviewPending_) {
+            growPreviewPending_ = false;
+            growPreviewActive_ = true;
+            if (growSeedsBtn_) growSeedsBtn_->setVisible(false);
+            if (growApplyBtn_) growApplyBtn_->setVisible(true);
+            if (growCancelBtn_) growCancelBtn_->setVisible(true);
+        }
         st_.busy = false;
         showBusy("");
         refreshCanvas();
@@ -504,7 +511,8 @@ QWidget* MainWindow::buildSegmentPanel() {
     // Grow from seeds.
     auto* seedsBox = section("Grow from seeds");
     body(seedsBox)->addWidget(new QLabel(
-        "Paint a seed in two or more segments, then Grow."));
+        "Paint a seed in each region using a different segment. Initialize a "
+        "preview, inspect it through the slices, then apply or cancel it."));
     seedItersLabel_ = new QLabel("Iterations: 25");
     seedItersSlider_ = new QSlider(Qt::Horizontal);
     seedItersSlider_->setRange(5, 100);
@@ -514,12 +522,32 @@ QWidget* MainWindow::buildSegmentPanel() {
     });
     body(seedsBox)->addWidget(seedItersLabel_);
     body(seedsBox)->addWidget(seedItersSlider_);
+    seedLocalityLabel_ = new QLabel("Seed locality: 0.0");
+    seedLocalitySlider_ = new QSlider(Qt::Horizontal);
+    seedLocalitySlider_->setRange(0, 100);
+    seedLocalitySlider_->setValue(0);
+    connect(seedLocalitySlider_, &QSlider::valueChanged, this, [this](int val) {
+        seedLocalityLabel_->setText(QString("Seed locality: %1").arg(val / 10.0, 0, 'f', 1));
+    });
+    body(seedsBox)->addWidget(seedLocalityLabel_);
+    body(seedsBox)->addWidget(seedLocalitySlider_);
     seedGateLabel_ = new QLabel("Seed at least two segments (0/2 seeded).");
     body(seedsBox)->addWidget(seedGateLabel_);
-    growSeedsBtn_ = new QPushButton("Grow from seeds");
+    growSeedsBtn_ = new QPushButton("Initialize preview");
     connect(growSeedsBtn_, &QPushButton::clicked, this,
             &MainWindow::growFromSeeds);
     body(seedsBox)->addWidget(growSeedsBtn_);
+    auto* growActions = new QHBoxLayout;
+    growApplyBtn_ = new QPushButton("Apply result");
+    growCancelBtn_ = new QPushButton("Cancel preview");
+    growApplyBtn_->setObjectName("accent");
+    growApplyBtn_->setVisible(false);
+    growCancelBtn_->setVisible(false);
+    connect(growApplyBtn_, &QPushButton::clicked, this, &MainWindow::applyGrowPreview);
+    connect(growCancelBtn_, &QPushButton::clicked, this, &MainWindow::cancelGrowPreview);
+    growActions->addWidget(growApplyBtn_);
+    growActions->addWidget(growCancelBtn_);
+    body(seedsBox)->addLayout(growActions);
     v->addWidget(seedsBox);
 
     // Edit.
@@ -1100,6 +1128,8 @@ void MainWindow::onLoadReady() {
 
 void MainWindow::adoptLoadedVolume(const LoadResult& r) {
     vol_.adopt(r.volume);
+    growPreviewPending_ = false;
+    growPreviewActive_ = false;
     const std::string status = r.message.toStdString();
     st_.volume = vol_.get();
     LumenVolume* v = st_.volume;
@@ -1226,7 +1256,8 @@ void MainWindow::onFocusPicked(int x, int y, int z) {
 }
 
 void MainWindow::onStrokeBegan() {
-    if (!st_.volume) return;
+    if (!st_.volume || st_.busy || heavyWatcher_.isRunning()) return;
+    cancelGrowPreview();
     lumen_seg_push_undo(st_.volume);
     updateUndoRedo();
     if (st_.tool == Tool::Paint || st_.tool == Tool::Erase) {
@@ -1237,7 +1268,7 @@ void MainWindow::onStrokeBegan() {
 
 void MainWindow::onPaintStroke(int axis, int index, int cx, int cy, int radius,
                                bool add) {
-    if (!st_.volume) return;
+    if (!st_.volume || st_.busy || heavyWatcher_.isRunning()) return;
     lumen_seg_paint(st_.volume, axis, index, cx, cy, radius, add ? 1 : 0);
     // The mask changes on every input event, but extracting three full overlays
     // and rescanning the whole mask for counts does not need to happen at input
@@ -1259,7 +1290,8 @@ void MainWindow::onStrokeEnded() {
 }
 
 void MainWindow::onFloodClicked(int x, int y, int z) {
-    if (!st_.volume) return;
+    if (!st_.volume || st_.busy || heavyWatcher_.isRunning()) return;
+    cancelGrowPreview();
     lumen_seg_region_grow(st_.volume, x, y, z, st_.tolerance);
     refreshCanvas();
     updateSegmentCounts();
@@ -1267,7 +1299,8 @@ void MainWindow::onFloodClicked(int x, int y, int z) {
 }
 
 void MainWindow::onLevelTraceClicked(int axis, int index, int cx, int cy) {
-    if (!st_.volume) return;
+    if (!st_.volume || st_.busy || heavyWatcher_.isRunning()) return;
+    cancelGrowPreview();
     lumen_seg_level_trace(st_.volume, axis, index, cx, cy);
     refreshCanvas();
     updateSegmentCounts();
@@ -1296,7 +1329,9 @@ void MainWindow::applyThreshold() {
     // the live drag snapshots once on editingStarted, and presets/Otsu snapshot
     // before calling this.
     LumenVolume* v = st_.volume;
-    if (!v || lumen_seg_active(v) == 0 || !threshSlider_) return;
+    if (!v || st_.busy || heavyWatcher_.isRunning() ||
+        lumen_seg_active(v) == 0 || !threshSlider_) return;
+    cancelGrowPreview();
     lumen_seg_threshold(v, float(threshSlider_->lowValue()),
                         float(threshSlider_->highValue()));
     refreshCanvas();
@@ -1307,6 +1342,7 @@ void MainWindow::applyThreshold() {
 void MainWindow::applyOtsu() {
     LumenVolume* v = st_.volume;
     if (!v || lumen_seg_active(v) == 0) return;
+    cancelGrowPreview();
     // Otsu + threshold are both full-volume passes; run off the UI thread.
     runMaskOp("Auto-threshold (Otsu)…", [v] {
         const float t = lumen_seg_otsu(v);
@@ -1330,15 +1366,41 @@ void MainWindow::runMaskOp(const QString& busyText, std::function<void()> op) {
 
 void MainWindow::growFromSeeds() {
     LumenVolume* v = st_.volume;
-    if (!v) return;
+    if (!v || st_.busy || heavyWatcher_.isRunning() || growPreviewActive_ ||
+        growPreviewPending_) return;
     const int iters = seedItersSlider_->value();
+    const float locality = seedLocalitySlider_ ? float(seedLocalitySlider_->value()) / 10.0f : 0.0f;
+    growPreviewPending_ = true;
     runMaskOp("Growing from seeds…",
-              [v, iters] { lumen_seg_grow_from_seeds(v, iters); });
+              [v, iters, locality] { lumen_seg_grow_from_seeds(v, iters, locality); });
+}
+
+void MainWindow::applyGrowPreview() {
+    growPreviewActive_ = false;
+    if (growApplyBtn_) growApplyBtn_->setVisible(false);
+    if (growCancelBtn_) growCancelBtn_->setVisible(false);
+    if (growSeedsBtn_) growSeedsBtn_->setVisible(true);
+    updateSegmentCounts();
+    updateUndoRedo();
+}
+
+void MainWindow::cancelGrowPreview() {
+    if (!growPreviewActive_ || st_.busy || !st_.volume) return;
+    if (lumen_seg_undo(st_.volume)) {
+        growPreviewActive_ = false;
+        if (growApplyBtn_) growApplyBtn_->setVisible(false);
+        if (growCancelBtn_) growCancelBtn_->setVisible(false);
+        if (growSeedsBtn_) growSeedsBtn_->setVisible(true);
+        refreshCanvas();
+        updateSegmentCounts();
+        updateUndoRedo();
+    }
 }
 
 void MainWindow::clearActive() {
     LumenVolume* v = st_.volume;
     if (!v || lumen_seg_active(v) == 0) return;
+    cancelGrowPreview();
     lumen_seg_push_undo(v);
     lumen_seg_clear(v);
     updateUndoRedo();
@@ -1839,7 +1901,13 @@ void MainWindow::recomputeSegmentCounts() {
     if (seedGateLabel_)
         seedGateLabel_->setText(
             QString("Seed at least two segments (%1/2 seeded).").arg(seeded));
-    if (growSeedsBtn_) growSeedsBtn_->setEnabled(seeded >= 2 && !generating_);
+    if (growSeedsBtn_) {
+        growSeedsBtn_->setEnabled(seeded >= 2 && !generating_ &&
+                                  !growPreviewActive_ && !growPreviewPending_);
+        growSeedsBtn_->setVisible(!growPreviewActive_ && !growPreviewPending_);
+    }
+    if (growApplyBtn_) growApplyBtn_->setVisible(growPreviewActive_);
+    if (growCancelBtn_) growCancelBtn_->setVisible(growPreviewActive_);
     if (generateBtn_)
         generateBtn_->setEnabled(total > 0 && !generating_);
     if (exportStlBtn_)

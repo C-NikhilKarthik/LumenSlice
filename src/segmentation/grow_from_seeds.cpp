@@ -39,7 +39,7 @@ bool seed_bbox(const LabelVolume& mask, int margin, int& x0, int& y0, int& z0,
 } // namespace
 
 long grow_from_seeds(const Volume& vol, LabelVolume& mask, int max_iters,
-                     int margin) {
+                     int margin, float distance_penalty) {
     if (!vol.valid() || !mask.valid()) return 0;
     if (mask.width() != vol.width || mask.height() != vol.height ||
         mask.depth() != vol.depth) {
@@ -47,6 +47,7 @@ long grow_from_seeds(const Volume& vol, LabelVolume& mask, int max_iters,
     }
     if (max_iters < 1) max_iters = 1;
     if (margin < 0) margin = 0;
+    distance_penalty = std::max(0.0f, distance_penalty);
 
     int x0, y0, z0, x1, y1, z1;
     if (!seed_bbox(mask, margin, x0, y0, z0, x1, y1, z1)) return 0;
@@ -131,7 +132,14 @@ long grow_from_seeds(const Volume& vol, LabelVolume& mask, int max_iters,
                                 const float g =
                                     1.0f - std::fabs(hu_a - hu[ni]) / denom;
                                 if (g <= 0.0f) continue;
-                                const float attack = cur_str[ni] * g;
+                                const float stepMm = k < 2
+                                    ? vol.spacing_x
+                                    : (k < 4 ? vol.spacing_y : vol.spacing_z);
+                                // Keep the 0..10 UI range useful with the
+                                // normalized HU similarity used by this kernel.
+                                const float locality =
+                                    std::max(0.0f, g - distance_penalty * stepMm * 0.1f);
+                                const float attack = cur_str[ni] * locality;
                                 // Strict '>' means a seed at strength 1 can never be
                                 // overwritten, so painted strokes are preserved.
                                 if (attack > best_str) {

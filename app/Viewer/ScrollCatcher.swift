@@ -19,6 +19,7 @@ import AppKit
 struct CanvasInputCatcher: NSViewRepresentable {
     let onStep: (Int) -> Void              // signed number of slices to move
     var onMove: ((CGPoint?) -> Void)?      // pointer in view coords, nil when outside
+    var onMagnify: ((CGFloat) -> Void)?    // trackpad pinch delta
     var onZoomBegin: ((CGPoint) -> Void)?  // right-down point (zoom anchor)
     var onZoom: ((CGFloat) -> Void)?       // right-drag dy: up (+) = zoom in
     var onShiftLocate: ((CGPoint) -> Void)? // Shift+move point over the pane
@@ -38,6 +39,7 @@ struct CanvasInputCatcher: NSViewRepresentable {
     private func apply(to view: CanvasInputNSView) {
         view.onStep = onStep
         view.onMove = onMove
+        view.onMagnify = onMagnify
         view.onZoomBegin = onZoomBegin
         view.onZoom = onZoom
         view.onShiftLocate = onShiftLocate
@@ -53,6 +55,7 @@ struct CanvasInputCatcher: NSViewRepresentable {
 final class CanvasInputNSView: NSView {
     var onStep: ((Int) -> Void)?
     var onMove: ((CGPoint?) -> Void)?
+    var onMagnify: ((CGFloat) -> Void)?
     var onZoomBegin: ((CGPoint) -> Void)?
     var onZoom: ((CGFloat) -> Void)?
     var onShiftLocate: ((CGPoint) -> Void)?
@@ -60,6 +63,7 @@ final class CanvasInputNSView: NSView {
     var onPan: ((CGSize) -> Void)?
     private var scrollMonitor: Any?
     private var moveMonitor: Any?
+    private var magnifyMonitor: Any?
     private var zoomMonitor: Any?
     private var flagsMonitor: Any?
     private var panMonitor: Any?
@@ -107,6 +111,16 @@ final class CanvasInputNSView: NSView {
                     self.onShiftLocate?(p)
                 }
                 return event // never consume pointer movement
+            }
+        }
+        if magnifyMonitor == nil {
+            magnifyMonitor = NSEvent.addLocalMonitorForEvents(matching: .magnify) {
+                [weak self] event in
+                guard let self, let w = self.window, event.window == w else { return event }
+                let p = self.convert(event.locationInWindow, from: nil)
+                guard self.bounds.contains(p) else { return event }
+                self.onMagnify?(event.magnification)
+                return nil
             }
         }
         if zoomMonitor == nil {
@@ -202,11 +216,13 @@ final class CanvasInputNSView: NSView {
     func teardown() {
         if let scrollMonitor { NSEvent.removeMonitor(scrollMonitor) }
         if let moveMonitor { NSEvent.removeMonitor(moveMonitor) }
+        if let magnifyMonitor { NSEvent.removeMonitor(magnifyMonitor) }
         if let zoomMonitor { NSEvent.removeMonitor(zoomMonitor) }
         if let flagsMonitor { NSEvent.removeMonitor(flagsMonitor) }
         if let panMonitor { NSEvent.removeMonitor(panMonitor) }
         scrollMonitor = nil
         moveMonitor = nil
+        magnifyMonitor = nil
         zoomMonitor = nil
         flagsMonitor = nil
         panMonitor = nil

@@ -89,9 +89,9 @@ long SegmentEditor::smooth(int iterations) {
     return apply(SmoothEffect{iterations});
 }
 
-long SegmentEditor::grow_from_seeds(int max_iters, int margin) {
+long SegmentEditor::grow_from_seeds(int max_iters, int margin, float distance_penalty) {
     if (volume_ == nullptr) return 0;
-    return lumen::grow_from_seeds(*volume_, mask_, max_iters, margin);
+    return lumen::grow_from_seeds(*volume_, mask_, max_iters, margin, distance_penalty);
 }
 
 long SegmentEditor::scissor_cut(const float* mvp, int vp_w, int vp_h,

@@ -147,7 +147,8 @@ long lumen_seg_smooth(LumenVolume* v, int iterations);
 // voxel is claimed by the most HU-similar seed. Painted strokes are preserved.
 // Paint a background segment too, or the whole box is partitioned among the
 // foreground labels. `max_iters` bounds the passes. Returns voxels relabelled.
-long lumen_seg_grow_from_seeds(LumenVolume* v, int max_iters);
+long lumen_seg_grow_from_seeds(LumenVolume* v, int max_iters,
+                               float distance_penalty);
 
 // Erase labelled voxels by a screen-space lasso outline drawn over the 3D view.
 // `mvp` is the 16-float combined view*projection matrix (row-major, row-vector

@@ -95,7 +95,8 @@ public:
 
     // Grow the current multi-label seeds competitively (grow-cut) over the seeds'
     // bounding box; see grow_from_seeds.hpp. Returns voxels relabelled.
-    long grow_from_seeds(int max_iters, int margin);
+    long grow_from_seeds(int max_iters, int margin,
+                         float distance_penalty = 0.0f);
 
     // Erase labelled voxels by a screen-space lasso; see scissor.hpp. Returns
     // voxels cleared.

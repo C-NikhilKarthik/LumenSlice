@@ -71,6 +71,8 @@ final class SegmentationModel: ObservableObject {
     @Published var tolerance: Float = 120
     @Published var brushRadius: Int = 12          // slice pixels
     @Published var growSeedIters: Int = 25        // grow-from-seeds passes
+    @Published var growSeedLocality: Float = 0   // Slicer-style distance penalty
+    @Published private(set) var growPreviewActive = false
     @Published var showOverlay = true { didSet { refreshAllOverlays() } }
 
     @Published private(set) var segments: [SegmentRow] = []
@@ -148,6 +150,7 @@ final class SegmentationModel: ObservableObject {
                 self.names.removeAll()
                 self.nextSegmentNumber = 1
                 self.nextColorIndex = 0
+                self.growPreviewActive = false
                 self.overlayStore.images = [nil, nil, nil]
                 if has {
                     self.reloadSegments()
@@ -286,6 +289,7 @@ final class SegmentationModel: ObservableObject {
     // MARK: - Editing operations
 
     func applyThreshold() {
+        cancelGrowPreviewForEditing()
         guard let h = volume.handle, activeID > 0 else { return }
         if thresholdNeedsUndoCapture {
             lumen_seg_push_undo(h)
@@ -296,6 +300,7 @@ final class SegmentationModel: ObservableObject {
     }
 
     func applyOtsu() {
+        cancelGrowPreviewForEditing()
         guard let h = volume.handle, activeID > 0 else { return }
         let t = lumen_seg_otsu(h)
         // We apply the threshold directly below; setting these @Published values
@@ -310,6 +315,7 @@ final class SegmentationModel: ObservableObject {
     }
 
     func seedRegionGrow(axis: Int, px: Int, py: Int) {
+        cancelGrowPreviewForEditing()
         guard let h = volume.handle, activeID > 0 else { return }
         var x: Int32 = 0, y: Int32 = 0, z: Int32 = 0
         lumen_slice_pixel_to_voxel(h, Int32(axis), Int32(volume.sliceIndex[axis]),
@@ -324,6 +330,7 @@ final class SegmentationModel: ObservableObject {
     // the clicked slice. The C++ kernel maps the pixel to a voxel itself, so we pass
     // slice-pixel coordinates straight through (unlike Fill, which seeds a voxel).
     func seedLevelTrace(axis: Int, px: Int, py: Int) {
+        cancelGrowPreviewForEditing()
         guard let h = volume.handle, activeID > 0 else { return }
         lumen_seg_push_undo(h)
         thresholdNeedsUndoCapture = true
@@ -335,6 +342,7 @@ final class SegmentationModel: ObservableObject {
     // Paint strokes: capture one undo entry at the start, paint per drag tick (only
     // re-extracting the painted plane for responsiveness), settle on stroke end.
     func beginStroke() {
+        cancelGrowPreviewForEditing()
         guard let h = volume.handle else { return }
         lumen_seg_push_undo(h)
         thresholdNeedsUndoCapture = true
@@ -383,15 +391,32 @@ final class SegmentationModel: ObservableObject {
 
     func endStroke() { didMutateMask() }
 
-    // Competitive grow-cut from the current multi-label seeds. Runs over the seeds'
-    // bounding box in the C++ core; the whole mask is one undo step. Slower than the
-    // other ops (bounded by seed extent × iterations), but capped by growSeedIters.
-    func growFromSeeds() {
+    // Slicer-style Grow from Seeds preview. The operation is kept as one undoable
+    // mask change so Cancel restores the painted seeds and Apply leaves the result
+    // available to Undo later.
+    func initializeGrowPreview() {
         guard let h = volume.handle, canGrowFromSeeds else { return }
+        if growPreviewActive { return }
         lumen_seg_push_undo(h)
         thresholdNeedsUndoCapture = true
-        if lumen_seg_grow_from_seeds(h, Int32(growSeedIters)) > 0 { didMutateMask() }
+        if lumen_seg_grow_from_seeds(h, Int32(growSeedIters), growSeedLocality) > 0 {
+            growPreviewActive = true
+            didMutateMask()
+        }
         else { refreshUndoState() }
+    }
+
+    func applyGrowPreview() { growPreviewActive = false; refreshUndoState() }
+
+    func cancelGrowPreview() {
+        guard growPreviewActive, let h = volume.handle else { return }
+        growPreviewActive = false
+        if lumen_seg_undo(h) != 0 { didMutateMask() }
+        else { refreshUndoState() }
+    }
+
+    private func cancelGrowPreviewForEditing() {
+        if growPreviewActive { cancelGrowPreview() }
     }
 
     // Erase labelled voxels by a screen-space lasso drawn over the 3D surface. The
@@ -403,6 +428,7 @@ final class SegmentationModel: ObservableObject {
     func scissorCut(mvp: [Float], viewportWidth: Int, viewportHeight: Int,
                     polygon: [Float], eraseInside: Bool = true,
                     onlyLabel: Int = 0) -> Bool {
+        cancelGrowPreviewForEditing()
         guard let h = volume.handle, mvp.count == 16, polygon.count >= 6 else {
             return false
         }
@@ -422,6 +448,7 @@ final class SegmentationModel: ObservableObject {
     }
 
     func clearActive() {
+        cancelGrowPreviewForEditing()
         guard let h = volume.handle, activeID > 0 else { return }
         lumen_seg_push_undo(h)
         thresholdNeedsUndoCapture = true
@@ -431,6 +458,7 @@ final class SegmentationModel: ObservableObject {
 
     func undo() {
         guard let h = volume.handle else { return }
+        growPreviewActive = false
         if lumen_seg_undo(h) != 0 {
             thresholdNeedsUndoCapture = true
             didMutateMask()
@@ -439,6 +467,7 @@ final class SegmentationModel: ObservableObject {
 
     func redo() {
         guard let h = volume.handle else { return }
+        growPreviewActive = false
         if lumen_seg_redo(h) != 0 {
             thresholdNeedsUndoCapture = true
             didMutateMask()

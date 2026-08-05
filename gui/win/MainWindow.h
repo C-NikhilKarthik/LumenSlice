@@ -79,6 +79,8 @@ private slots:
     void applyThreshold();
     void applyOtsu();
     void growFromSeeds();
+    void applyGrowPreview();
+    void cancelGrowPreview();
     void undo();
     void redo();
     void clearActive();
@@ -187,8 +189,12 @@ private:
     QLabel* brushLabel_ = nullptr;
     QSlider* seedItersSlider_ = nullptr;
     QLabel* seedItersLabel_ = nullptr;
+    QSlider* seedLocalitySlider_ = nullptr;
+    QLabel* seedLocalityLabel_ = nullptr;
     QLabel* seedGateLabel_ = nullptr;
     QPushButton* growSeedsBtn_ = nullptr;
+    QPushButton* growApplyBtn_ = nullptr;
+    QPushButton* growCancelBtn_ = nullptr;
     QPushButton* undoBtn_ = nullptr;
     QPushButton* redoBtn_ = nullptr;
     QCheckBox* overlayCheck_ = nullptr;
@@ -237,6 +243,8 @@ private:
     bool meshRefreshPending_ = false;
     QTimer countsTimer_;  // debounces the full-volume segment histogram
     QFutureWatcher<void> heavyWatcher_;  // async grow-from-seeds mask operation
+    bool growPreviewPending_ = false;
+    bool growPreviewActive_ = false;
     QTimer scrollThrottle_;  // caps slice re-extraction rate during wheel-scroll
     int lastScrollAxis_ = -1;
     bool scrollDirty_ = false;

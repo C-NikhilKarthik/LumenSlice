@@ -15,7 +15,8 @@
 //     without one the whole box is partitioned among the foreground labels).
 //   * It is capped at `max_iters` Jacobi passes.
 //
-// Pure compute: no UI, no threading. The bridge/app decides when to run it.
+// `distance_penalty` is the Slicer-style seed locality control: increasing it
+// makes seed influence fall off faster with physical distance.
 
 #pragma once
 
@@ -34,6 +35,6 @@ namespace lumen {
 // of voxels whose label changed (newly claimed or reassigned). No-op (returns 0) if
 // the mask is empty or carries no seeds.
 long grow_from_seeds(const Volume& vol, LabelVolume& mask, int max_iters,
-                     int margin);
+                     int margin, float distance_penalty = 0.0f);
 
 } // namespace lumen

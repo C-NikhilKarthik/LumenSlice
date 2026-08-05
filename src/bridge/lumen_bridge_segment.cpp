@@ -187,11 +187,11 @@ long lumen_seg_smooth(LumenVolume* v, int iterations) {
     return changed;
 }
 
-long lumen_seg_grow_from_seeds(LumenVolume* v, int max_iters) {
+long lumen_seg_grow_from_seeds(LumenVolume* v, int max_iters, float distance_penalty) {
     if (v == nullptr) return 0;
     // Fixed 8-voxel margin around the seeds: enough headroom for the grow to reach
     // structure edges without ballooning the working box on a large scan.
-    const long changed = v->editor.grow_from_seeds(max_iters, 8);
+    const long changed = v->editor.grow_from_seeds(max_iters, 8, distance_penalty);
     if (changed > 0) invalidate_mask_cache(v);
     return changed;
 }

@@ -110,6 +110,28 @@ struct SlicePane: View {
                 brushRing(fitted: display)
                 markupGeometry(container: container, aspect: aspect)
             }
+            .overlay(alignment: .topTrailing) {
+                HStack(spacing: 2) {
+                    Button { zoomBy(0.8, container: container) } label: {
+                        Image(systemName: "minus.magnifyingglass")
+                    }
+                    .help("Zoom out")
+                    Button { resetZoom() } label: {
+                        Image(systemName: "arrow.counterclockwise")
+                    }
+                    .help("Reset zoom")
+                    Button { zoomBy(1.25, container: container) } label: {
+                        Image(systemName: "plus.magnifyingglass")
+                    }
+                    .help("Zoom in")
+                }
+                .font(.caption)
+                .buttonStyle(.borderless)
+                .foregroundStyle(.white)
+                .padding(4)
+                .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 6))
+                .padding(8)
+            }
             .clipShape(RoundedRectangle(cornerRadius: 10))
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .contentShape(Rectangle())
@@ -117,6 +139,7 @@ struct SlicePane: View {
             .overlay(CanvasInputCatcher(
                 onStep: { model.setSlice(axis, model.sliceIndex[axis] + $0) },
                 onMove: { pointer = $0 },
+                onMagnify: { applyMagnification($0) },
                 onZoomBegin: { zoomAnchor = $0 },
                 onZoom: { applyZoom($0) },
                 onShiftLocate: { locate(at: $0, container: container) },
@@ -347,6 +370,23 @@ struct SlicePane: View {
         let factor = CGFloat(exp(Double(dy) * 0.01))
         zoom = min(Self.maxZoom, max(1, zoom * factor))
         if zoom == 1 { pan = .zero } // back to fit: recenter, no stale offset
+    }
+
+    private func applyMagnification(_ delta: CGFloat) {
+        zoomAnchor = pointer ?? .zero
+        zoom = min(Self.maxZoom, max(1, zoom * CGFloat(exp(Double(delta)))))
+        if zoom == 1 { pan = .zero }
+    }
+
+    private func zoomBy(_ factor: CGFloat, container: CGSize) {
+        zoomAnchor = pointer ?? CGPoint(x: container.width / 2, y: container.height / 2)
+        zoom = min(Self.maxZoom, max(1, zoom * factor))
+        if zoom == 1 { pan = .zero }
+    }
+
+    private func resetZoom() {
+        zoom = 1
+        pan = .zero
     }
 
     // MARK: - Interaction helpers (called from SliceInteraction)
