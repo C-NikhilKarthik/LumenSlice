@@ -70,7 +70,6 @@ final class SegmentationModel: ObservableObject {
     @Published var thresholdHi: Float = 3000
     @Published var tolerance: Float = 120
     @Published var brushRadius: Int = 12          // slice pixels
-    @Published var growSeedIters: Int = 25        // grow-from-seeds passes
     @Published var growSeedLocality: Float = 0   // Slicer-style distance penalty
     @Published private(set) var growPreviewActive = false
     @Published var showOverlay = true { didSet { refreshAllOverlays() } }
@@ -399,7 +398,7 @@ final class SegmentationModel: ObservableObject {
         if growPreviewActive { return }
         lumen_seg_push_undo(h)
         thresholdNeedsUndoCapture = true
-        if lumen_seg_grow_from_seeds(h, Int32(growSeedIters), growSeedLocality) > 0 {
+        if lumen_seg_grow_from_seeds(h, 1, growSeedLocality) > 0 {
             growPreviewActive = true
             didMutateMask()
         }

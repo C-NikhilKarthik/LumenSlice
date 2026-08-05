@@ -184,18 +184,6 @@ struct SegmentControls: View {
                 .foregroundStyle(.secondary)
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
-                    Text("Iterations")
-                    Spacer()
-                    Text("\(seg.growSeedIters)")
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                }
-                Slider(value: Binding(get: { Double(seg.growSeedIters) },
-                       set: { seg.growSeedIters = Int($0) }),
-                       in: 5...100, step: 1)
-            }
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
                     Text("Seed locality")
                     Spacer()
                     Text(String(format: "%.1f", seg.growSeedLocality))

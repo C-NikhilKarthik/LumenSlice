@@ -3,7 +3,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
-#include <thread>
+#include <limits>
+#include <queue>
 #include <vector>
 
 namespace lumen {
@@ -11,7 +12,9 @@ namespace lumen {
 namespace {
 
 // Inclusive bounding box of every non-zero (seed) voxel in the mask, expanded by
-// `margin` and clamped to the volume. Returns false if there are no seeds.
+// `margin` and clamped to the volume. A negative margin follows Slicer's
+// extentGrowthRatio rule independently on each axis. Returns false if there are
+// no seeds.
 bool seed_bbox(const LabelVolume& mask, int margin, int& x0, int& y0, int& z0,
                int& x1, int& y1, int& z1) {
     const int w = mask.width(), h = mask.height(), d = mask.depth();
@@ -29,10 +32,13 @@ bool seed_bbox(const LabelVolume& mask, int margin, int& x0, int& y0, int& z0,
         }
     }
     if (x1 < 0) return false; // no seeds
-    x0 = std::max(0, x0 - margin); y0 = std::max(0, y0 - margin);
-    z0 = std::max(0, z0 - margin);
-    x1 = std::min(w - 1, x1 + margin); y1 = std::min(h - 1, y1 + margin);
-    z1 = std::min(d - 1, z1 + margin);
+    const int mx = margin < 0 ? std::max(3, int(std::ceil(0.5 * (x1 - x0))) ) : margin;
+    const int my = margin < 0 ? std::max(3, int(std::ceil(0.5 * (y1 - y0))) ) : margin;
+    const int mz = margin < 0 ? std::max(3, int(std::ceil(0.5 * (z1 - z0))) ) : margin;
+    x0 = std::max(0, x0 - mx); y0 = std::max(0, y0 - my);
+    z0 = std::max(0, z0 - mz);
+    x1 = std::min(w - 1, x1 + mx); y1 = std::min(h - 1, y1 + my);
+    z1 = std::min(d - 1, z1 + mz);
     return true;
 }
 
@@ -46,20 +52,14 @@ long grow_from_seeds(const Volume& vol, LabelVolume& mask, int max_iters,
         return 0;
     }
     if (max_iters < 1) max_iters = 1;
-    if (margin < 0) margin = 0;
     distance_penalty = std::max(0.0f, distance_penalty);
 
     int x0, y0, z0, x1, y1, z1;
     if (!seed_bbox(mask, margin, x0, y0, z0, x1, y1, z1)) return 0;
-
     const int bw = x1 - x0 + 1, bh = y1 - y0 + 1, bd = z1 - z0 + 1;
     const std::size_t box = static_cast<std::size_t>(bw) *
                             static_cast<std::size_t>(bh) *
                             static_cast<std::size_t>(bd);
-
-    // HU-similarity normaliser: closer HU ⇒ stronger attack. A global range is a
-    // fine, cheap scale — the competition still routes boundaries to HU edges.
-    const float denom = std::max(1e-3f, vol.hu_max - vol.hu_min);
 
     // Local box index (x,y,z are box-relative).
     auto bidx = [bw, bh](int x, int y, int z) -> std::size_t {
@@ -69,8 +69,8 @@ long grow_from_seeds(const Volume& vol, LabelVolume& mask, int max_iters,
                    static_cast<std::size_t>(bh);
     };
 
-    std::vector<std::uint8_t> cur_lbl(box), next_lbl(box);
-    std::vector<float> cur_str(box, 0.0f), next_str(box, 0.0f);
+    std::vector<std::uint8_t> labels(box, 0);
+    std::vector<float> distance(box, std::numeric_limits<float>::max());
     std::vector<float> hu(box); // cached HU per box voxel
 
     for (int z = 0; z < bd; ++z) {
@@ -79,88 +79,74 @@ long grow_from_seeds(const Volume& vol, LabelVolume& mask, int max_iters,
                 const std::size_t bi = bidx(x, y, z);
                 const int vx = x0 + x, vy = y0 + y, vz = z0 + z;
                 const std::uint8_t lbl = mask.at(vx, vy, vz);
-                cur_lbl[bi] = lbl;
-                cur_str[bi] = lbl != 0 ? 1.0f : 0.0f; // seeds start at full strength
+                labels[bi] = lbl;
                 hu[bi] = vol.voxel_buffer[vol.index(vx, vy, vz)];
             }
         }
     }
 
-    const int nx[6] = {-1, 1, 0, 0, 0, 0};
-    const int ny[6] = {0, 0, -1, 1, 0, 0};
-    const int nz[6] = {0, 0, 0, 0, -1, 1};
-
-    // Each voxel's next label depends only on the previous iteration, so the
-    // expensive propagation pass can be split into independent Z slabs. The
-    // live mask is not touched until all iterations finish, keeping this safe
-    // for both UI front ends and preserving deterministic results.
-    const unsigned hardware = std::thread::hardware_concurrency();
-    const unsigned requested = hardware == 0 ? 2u : hardware;
-    const unsigned worker_count = box < 65536
-                                      ? 1u
-                                      : std::max(1u, std::min<unsigned>(requested,
-                                                                          static_cast<unsigned>(bd)));
-
-    for (int iter = 0; iter < max_iters; ++iter) {
-        next_lbl = cur_lbl; // unattacked voxels keep their current owner
-        next_str = cur_str;
-        std::vector<std::thread> workers;
-        std::vector<unsigned char> changed_by_worker(worker_count, 0);
-        workers.reserve(worker_count);
-        for (unsigned worker = 0; worker < worker_count; ++worker) {
-            const int z_begin = static_cast<int>((static_cast<std::size_t>(bd) * worker) /
-                                                 worker_count);
-            const int z_end = static_cast<int>((static_cast<std::size_t>(bd) * (worker + 1)) /
-                                               worker_count);
-            workers.emplace_back([&, worker, z_begin, z_end] {
-                bool changed = false;
-                for (int z = z_begin; z < z_end; ++z) {
-                    for (int y = 0; y < bh; ++y) {
-                        for (int x = 0; x < bw; ++x) {
-                            const std::size_t bi = bidx(x, y, z);
-                            const float hu_a = hu[bi];
-                            float best_str = cur_str[bi];
-                            std::uint8_t best_lbl = cur_lbl[bi];
-                            for (int k = 0; k < 6; ++k) {
-                                const int ax = x + nx[k], ay = y + ny[k], az = z + nz[k];
-                                if (ax < 0 || ay < 0 || az < 0 || ax >= bw || ay >= bh ||
-                                    az >= bd) {
-                                    continue;
-                                }
-                                const std::size_t ni = bidx(ax, ay, az);
-                                if (cur_str[ni] <= 0.0f || cur_lbl[ni] == 0) continue;
-                                const float g =
-                                    1.0f - std::fabs(hu_a - hu[ni]) / denom;
-                                if (g <= 0.0f) continue;
-                                const float stepMm = k < 2
-                                    ? vol.spacing_x
-                                    : (k < 4 ? vol.spacing_y : vol.spacing_z);
-                                // Keep the 0..10 UI range useful with the
-                                // normalized HU similarity used by this kernel.
-                                const float locality =
-                                    std::max(0.0f, g - distance_penalty * stepMm * 0.1f);
-                                const float attack = cur_str[ni] * locality;
-                                // Strict '>' means a seed at strength 1 can never be
-                                // overwritten, so painted strokes are preserved.
-                                if (attack > best_str) {
-                                    best_str = attack;
-                                    best_lbl = cur_lbl[ni];
-                                }
-                            }
-                            if (best_lbl != cur_lbl[bi]) changed = true;
-                            next_lbl[bi] = best_lbl;
-                            next_str[bi] = best_str;
-                        }
-                    }
-                }
-                changed_by_worker[worker] = changed ? 1 : 0;
-            });
+    // This is Slicer's current FastGrowCut formulation: a Dijkstra shortest-path
+    // propagation over a 26-neighbor physical neighborhood. The path cost is the
+    // accumulated absolute HU difference plus the distance penalty per millimetre.
+    // It converges by exhausting the heap; max_iters remains only for API
+    // compatibility with the previous iterative kernel.
+    (void)max_iters;
+    struct Candidate {
+        float cost;
+        std::size_t index;
+        bool operator>(const Candidate& other) const {
+            return cost != other.cost ? cost > other.cost : index > other.index;
         }
-        for (auto& worker : workers) worker.join();
-        cur_lbl.swap(next_lbl);
-        cur_str.swap(next_str);
-        if (std::none_of(changed_by_worker.begin(), changed_by_worker.end(),
-                         [](unsigned char changed) { return changed != 0; })) break;
+    };
+    struct Neighbor {
+        int dx, dy, dz;
+        float distance;
+    };
+    std::priority_queue<Candidate, std::vector<Candidate>, std::greater<Candidate>> heap;
+    std::vector<Neighbor> neighbors;
+    neighbors.reserve(26);
+    for (int dz = -1; dz <= 1; ++dz) {
+        for (int dy = -1; dy <= 1; ++dy) {
+            for (int dx = -1; dx <= 1; ++dx) {
+                if (dx == 0 && dy == 0 && dz == 0) continue;
+                const float physicalDistance = std::sqrt(
+                    (dx * vol.spacing_x) * (dx * vol.spacing_x) +
+                    (dy * vol.spacing_y) * (dy * vol.spacing_y) +
+                    (dz * vol.spacing_z) * (dz * vol.spacing_z));
+                neighbors.push_back({dx, dy, dz, physicalDistance});
+            }
+        }
+    }
+    constexpr float epsilon = 1e-3f;
+    for (std::size_t bi = 0; bi < box; ++bi) {
+        if (labels[bi] == 0) continue;
+        distance[bi] = epsilon;
+        heap.push({epsilon, bi});
+    }
+    if (heap.empty()) return 0;
+
+    while (!heap.empty()) {
+        const Candidate current = heap.top();
+        heap.pop();
+        if (current.cost > distance[current.index] + epsilon) continue;
+        const int cz = int(current.index / (std::size_t(bw) * bh));
+        const std::size_t rem = current.index % (std::size_t(bw) * bh);
+        const int cy = int(rem / bw);
+        const int cx = int(rem % bw);
+        for (const Neighbor& n : neighbors) {
+            const int nx = cx + n.dx, ny = cy + n.dy, nz = cz + n.dz;
+            if (nx < 0 || ny < 0 || nz < 0 || nx >= bw || ny >= bh || nz >= bd)
+                continue;
+            const std::size_t ni = bidx(nx, ny, nz);
+            const float newCost = current.cost +
+                std::fabs(hu[current.index] - hu[ni]) +
+                distance_penalty * n.distance;
+            if (newCost < distance[ni]) {
+                distance[ni] = newCost;
+                labels[ni] = labels[current.index];
+                heap.push({newCost, ni});
+            }
+        }
     }
 
     // Write winners back into the live mask; count relabelled voxels.
@@ -170,7 +156,7 @@ long grow_from_seeds(const Volume& vol, LabelVolume& mask, int max_iters,
             for (int x = 0; x < bw; ++x) {
                 const std::size_t bi = bidx(x, y, z);
                 const int vx = x0 + x, vy = y0 + y, vz = z0 + z;
-                const std::uint8_t final_lbl = cur_lbl[bi];
+                const std::uint8_t final_lbl = labels[bi];
                 if (final_lbl != mask.at(vx, vy, vz)) {
                     mask.set(vx, vy, vz, final_lbl);
                     ++changed_count;

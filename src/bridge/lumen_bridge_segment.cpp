@@ -189,9 +189,10 @@ long lumen_seg_smooth(LumenVolume* v, int iterations) {
 
 long lumen_seg_grow_from_seeds(LumenVolume* v, int max_iters, float distance_penalty) {
     if (v == nullptr) return 0;
-    // Fixed 8-voxel margin around the seeds: enough headroom for the grow to reach
-    // structure edges without ballooning the working box on a large scan.
-    const long changed = v->editor.grow_from_seeds(max_iters, 8, distance_penalty);
+    // Match Slicer: expand the combined seed extent by 50% per axis, with a
+    // minimum of three voxels. The core uses a negative margin to select this
+    // extent-based mode rather than an arbitrary fixed slice count.
+    const long changed = v->editor.grow_from_seeds(max_iters, -1, distance_penalty);
     if (changed > 0) invalidate_mask_cache(v);
     return changed;
 }

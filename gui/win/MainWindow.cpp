@@ -513,15 +513,6 @@ QWidget* MainWindow::buildSegmentPanel() {
     body(seedsBox)->addWidget(new QLabel(
         "Paint a seed in each region using a different segment. Initialize a "
         "preview, inspect it through the slices, then apply or cancel it."));
-    seedItersLabel_ = new QLabel("Iterations: 25");
-    seedItersSlider_ = new QSlider(Qt::Horizontal);
-    seedItersSlider_->setRange(5, 100);
-    seedItersSlider_->setValue(25);
-    connect(seedItersSlider_, &QSlider::valueChanged, this, [this](int val) {
-        seedItersLabel_->setText(QString("Iterations: %1").arg(val));
-    });
-    body(seedsBox)->addWidget(seedItersLabel_);
-    body(seedsBox)->addWidget(seedItersSlider_);
     seedLocalityLabel_ = new QLabel("Seed locality: 0.0");
     seedLocalitySlider_ = new QSlider(Qt::Horizontal);
     seedLocalitySlider_->setRange(0, 100);
@@ -1368,11 +1359,12 @@ void MainWindow::growFromSeeds() {
     LumenVolume* v = st_.volume;
     if (!v || st_.busy || heavyWatcher_.isRunning() || growPreviewActive_ ||
         growPreviewPending_) return;
-    const int iters = seedItersSlider_->value();
     const float locality = seedLocalitySlider_ ? float(seedLocalitySlider_->value()) / 10.0f : 0.0f;
     growPreviewPending_ = true;
     runMaskOp("Growing from seeds…",
-              [v, iters, locality] { lumen_seg_grow_from_seeds(v, iters, locality); });
+              [v, locality] {
+                  lumen_seg_grow_from_seeds(v, 1, locality);
+              });
 }
 
 void MainWindow::applyGrowPreview() {

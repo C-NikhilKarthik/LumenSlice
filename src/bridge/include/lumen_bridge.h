@@ -146,7 +146,9 @@ long lumen_seg_smooth(LumenVolume* v, int iterations);
 // segment outward over the seeds' bounding box (expanded by a fixed margin) so each
 // voxel is claimed by the most HU-similar seed. Painted strokes are preserved.
 // Paint a background segment too, or the whole box is partitioned among the
-// foreground labels. `max_iters` bounds the passes. Returns voxels relabelled.
+// foreground labels. `max_iters` is retained for API compatibility; the current
+// FastGrowCut implementation converges through its priority queue. Returns voxels
+// relabelled.
 long lumen_seg_grow_from_seeds(LumenVolume* v, int max_iters,
                                float distance_penalty);
 

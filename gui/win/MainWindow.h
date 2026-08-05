@@ -187,8 +187,6 @@ private:
     QLabel* toleranceLabel_ = nullptr;
     QSlider* brushSlider_ = nullptr;
     QLabel* brushLabel_ = nullptr;
-    QSlider* seedItersSlider_ = nullptr;
-    QLabel* seedItersLabel_ = nullptr;
     QSlider* seedLocalitySlider_ = nullptr;
     QLabel* seedLocalityLabel_ = nullptr;
     QLabel* seedGateLabel_ = nullptr;
