@@ -8,6 +8,7 @@ import AppKit
 //   - right-button drag               -> zoom (onZoomBegin sets the anchor,
 //                                         onZoom feeds vertical drag deltas)
 //   - middle-button (scroll-wheel) drag -> pan (onPan feeds view-coord drag deltas)
+//   - ⌥ (Option) + left-drag           -> pan too (trackpad-friendly path; onPan)
 //   - Shift held + hover              -> cross-reference (onShiftLocate recenters,
 //                                         onShiftChange toggles the crosshair)
 // SwiftUI has no scroll-wheel or right-drag gesture and its hover tracking is
@@ -76,6 +77,11 @@ final class CanvasInputNSView: NSView {
     // A middle-drag that began inside this pane keeps panning past the edge too.
     private var isPanning = false
     private var lastPanPoint: CGPoint = .zero
+    // ⌥ (Option) + left-drag also pans — the accessible path on a trackpad, which has
+    // no middle mouse button. The whole gesture (down/drag/up) is claimed so it never
+    // reaches the window/level drag or tap-to-locate underneath.
+    private var isOptionPanning = false
+    private var lastOptionPanPoint: CGPoint = .zero
 
     // Flip so our coordinate origin is top-left, matching SwiftUI's overlay space:
     // a point reported here lines up with where the brush ring is drawn.
@@ -98,10 +104,34 @@ final class CanvasInputNSView: NSView {
         }
         if moveMonitor == nil {
             moveMonitor = NSEvent.addLocalMonitorForEvents(
-                matching: [.mouseMoved, .leftMouseDragged]) { [weak self] event in
+                matching: [.mouseMoved, .leftMouseDown, .leftMouseDragged,
+                           .leftMouseUp]) { [weak self] event in
                 guard let self, let w = self.window, event.window == w else { return event }
                 let p = self.convert(event.locationInWindow, from: nil)
                 let inside = self.bounds.contains(p)
+
+                // ⌥ + left-drag = pan. Claim the whole gesture (consume the events) so
+                // the window/level drag and tap-to-locate underneath never see it.
+                switch event.type {
+                case .leftMouseDown:
+                    if inside, event.modifierFlags.contains(.option) {
+                        self.isOptionPanning = true
+                        self.lastOptionPanPoint = p
+                        return nil
+                    }
+                case .leftMouseDragged:
+                    if self.isOptionPanning {
+                        self.onPan?(CGSize(width: p.x - self.lastOptionPanPoint.x,
+                                           height: p.y - self.lastOptionPanPoint.y))
+                        self.lastOptionPanPoint = p
+                        return nil
+                    }
+                case .leftMouseUp:
+                    if self.isOptionPanning { self.isOptionPanning = false; return nil }
+                default:
+                    break
+                }
+
                 self.onMove?(inside ? p : nil)
                 // Cross-reference is a hover gesture (no button), so only .mouseMoved
                 // with Shift held triggers it - this never collides with a W/L

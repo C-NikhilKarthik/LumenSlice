@@ -30,6 +30,7 @@ struct SlicePane: View {
     @State private var zoom: CGFloat = 1
     @State private var zoomAnchor: CGPoint = .zero
     @State private var pan: CGSize = .zero
+    @State private var showHelp = false
     private static let maxZoom: CGFloat = 8
 
     var body: some View {
@@ -112,6 +113,13 @@ struct SlicePane: View {
             }
             .overlay(alignment: .topTrailing) {
                 HStack(spacing: 2) {
+                    Button { showHelp.toggle() } label: {
+                        Image(systemName: "info.circle")
+                    }
+                    .help("How to zoom, pan, and navigate this view")
+                    .popover(isPresented: $showHelp, arrowEdge: .bottom) {
+                        SliceHelpPopover()
+                    }
                     Button { zoomBy(0.8, container: container) } label: {
                         Image(systemName: "minus.magnifyingglass")
                     }
@@ -501,5 +509,40 @@ private struct SliceInteraction: ViewModifier {
                         .onEnded { pane.locate(at: $0.location, container: container) }
                 )
         }
+    }
+}
+
+// The "how do I move around this view" cheat-sheet shown from the info (i) button on
+// each pane — surfaced because panning a zoomed slice (⌥ + drag) isn't discoverable
+// on a trackpad, where there's no middle mouse button.
+private struct SliceHelpPopover: View {
+    private struct Row: Identifiable {
+        let id = UUID(); let keys: String; let action: String
+    }
+    private let rows = [
+        Row(keys: "Scroll", action: "Change slice"),
+        Row(keys: "Pinch / right-drag / ± buttons", action: "Zoom in and out"),
+        Row(keys: "⌥ Option + drag", action: "Pan (when zoomed in)"),
+        Row(keys: "Click", action: "Recenter all three views here"),
+        Row(keys: "Shift + move", action: "Crosshair cross-reference"),
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Navigation")
+                .font(.headline)
+            ForEach(rows) { row in
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Text(row.keys)
+                        .font(.caption.weight(.semibold))
+                        .frame(width: 190, alignment: .leading)
+                    Text(row.action)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(14)
+        .frame(width: 340)
     }
 }
