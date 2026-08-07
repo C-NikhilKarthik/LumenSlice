@@ -15,6 +15,19 @@ struct ThreeDControls: View {
                     .foregroundStyle(.secondary)
             }
 
+            // Pick which segments the surface is built from, right here — toggle the
+            // eye to include/exclude a segment without switching back to the Segment
+            // tab (generation builds exactly the visible, non-empty ones).
+            if !seg.segments.isEmpty {
+                Section("Segments (visible ones are built)") {
+                    ForEach(seg.segments) { row in
+                        SegmentListRow(row: row,
+                                       isActive: row.id == seg.activeID,
+                                       seg: seg)
+                    }
+                }
+            }
+
             Section("Quality") {
                 Stepper("Smoothing: \(mesh.smoothing)", value: $mesh.smoothing, in: 0...5)
                 Picker("Resolution", selection: $mesh.downsample) {

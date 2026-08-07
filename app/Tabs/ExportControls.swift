@@ -7,10 +7,29 @@ import UniformTypeIdentifiers
 struct ExportControls: View {
     @EnvironmentObject var model: VolumeModel
     @EnvironmentObject var mesh: MeshModel
+    @EnvironmentObject var seg: SegmentationModel
     @State private var message: String?
+
+    // The segments that will go into the STL: visible + non-empty. Toggling a
+    // segment's eye in the list below includes/excludes it from the export.
+    private var exportIDs: [Int] {
+        seg.segments.filter { $0.visible && $0.voxels > 0 }.map(\.id)
+    }
 
     var body: some View {
         Form {
+            // Choose which segments to export by toggling their eye — the STL is the
+            // union of the visible, non-empty ones (mirrors the 3D tab).
+            if !seg.segments.isEmpty {
+                Section("Segments (visible ones are exported)") {
+                    ForEach(seg.segments) { row in
+                        SegmentListRow(row: row,
+                                       isActive: row.id == seg.activeID,
+                                       seg: seg)
+                    }
+                }
+            }
+
             Section("3D mesh") {
                 Button {
                     exportSTL()
@@ -20,18 +39,19 @@ struct ExportControls: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
-                .disabled(mesh.triangleCount == 0 || mesh.isGenerating)
+                .disabled(exportIDs.isEmpty || mesh.isGenerating)
 
                 if mesh.isGenerating {
                     Text("Generating… export is available once it finishes.")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
-                } else if mesh.triangleCount == 0 {
-                    Text("Generate a 3D surface first (3D tab).")
+                } else if exportIDs.isEmpty {
+                    Text("Nothing to export. Segment a structure and make it visible.")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 } else {
-                    Text("\(mesh.triangleCount.formatted()) triangles ready, in mm.")
+                    Text("\(exportIDs.count) segment\(exportIDs.count == 1 ? "" : "s") "
+                         + "will be exported, in mm.")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -67,7 +87,7 @@ struct ExportControls: View {
             panel.allowedContentTypes = [stl]
         }
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        message = mesh.exportSTL(to: url)
+        message = mesh.exportSTL(to: url, ids: exportIDs)
             ? "Saved \(url.lastPathComponent)."
             : "STL export failed."
     }

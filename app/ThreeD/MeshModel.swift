@@ -157,9 +157,17 @@ final class MeshModel: ObservableObject {
     // surface into the buffer; the on-screen per-segment geometries are unaffected).
     // Refuses to run while a background generate is in flight — both write the one
     // shared C++ mesh buffer, so overlapping them would tear the STL.
-    func exportSTL(to url: URL) -> Bool {
-        guard let h = volume.handle, !isGenerating else { return false }
-        lumen_mesh_snapshot(h) // every labelled voxel
+    // Export the chosen segments (their union) as one binary STL: snapshot the
+    // selected labels, regenerate the shared buffer, write. Empty ids is a no-op
+    // failure the caller messages. Refuses to run while a background generate is in
+    // flight — both write the one shared C++ mesh buffer, so overlapping them would
+    // tear the STL.
+    func exportSTL(to url: URL, ids: [Int]) -> Bool {
+        guard let h = volume.handle, !isGenerating, !ids.isEmpty else { return false }
+        let ids32 = ids.map { Int32($0) }
+        ids32.withUnsafeBufferPointer { buf in
+            lumen_mesh_snapshot_labels(h, buf.baseAddress, Int32(buf.count))
+        }
         _ = lumen_mesh_generate(h, Int32(max(0, smoothing)), Int32(max(1, downsample)))
         return lumen_mesh_write_stl(h, url.path) == 0
     }

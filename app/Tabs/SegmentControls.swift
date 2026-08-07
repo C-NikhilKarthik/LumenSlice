@@ -89,19 +89,9 @@ struct SegmentControls: View {
                  + "Drag either handle to update live.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
-            HStack {
-                // Typed values are clamped into the volume's HU range and kept
-                // ordered (Low <= High), so a stray entry can't invert the window or
-                // desync from the slider (the slider itself already clamps on drag).
-                huField("Low", value: Binding(
-                    get: { seg.thresholdLo },
-                    set: { seg.thresholdLo = min(max($0, lo), seg.thresholdHi) }))
-                Spacer()
-                huField("High", value: Binding(
-                    get: { seg.thresholdHi },
-                    set: { seg.thresholdHi = max(min($0, hi), seg.thresholdLo) }))
-            }
-            RangeSlider(low: $seg.thresholdLo, high: $seg.thresholdHi, bounds: lo...hi)
+            // Shared HU-range control (same one the Visualize tab uses for W/L).
+            HURangeControl(low: $seg.thresholdLo, high: $seg.thresholdHi,
+                           bounds: lo...hi)
                 .padding(.top, 2)
             HStack(spacing: 6) {
                 presetButton("Bone", lo: 300, hi: 3000)
@@ -266,20 +256,6 @@ struct SegmentControls: View {
     }
 
     // MARK: - Helpers
-
-    // A compact "Low: [ 150 ]" numeric field. The slider itself is the two-thumb
-    // RangeSlider above these fields; these just allow typing an exact HU value.
-    private func huField(_ title: String, value: Binding<Float>) -> some View {
-        HStack(spacing: 6) {
-            Text(title).foregroundStyle(.secondary)
-            TextField(title, value: value,
-                      format: .number.precision(.fractionLength(0)))
-                .labelsHidden()
-                .frame(width: 64)
-                .multilineTextAlignment(.trailing)
-                .textFieldStyle(.roundedBorder)
-        }
-    }
 
     private func presetButton(_ name: String, lo: Float, hi: Float) -> some View {
         Button(name) {

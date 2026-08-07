@@ -133,11 +133,15 @@ final class SegmentationModel: ObservableObject {
             }
             .store(in: &cancellables)
 
-        // Focus/slice changes -> re-extract the overlays for the new planes.
+        // Focus/slice changes -> re-extract the overlays for the new planes. Coalesced
+        // the same way the grayscale slices are (VolumeModel.scheduleRefresh): a fast
+        // scroll fires many focus changes, and re-extracting the mask overlays on each
+        // one keeps the Segment tab from scrolling as smoothly as Visualize. Drop the
+        // intermediate overlays and refresh once on the next runloop tick.
         volume.$focus
             .sink { [weak self] _ in
                 guard let self, self.isActive else { return }
-                self.refreshAllOverlays()
+                self.scheduleOverlayRefresh()
             }
             .store(in: &cancellables)
 
@@ -489,6 +493,19 @@ final class SegmentationModel: ObservableObject {
     private func refreshAllOverlays() {
         guard volume.hasVolume else { return }
         for axis in 0..<3 { refreshOverlay(axis) }
+    }
+
+    // Coalesced overlay refresh for the scroll/nav path (see the $focus sink): a burst
+    // of focus changes collapses to a single refresh on the next runloop tick.
+    private var overlayRefreshScheduled = false
+    private func scheduleOverlayRefresh() {
+        guard !overlayRefreshScheduled else { return }
+        overlayRefreshScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.overlayRefreshScheduled = false
+            self.refreshAllOverlays()
+        }
     }
 
     private func refreshOverlay(_ axis: Int) {
