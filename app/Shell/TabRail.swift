@@ -7,7 +7,7 @@ struct TabRail: View {
     @Binding var selection: WorkspaceTab
 
     var body: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 12) {
             ForEach(WorkspaceTab.allCases) { tab in
                 TabRailButton(tab: tab, isSelected: selection == tab) {
                     selection = tab
@@ -15,9 +15,11 @@ struct TabRail: View {
             }
             Spacer()
         }
-        .padding(.top, 56)        // clear the transparent titlebar
-        .padding(.bottom, 14)
-        .frame(width: 66)
+        // The standard titlebar sits above the whole workspace, so the rail only
+        // needs a little breathing room from the top of the content area.
+        .padding(.top, 14)
+        .padding(.bottom, 16)
+        .frame(width: 72)
         .frame(maxHeight: .infinity)
         .background(
             VisualEffectView(material: .underWindowBackground, blendingMode: .behindWindow)
@@ -42,7 +44,7 @@ private struct TabRailButton: View {
                 Text(tab.title)
                     .font(.system(size: 9, weight: .medium))
             }
-            .frame(width: 54, height: 48)
+            .frame(width: 58, height: 52)
             .foregroundStyle(isSelected ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
             .background(
                 isSelected ? Color.accentColor.opacity(0.15) : Color.clear,
