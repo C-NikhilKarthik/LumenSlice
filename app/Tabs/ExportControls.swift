@@ -21,12 +21,17 @@ struct ExportControls: View {
             // Choose which segments to export by toggling their eye — the STL is the
             // union of the visible, non-empty ones (mirrors the 3D tab).
             if !seg.segments.isEmpty {
-                Section("Segments (visible ones are exported)") {
+                Section {
                     ForEach(seg.segments) { row in
                         SegmentListRow(row: row,
                                        isActive: row.id == seg.activeID,
                                        seg: seg)
                     }
+                } header: {
+                    InfoHeader("Segments",
+                               help: "The STL is the union of the visible, non-empty "
+                                   + "segments. Toggle the eye to include or exclude a "
+                                   + "segment.")
                 }
             }
 

@@ -68,13 +68,7 @@ struct VisualizeControls: View {
                     }
                 }
 
-                Section("Window / Level (HU)") {
-                    Text("Level = brightness (the HU shown as mid-gray). "
-                         + "Window = contrast (the HU span mapped black→white). "
-                         + "Drag the handles to set the visible HU range, or drag "
-                         + "on a slice.")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                Section {
                     // The SAME two-thumb control the Segment tab uses for threshold:
                     // a window IS a range (min..max visible HU), so dragging the
                     // handles sets level = midpoint and window = width. Min/Max fields
@@ -91,6 +85,12 @@ struct VisualizeControls: View {
                         preset("Lung", level: -600, window: 1500)
                     }
                     .padding(.top, 2)
+                } header: {
+                    InfoHeader("Window / Level (HU)",
+                               help: "Level = brightness (the HU shown as mid-gray). "
+                                   + "Window = contrast (the HU span mapped "
+                                   + "black→white). Drag the handles to set the visible "
+                                   + "HU range, or drag on a slice.")
                 }
 
                 Section("Overlays") {

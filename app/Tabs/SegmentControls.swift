@@ -84,11 +84,7 @@ struct SegmentControls: View {
     private var thresholdSection: some View {
         let lo = model.huLo
         let hi = max(model.huHi, lo + 1)
-        return Section("Threshold (HU)") {
-            Text("Label every voxel in this HU window into the active segment. "
-                 + "Drag either handle to update live.")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+        return Section {
             // Shared HU-range control (same one the Visualize tab uses for W/L).
             HURangeControl(low: $seg.thresholdLo, high: $seg.thresholdHi,
                            bounds: lo...hi)
@@ -108,16 +104,15 @@ struct SegmentControls: View {
             .buttonStyle(.bordered)
             .controlSize(.small)
             .disabled(seg.activeID == 0)
+        } header: {
+            InfoHeader("Threshold (HU)",
+                       help: "Label every voxel in this HU window into the active "
+                           + "segment. Drag either handle to update live.")
         }
     }
 
     private var regionGrowSection: some View {
-        Section("Fill (flood)") {
-            Text("Click a structure in any slice to flood-fill connected voxels "
-                 + "within the tolerance of the clicked voxel. Each click fills; "
-                 + "this is not the seed brush for Grow from seeds (use Paint for that).")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+        Section {
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
                     Text("Tolerance")
@@ -128,26 +123,33 @@ struct SegmentControls: View {
                 }
                 Slider(value: $seg.tolerance, in: 1...1000, step: 1)
             }
+        } header: {
+            InfoHeader("Fill (flood)",
+                       help: "Click a structure in any slice to flood-fill connected "
+                           + "voxels within the tolerance of the clicked voxel. Each "
+                           + "click fills; this is not the seed brush for Grow from "
+                           + "seeds (use Paint for that).")
         }
     }
 
     private var levelTraceSection: some View {
-        Section("Level Trace") {
-            Text("Click a bright structure on any slice to select its whole level "
-                 + "set: every connected pixel at or above the clicked HU is added to "
-                 + "the active segment. Works on the clicked slice only.")
-                .font(.caption2)
+        Section {
+            Label("Click a bright structure on a slice.",
+                  systemImage: "hand.point.up.left")
+                .font(.caption)
                 .foregroundStyle(.secondary)
+        } header: {
+            InfoHeader("Level Trace",
+                       help: "Click a bright structure on any slice to select its whole "
+                           + "level set: every connected pixel at or above the clicked "
+                           + "HU is added to the active segment. Works on the clicked "
+                           + "slice only.")
         }
     }
 
     private var brushSection: some View {
-        Section(seg.tool == .erase ? "Erase brush" : "Paint brush") {
-            Text(seg.tool == .erase
-                 ? "Drag over the slice to erase the active segment."
-                 : "Drag over the slice to paint the active segment.")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+        let isErase = seg.tool == .erase
+        return Section {
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
                     Text("Brush radius")
@@ -160,18 +162,18 @@ struct SegmentControls: View {
                                       set: { seg.brushRadius = Int($0) }),
                        in: 1...80, step: 1)
             }
+        } header: {
+            InfoHeader(isErase ? "Erase brush" : "Paint brush",
+                       help: isErase
+                           ? "Drag over the slice to erase the active segment."
+                           : "Drag over the slice to paint the active segment.")
         }
     }
 
     // MARK: - Grow from seeds
 
     private var growSeedsSection: some View {
-        Section("Grow from seeds") {
-            Text("Paint a seed in each region with a different segment. Initialize "
-                 + "a preview, inspect the result through the slices, then apply it "
-                 + "or cancel and add more seeds.")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+        Section {
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
                     Text("Seed locality")
@@ -181,9 +183,6 @@ struct SegmentControls: View {
                         .monospacedDigit()
                 }
                 Slider(value: $seg.growSeedLocality, in: 0...10, step: 0.1)
-                Text("Higher values keep growth closer to the painted seeds.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
             }
             // Gate exactly like Slicer: at least two segments must carry seeds.
             if !seg.canGrowFromSeeds {
@@ -215,6 +214,13 @@ struct SegmentControls: View {
                 .controlSize(.small)
                 .disabled(!seg.canGrowFromSeeds)
             }
+        } header: {
+            InfoHeader("Grow from seeds",
+                       help: "Paint a seed in each region with a different segment. "
+                           + "Initialize a preview, inspect the result through the "
+                           + "slices, then apply it or cancel and add more seeds. Seed "
+                           + "locality: higher values keep growth closer to the painted "
+                           + "seeds.")
         }
     }
 
