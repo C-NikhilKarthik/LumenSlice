@@ -35,11 +35,11 @@ struct WindowAccessor: NSViewRepresentable {
         let view = NSView()
         DispatchQueue.main.async {
             guard let window = view.window else { return }
-            // Keep a real window title (Window menu, Mission Control) but hide it in
-            // the titlebar - the toolbar's principal item already shows the identity,
-            // so a visible title would render "LumenSlice" twice.
+            // The window title is the app name and shows on the LEFT of the titlebar.
+            // The toolbar's principal (center) item shows only the active tab name, so
+            // "LumenSlice" appears exactly once.
             window.title = "LumenSlice"
-            window.titleVisibility = .hidden
+            window.titleVisibility = .visible
             // NOTE: do NOT set isMovableByWindowBackground — it makes AppKit steal
             // drags from controls like the slice sliders and move the window instead.
             // A bare SwiftPM executable opens behind the launching app (Xcode/

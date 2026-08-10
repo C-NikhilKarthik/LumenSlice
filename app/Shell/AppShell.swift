@@ -63,12 +63,17 @@ struct AppShell: View {
                                                    : "Hide features panel")
             }
             ToolbarItem(placement: .principal) {
-                HStack(spacing: 6) {
-                    Text("LumenSlice").font(.headline)
-                    Text(selectedTab.title)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
+                // Center shows only the active tab's name; the app identity lives on
+                // the left as the window title, so "LumenSlice" appears once. fixedSize
+                // lets the system titlebar glass capsule wrap the whole word instead of
+                // clipping it.
+                Text(selectedTab.title)
+                    .font(.headline)
+                    .lineLimit(1)
+                    .fixedSize()
+                    // Breathing room so the system titlebar glass capsule wraps the
+                    // word with margin instead of clipping its first/last glyphs.
+                    .padding(.horizontal, 10)
             }
             ToolbarItem(placement: .primaryAction) {
                 Button {
