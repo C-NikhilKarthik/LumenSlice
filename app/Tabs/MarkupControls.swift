@@ -17,7 +17,6 @@ struct MarkupControls: View {
                         .foregroundStyle(.secondary)
                 }
             } else {
-                infoSection
                 typeSection
                 colorSection
                 placeSection
@@ -28,17 +27,8 @@ struct MarkupControls: View {
         .scrollContentBackground(.hidden)
     }
 
-    private var infoSection: some View {
-        Section {
-            Text("Drop points on any slice pane; they show in the 3D pane. A Point "
-                 + "is one click, a Line is two, a Plane is three (a triangle).")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-    }
-
     private var typeSection: some View {
-        Section("Type") {
+        Section {
             Picker("Type", selection: $markup.kind) {
                 ForEach(MarkupModel.Kind.allCases) { k in
                     Label(k.title, systemImage: k.icon).tag(k)
@@ -46,17 +36,22 @@ struct MarkupControls: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
+        } header: {
+            InfoHeader("Type",
+                       help: "Drop points on any slice pane; they show in the 3D pane. "
+                           + "A Point is one click, a Line is two, a Plane is three (a "
+                           + "triangle).")
         }
     }
 
     private var colorSection: some View {
-        Section("Colour") {
+        Section {
             MarkupPalette(selected: markup.nextColorIndex) { markup.pickNextColor($0) }
-            Text("New markups use this colour (the points you drop show it live) and "
-                 + "keep using it until you pick another. Recolour an existing markup "
-                 + "from the list below.")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+        } header: {
+            InfoHeader("Colour",
+                       help: "New markups use this colour (the points you drop show it "
+                           + "live) and keep using it until you pick another. Recolour "
+                           + "an existing markup from the list below.")
         }
     }
 

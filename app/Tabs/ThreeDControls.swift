@@ -8,30 +8,45 @@ struct ThreeDControls: View {
 
     var body: some View {
         Form {
-            Section {
-                Text("Build a colored 3D surface for each visible segment using "
-                     + "marching cubes. Hidden or empty segments are skipped.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            // Pick which segments the surface is built from, right here — toggle the
+            // eye to include/exclude a segment without switching back to the Segment
+            // tab (generation builds exactly the visible, non-empty ones).
+            if !seg.segments.isEmpty {
+                Section {
+                    ForEach(seg.segments) { row in
+                        SegmentListRow(row: row,
+                                       isActive: row.id == seg.activeID,
+                                       seg: seg)
+                    }
+                } header: {
+                    InfoHeader("Segments",
+                               help: "Toggle the eye to include or exclude a segment. "
+                                   + "The surface is built from exactly the visible, "
+                                   + "non-empty segments.")
+                }
             }
 
-            Section("Quality") {
+            Section {
                 Stepper("Smoothing: \(mesh.smoothing)", value: $mesh.smoothing, in: 0...5)
                 Picker("Resolution", selection: $mesh.downsample) {
                     Text("Full").tag(1)
                     Text("Half").tag(2)
                     Text("Third").tag(3)
                 }
-                Text("Lower resolution = fewer triangles, faster, coarser.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+            } header: {
+                InfoHeader("Quality",
+                           help: "Smoothing rounds the surface (0 = raw voxel steps). "
+                               + "Resolution downsamples before marching cubes: lower = "
+                               + "fewer triangles, faster and coarser. Use Full for "
+                               + "the final export.")
             }
 
-            Section("Volume") {
+            Section {
                 Toggle("Volume rendering", isOn: $mesh.volumeRendering)
-                Text("Fast downsampled preview controlled by window and level.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+            } header: {
+                InfoHeader("Volume",
+                           help: "Fast downsampled preview controlled by window and "
+                               + "level.")
             }
 
             Section {
@@ -52,24 +67,29 @@ struct ThreeDControls: View {
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
+            } header: {
+                InfoHeader("3D surface",
+                           help: "Build a colored 3D surface for each visible segment "
+                               + "using marching cubes. Hidden or empty segments are "
+                               + "skipped.")
             }
 
             if mesh.triangleCount > 0 {
-                Section("Mesh") {
+                Section {
                     LabeledContent("Triangles", value: mesh.triangleCount.formatted())
                     LabeledContent("Vertices", value: mesh.vertexCount.formatted())
-                    Text("Drag to orbit, scroll to zoom.")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                } header: {
+                    InfoHeader("Mesh", help: "Drag to orbit, scroll to zoom.")
                 }
 
-                Section("Scissor") {
+                Section {
                     Toggle("Scissor mode", isOn: $mesh.scissorActive)
-                    Text("When on, draw a freehand loop over the surface to erase "
-                         + "every voxel inside it (through the full depth), then the "
-                         + "surface rebuilds. Turn off to orbit again.")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                } header: {
+                    InfoHeader("Scissor",
+                               help: "When on, draw a freehand loop over the surface to "
+                                   + "erase every voxel inside it (through the full "
+                                   + "depth), then the surface rebuilds. Turn off to "
+                                   + "orbit again.")
                 }
             }
         }

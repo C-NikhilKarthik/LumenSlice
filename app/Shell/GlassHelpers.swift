@@ -26,18 +26,22 @@ struct VisualEffectView: NSViewRepresentable {
     }
 }
 
-// Reaches up to the hosting NSWindow to make the titlebar transparent so the
-// sidebar glass flows all the way to the top edge.
+// Reaches up to the hosting NSWindow to front the window on launch. We keep a
+// STANDARD opaque titlebar (no fullSizeContentView, no transparency) so the toolbar
+// reads as a solid top strip with a separator line and the workspace sits cleanly
+// below it, rather than bleeding up behind the traffic-light buttons.
 struct WindowAccessor: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView {
         let view = NSView()
         DispatchQueue.main.async {
             guard let window = view.window else { return }
-            window.titlebarAppearsTransparent = true
+            // The window title is the app name and shows on the LEFT of the titlebar.
+            // The toolbar's principal (center) item shows only the active tab name, so
+            // "LumenSlice" appears exactly once.
+            window.title = "LumenSlice"
             window.titleVisibility = .visible
             // NOTE: do NOT set isMovableByWindowBackground — it makes AppKit steal
             // drags from controls like the slice sliders and move the window instead.
-            window.styleMask.insert(.fullSizeContentView)
             // A bare SwiftPM executable opens behind the launching app (Xcode/
             // Terminal). Pull our window to the front and focus it.
             window.center()

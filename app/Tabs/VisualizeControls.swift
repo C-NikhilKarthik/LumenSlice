@@ -68,21 +68,29 @@ struct VisualizeControls: View {
                     }
                 }
 
-                Section("Window / Level (HU)") {
-                    Text("Drag on a slice to adjust, or set exact values here.")
-                        .font(.caption2)
+                Section {
+                    // The SAME two-thumb control the Segment tab uses for threshold:
+                    // a window IS a range (min..max visible HU), so dragging the
+                    // handles sets level = midpoint and window = width. Min/Max fields
+                    // type exact edges.
+                    HURangeControl(low: wlLow, high: wlHigh, bounds: wlBounds,
+                                   step: 10, lowLabel: "Min", highLabel: "Max")
+                    // The derived level/window the range maps to.
+                    Text("Level \(Int(model.level)) · Window \(Int(model.window)) HU")
+                        .font(.caption2.monospacedDigit())
                         .foregroundStyle(.secondary)
-                    // Ranges always span the current value so a preset (e.g. Bone
-                    // L400/W1500) outside the volume's HU span doesn't get snapped
-                    // back the moment the user touches the slider or stepper.
-                    wlRow("Level", value: $model.level, range: levelRange, step: 10)
-                    wlRow("Window", value: $model.window, range: windowRange, step: 10)
                     HStack(spacing: 6) {
                         preset("Bone", level: 400, window: 1500)
                         preset("Soft", level: 40, window: 400)
                         preset("Lung", level: -600, window: 1500)
                     }
                     .padding(.top, 2)
+                } header: {
+                    InfoHeader("Window / Level (HU)",
+                               help: "Level = brightness (the HU shown as mid-gray). "
+                                   + "Window = contrast (the HU span mapped "
+                                   + "black→white). Drag the handles to set the visible "
+                                   + "HU range, or drag on a slice.")
                 }
 
                 Section("Overlays") {
@@ -100,36 +108,39 @@ struct VisualizeControls: View {
         }
     }
 
-    // W/L control ranges, widened to always contain the current value (presets can
-    // set values outside the volume's HU span; without this the first slider touch
-    // would snap them back).
-    private var levelRange: ClosedRange<Float> {
-        min(model.huLo, model.level)...max(model.huHi, model.level, model.huLo + 1)
+    // Window/level expressed as its visible HU range (Min = level − window/2,
+    // Max = level + window/2) so the shared two-thumb HURangeControl can drive it.
+    // Moving either edge recomputes level (the midpoint) and window (the width) in a
+    // single refresh; the edges are kept at least 1 HU apart so window can't hit 0.
+    private var wlLow: Binding<Float> {
+        Binding(
+            get: { model.level - model.window / 2 },
+            set: { newMin in
+                let hi = model.level + model.window / 2
+                let lo = min(newMin, hi - 1)
+                model.setWindowLevel(level: (lo + hi) / 2, window: max(1, hi - lo))
+            })
     }
-    private var windowRange: ClosedRange<Float> {
-        1...max(model.huHi - model.huLo, model.window, 2)
+    private var wlHigh: Binding<Float> {
+        Binding(
+            get: { model.level + model.window / 2 },
+            set: { newMax in
+                let lo = model.level - model.window / 2
+                let hi = max(newMax, lo + 1)
+                model.setWindowLevel(level: (lo + hi) / 2, window: max(1, hi - lo))
+            })
     }
 
-    // Precise W/L control: an editable numeric field + stepper (arrow keys nudge
-    // by `step`) over a coarse slider. The drag-on-image gesture is the fast path;
-    // this is for exact values and small adjustments.
-    private func wlRow(_ title: String, value: Binding<Float>,
-                       range: ClosedRange<Float>, step: Float) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(title)
-                Spacer()
-                TextField(title, value: value,
-                          format: .number.precision(.fractionLength(0)))
-                    .labelsHidden()
-                    .frame(width: 60)
-                    .multilineTextAlignment(.trailing)
-                    .textFieldStyle(.roundedBorder)
-                Stepper(title, value: value, in: range, step: step)
-                    .labelsHidden()
-            }
-            Slider(value: value, in: range)
-        }
+    // Usable band for the window edges. A CT's raw HU span is enormous and mostly
+    // unused, so cap to a clinically useful range that still covers every preset
+    // (Lung reaches ~-1350, Bone ~+1150) - clamped to the volume, and widened to
+    // include the current window so a handle never parks off the track.
+    private var wlBounds: ClosedRange<Float> {
+        let curLo = model.level - model.window / 2
+        let curHi = model.level + model.window / 2
+        let lo = min(max(model.huLo, -1400), curLo)
+        let hi = max(min(model.huHi, 1600), curHi)
+        return lo...hi
     }
 
     private func preset(_ name: String, level: Float, window: Float) -> some View {

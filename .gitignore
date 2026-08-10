@@ -51,3 +51,4 @@ yashdocs/
 
 # Python tooling venv (fixture generation)
 .venv/
+.ua/

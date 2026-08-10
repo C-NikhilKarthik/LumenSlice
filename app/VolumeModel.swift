@@ -207,7 +207,33 @@ final class VolumeModel: ObservableObject {
         case 1: focus.y = clampY(value)
         default: focus.x = clampX(value)
         }
-        refresh(axis)
+        // Coalesced, not synchronous: a fast scroll (or slider drag) fires many
+        // setSlice calls, and re-extracting every intermediate slice inline is what
+        // makes the sagittal pane feel choppy next to axial. Sagittal slices are the
+        // slowest to extract — with the volume stored X-fastest, a constant-X plane
+        // strides the whole buffer, roughly one cache miss per pixel — so paying that
+        // for slices you scroll straight past is wasted. `focus` updates now (the
+        // crosshair + slider track live); the image catches up on the next runloop
+        // tick, dropping the slices in between.
+        scheduleRefresh(axis)
+    }
+
+    // See setSlice: bump `focus` immediately, coalesce the (possibly slow) extraction
+    // to the next runloop tick so a burst of slice changes collapses to one re-extract
+    // of the latest slice.
+    private var pendingRefresh: Set<Int> = []
+    private var refreshScheduled = false
+    private func scheduleRefresh(_ axis: Int) {
+        pendingRefresh.insert(axis)
+        guard !refreshScheduled else { return }
+        refreshScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.refreshScheduled = false
+            let axes = self.pendingRefresh
+            self.pendingRefresh.removeAll()
+            for a in axes { self.refresh(a) }
+        }
     }
 
     /// Jump the shared focus to a voxel (click-to-locate, or Shift+hover linked

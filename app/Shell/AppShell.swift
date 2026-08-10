@@ -2,20 +2,17 @@ import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 
-// Root window: a left icon rail (Visualize / Segment / 3D / Export) + a per-tab
-// control panel + an adaptive central canvas. Selecting a tab swaps ONLY the
-// control panel and the canvas; the other tabs' controls hide.
+// Root window. A standard opaque titlebar (traffic lights + toolbar + separator
+// line) sits across the top; EVERYTHING else - the icon rail, the collapsible
+// control panel, and the canvas - sits BELOW it as a distinct row, so the panel
+// reads as its own rectangle starting under the navbar rather than flowing up
+// behind it. The panel is a fixed width sized to fit its widest tab, so it never
+// spills over the rail. The toolbar's sidebar button collapses/expands the panel.
 //
-//   ┌──────┬──────────────────┬───────────────────────────┐
-//   │ rail │  control panel   │   canvas (adapts per tab)  │
-//   │  V   │  (active tab's   │   Visualize/Segment -> 3   │
-//   │  S   │   buttons only)  │     slice panes            │
-//   │  3D  │                  │   3D -> SceneKit mesh      │
-//   │  E   │                  │   Export -> preview        │
-//   └──────┴──────────────────┴───────────────────────────┘
-//
-// P0 wires the Visualize tab fully (identical to the pre-refactor app); the
-// Segment / 3D / Export tabs are placeholders filled in by later phases.
+//   ┌──────────── titlebar: ⊙⊙⊙  ⊟  LumenSlice · tab      Open Folder ─────┐
+//   ├──────────────────────────── separator ────────────────────────────┤
+//   │ rail │  control panel   │   canvas (adapts per tab)                │
+//   └──────┴──────────────────┴──────────────────────────────────────────┘
 struct AppShell: View {
     @EnvironmentObject var model: VolumeModel
     @EnvironmentObject var segmentation: SegmentationModel
@@ -24,6 +21,13 @@ struct AppShell: View {
     // Owned by the App so the global Undo command can route by active tab.
     @Binding var selectedTab: WorkspaceTab
     @State private var dropTargeted = false
+    // The features panel collapses to give the canvas the full width.
+    @State private var panelCollapsed = false
+
+    // Fixed panel width so every tab's control panel has the same breadth. Sized to
+    // fit the widest tab (Segment - its 5-item tool picker + threshold fields), so no
+    // control is clipped on the right.
+    private let panelWidth: CGFloat = 360
 
     var body: some View {
         HStack(spacing: 0) {
@@ -35,34 +39,57 @@ struct AppShell: View {
                     // back to navigation / painting instead of dropping points.
                     if newTab != .markups { markup.placing = false }
                 }
-            NavigationSplitView {
+            if !panelCollapsed {
                 controlPanel
-                    .navigationSplitViewColumnWidth(min: 262, ideal: 292, max: 360)
-            } detail: {
-                canvas
-                    .navigationTitle("LumenSlice")
-                    .toolbar {
-                        ToolbarItem(placement: .primaryAction) {
-                            Button {
-                                chooseFolder(model)
-                            } label: {
-                                Label("Open Folder", systemImage: "folder.badge.plus")
-                            }
-                        }
-                    }
-                    .toolbarBackground(.hidden, for: .windowToolbar)
-                    .onDrop(of: [.fileURL], isTargeted: $dropTargeted) { providers in
-                        handleDrop(providers, model)
-                    }
+                    .frame(width: panelWidth)
+                Divider()
             }
+            canvas
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .onDrop(of: [.fileURL], isTargeted: $dropTargeted) { providers in
+                    handleDrop(providers, model)
+                }
         }
         .background(WindowAccessor())
+        .toolbar {
+            ToolbarItem(placement: .navigation) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.15)) { panelCollapsed.toggle() }
+                } label: {
+                    Image(systemName: "sidebar.left")
+                }
+                .help(panelCollapsed ? "Show features panel" : "Hide features panel")
+                .accessibilityLabel(panelCollapsed ? "Show features panel"
+                                                   : "Hide features panel")
+            }
+            ToolbarItem(placement: .principal) {
+                // Center shows only the active tab's name; the app identity lives on
+                // the left as the window title, so "LumenSlice" appears once. fixedSize
+                // lets the system titlebar glass capsule wrap the whole word instead of
+                // clipping it.
+                Text(selectedTab.title)
+                    .font(.headline)
+                    .lineLimit(1)
+                    .fixedSize()
+                    // Breathing room so the system titlebar glass capsule wraps the
+                    // word with margin instead of clipping its first/last glyphs.
+                    .padding(.horizontal, 10)
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    chooseFolder(model)
+                } label: {
+                    Label("Open Folder", systemImage: "folder.badge.plus")
+                }
+            }
+        }
+        .toolbarBackground(.visible, for: .windowToolbar)
     }
 
-    // The left control panel: a shared app header + the active tab's controls.
+    // The left control panel: just the active tab's controls (identity lives in the
+    // titlebar). Fixed width via the caller so all tabs match.
     @ViewBuilder private var controlPanel: some View {
-        VStack(spacing: 0) {
-            AppHeader(tab: selectedTab)
+        Group {
             switch selectedTab {
             case .visualize: VisualizeControls()
             case .segment:   SegmentControls()
@@ -73,7 +100,6 @@ struct AppShell: View {
         }
         .background(
             VisualEffectView(material: .sidebar, blendingMode: .behindWindow)
-                .ignoresSafeArea()
         )
     }
 
@@ -89,29 +115,5 @@ struct AppShell: View {
         case .threeD, .export:
             MeshCanvas()
         }
-    }
-}
-
-// MARK: - Header + placeholders
-
-private struct AppHeader: View {
-    let tab: WorkspaceTab
-    var body: some View {
-        HStack(spacing: 11) {
-            Image(systemName: "square.stack.3d.up.fill")
-                .font(.system(size: 22, weight: .semibold))
-                .foregroundStyle(.tint)
-            VStack(alignment: .leading, spacing: 1) {
-                Text("LumenSlice")
-                    .font(.title3.weight(.semibold))
-                Text(tab.title)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-        }
-        .padding(.horizontal, 18)
-        .padding(.top, 24)
-        .padding(.bottom, 10)
     }
 }
