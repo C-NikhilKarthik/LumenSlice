@@ -7,6 +7,7 @@
 #include <QColorDialog>
 #include <QComboBox>
 #include <QDialog>
+#include <QDialogButtonBox>
 #include <QDir>
 #include <QDoubleSpinBox>
 #include <QDragEnterEvent>
@@ -26,6 +27,7 @@
 #include <QJsonObject>
 #include <QLabel>
 #include <QLineEdit>
+#include <QListWidget>
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QMimeData>
@@ -957,7 +959,37 @@ QWidget* MainWindow::buildQuad() {
         const int axis = axes[i];
         connect(sliders_[i], &QSlider::valueChanged, this,
                 [this, axis](int val) { onSliceScrolled(axis, val); });
-        col->addWidget(sliders_[i]);
+
+        // Prev (up) / next (down) frame buttons flanking the slider. They step the
+        // slice index by exactly -1 / +1 through the same setter the slider uses.
+        auto makeStepBtn = [](const QString& glyph, const QString& tip) {
+            auto* b = new QToolButton;
+            b->setText(glyph);
+            b->setToolTip(tip);
+            b->setFixedSize(24, 22);
+            b->setStyleSheet(
+                "QToolButton{background:#2a2d36;border:1px solid #3a3f4c;"
+                "border-radius:6px;color:#c3c8d2;font-size:12px;}"
+                "QToolButton:hover{background:#363b47;border-color:#454b59;}"
+                "QToolButton:pressed{background:#414857;}"
+                "QToolButton:disabled{color:#5a5f6d;background:#23252c;"
+                "border-color:#2b2e37;}");
+            return b;
+        };
+        slicePrevBtns_[i] = makeStepBtn("▲", "Previous slice");
+        sliceNextBtns_[i] = makeStepBtn("▼", "Next slice");
+        connect(slicePrevBtns_[i], &QToolButton::clicked, this,
+                [this, axis] { onSliceScrolled(axis, st_.sliceIndex[axis] - 1); });
+        connect(sliceNextBtns_[i], &QToolButton::clicked, this,
+                [this, axis] { onSliceScrolled(axis, st_.sliceIndex[axis] + 1); });
+
+        auto* sliceRow = new QHBoxLayout;
+        sliceRow->setContentsMargins(0, 0, 0, 0);
+        sliceRow->setSpacing(4);
+        sliceRow->addWidget(slicePrevBtns_[i]);
+        sliceRow->addWidget(sliders_[i], 1);
+        sliceRow->addWidget(sliceNextBtns_[i]);
+        col->addLayout(sliceRow);
         quadCells_[i] = cell;
         quadLayout_->addWidget(cell, cellPos[i][0], cellPos[i][1]);
     }
@@ -1081,17 +1113,93 @@ void MainWindow::openFolder() {
 
 void MainWindow::loadPath(const QString& path) {
     if (loading_) return;
-    loading_ = true;
+    loading_ = true;  // also guards against re-entry during the scan / picker
+
+    // Scan first (header crawl, groups files into series). This is far cheaper
+    // than a full decode, so it runs synchronously behind a busy overlay.
+    setStatus(QString("Scanning %1 …").arg(path));
+    showBusy("Scanning DICOM…");
+    QCoreApplication::processEvents();  // ensure the overlay is on screen
+    char scanMsg[512] = {0};
+    LumenSeriesScan* scan =
+        lumen_scan_folder(path.toUtf8().constData(), scanMsg, sizeof(scanMsg));
+    if (!scan) {
+        loading_ = false;
+        showBusy("");
+        const QString m = QString::fromUtf8(scanMsg);
+        setStatus(QString("Could not load: %1").arg(m));
+        QMessageBox::warning(
+            this, "LumenSlice",
+            m.isEmpty() ? "Could not scan the DICOM folder." : m);
+        return;
+    }
+
+    // One series loads straight through; several pop a modal picker.
+    int chosen = 0;
+    if (lumen_series_count(scan) > 1) {
+        showBusy("");  // hide the overlay while the picker is up
+        chosen = pickSeries(scan);
+        if (chosen < 0) {
+            lumen_scan_free(scan);
+            loading_ = false;
+            setStatus("Open cancelled.");
+            return;
+        }
+    }
+
+    // Decode the chosen series off the UI thread so a large series never freezes
+    // the window; the volume is adopted back on the UI thread in onLoadReady().
+    // The scan handle is only needed for this decode, so free it in the worker.
     setStatus(QString("Loading %1 …").arg(path));
     showBusy("Loading DICOM…");
-    // Ingestion (recursive crawl + decode) runs off the UI thread so a large
-    // series never freezes the window; the volume is adopted back on the UI thread.
-    loadWatcher_.setFuture(QtConcurrent::run([path]() -> LoadResult {
+    loadWatcher_.setFuture(QtConcurrent::run([scan, chosen]() -> LoadResult {
         char msg[512] = {0};
-        LumenVolume* v =
-            lumen_load_folder(path.toUtf8().constData(), msg, sizeof(msg));
+        LumenVolume* v = lumen_load_series(scan, chosen, msg, sizeof(msg));
+        lumen_scan_free(scan);
         return LoadResult{v, QString::fromUtf8(msg)};
     }));
+}
+
+// Modal picker listing every series in a multi-series folder. Returns the chosen
+// series index, or -1 if the user cancelled.
+int MainWindow::pickSeries(LumenSeriesScan* scan) {
+    const int n = lumen_series_count(scan);
+    QDialog dlg(this);
+    dlg.setWindowTitle("Select DICOM series");
+    dlg.resize(460, 320);
+    auto* layout = new QVBoxLayout(&dlg);
+    auto* prompt = new QLabel(
+        "This folder holds multiple series. Choose one to open:");
+    prompt->setWordWrap(true);
+    layout->addWidget(prompt);
+
+    auto* list = new QListWidget(&dlg);
+    for (int i = 0; i < n; ++i) {
+        char desc[256] = {0};
+        char modality[64] = {0};
+        int sliceCount = 0;
+        lumen_series_info(scan, i, desc, sizeof(desc), modality,
+                          sizeof(modality), &sliceCount);
+        QString d = QString::fromUtf8(desc).trimmed();
+        QString m = QString::fromUtf8(modality).trimmed();
+        if (d.isEmpty()) d = QString("Series %1").arg(i + 1);
+        if (m.isEmpty()) m = "?";
+        list->addItem(
+            QString("%1  -  %2  -  %3 slices").arg(d, m).arg(sliceCount));
+    }
+    list->setCurrentRow(0);
+    layout->addWidget(list, 1);
+
+    auto* buttons = new QDialogButtonBox(
+        QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
+    layout->addWidget(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+    connect(list, &QListWidget::itemDoubleClicked, &dlg, &QDialog::accept);
+
+    if (dlg.exec() != QDialog::Accepted) return -1;
+    const int row = list->currentRow();
+    return row < 0 ? -1 : row;
 }
 
 void MainWindow::onLoadReady() {
@@ -1194,6 +1302,7 @@ void MainWindow::onSliceScrolled(int axis, int index) {
             QSignalBlocker b(sliders_[i]);
             sliders_[i]->setValue(index);
         }
+    updateSliceButtons();  // reflect the new index at the range ends
     lastScrollAxis_ = axis;
     if (scrollThrottle_.isActive()) {
         scrollDirty_ = true;
@@ -1283,7 +1392,16 @@ void MainWindow::onStrokeEnded() {
 void MainWindow::onFloodClicked(int x, int y, int z) {
     if (!st_.volume || st_.busy || heavyWatcher_.isRunning()) return;
     cancelGrowPreview();
+    // Flood fill runs synchronously on the UI thread and can block on a large
+    // connected structure, so flash a busy overlay first. st_.busy doubles as a
+    // re-entrancy guard while processEvents() paints the overlay. Undo was
+    // already snapshotted in onStrokeBegan().
+    st_.busy = true;
+    showBusy("Filling…");
+    QCoreApplication::processEvents();  // ensure the overlay is on screen
     lumen_seg_region_grow(st_.volume, x, y, z, st_.tolerance);
+    st_.busy = false;
+    showBusy("");
     refreshCanvas();
     updateSegmentCounts();
     scheduleMeshRefresh();
@@ -1292,7 +1410,13 @@ void MainWindow::onFloodClicked(int x, int y, int z) {
 void MainWindow::onLevelTraceClicked(int axis, int index, int cx, int cy) {
     if (!st_.volume || st_.busy || heavyWatcher_.isRunning()) return;
     cancelGrowPreview();
+    // Same pattern as flood fill: brief busy overlay around the blocking trace.
+    st_.busy = true;
+    showBusy("Tracing…");
+    QCoreApplication::processEvents();  // ensure the overlay is on screen
     lumen_seg_level_trace(st_.volume, axis, index, cx, cy);
+    st_.busy = false;
+    showBusy("");
     refreshCanvas();
     updateSegmentCounts();
     scheduleMeshRefresh();
@@ -1702,6 +1826,19 @@ void MainWindow::refreshSliders() {
         sliders_[i]->setRange(0, std::max(0, count - 1));
         sliders_[i]->setValue(st_.sliceIndex[i]);
         sliders_[i]->setEnabled(v != nullptr);
+    }
+    updateSliceButtons();
+}
+
+void MainWindow::updateSliceButtons() {
+    LumenVolume* v = st_.volume;
+    for (int i = 0; i < 3; ++i) {
+        if (!slicePrevBtns_[i] || !sliceNextBtns_[i]) continue;
+        const int axis = panes_[i] ? panes_[i]->axis() : i;
+        const int count = v ? lumen_slice_count(v, axis) : 0;
+        const int idx = st_.sliceIndex[axis];
+        slicePrevBtns_[i]->setEnabled(v && count > 0 && idx > 0);
+        sliceNextBtns_[i]->setEnabled(v && count > 0 && idx < count - 1);
     }
 }
 

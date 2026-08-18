@@ -125,10 +125,13 @@ private:
 
     // Refresh helpers.
     void loadPath(const QString& path);
+    // Modal series picker for a multi-series folder; returns the chosen index or -1.
+    int pickSeries(LumenSeriesScan* scan);
     void adoptLoadedVolume(const LoadResult& result);
     void refreshAll();
     void refreshCanvas();
     void refreshSliders();
+    void updateSliceButtons();  // enable/disable the per-pane prev/next buttons
     void refreshVolumeInfo();
     void refreshVolumeTexture();
     void rebuildSegmentList();
@@ -154,6 +157,9 @@ private:
     int maximized_ = -1;
     SliceView* panes_[3] = {nullptr, nullptr, nullptr};
     QSlider* sliders_[3] = {nullptr, nullptr, nullptr};
+    // Per-pane step buttons: previous (up) / next (down) slice, beside the slider.
+    QToolButton* slicePrevBtns_[3] = {nullptr, nullptr, nullptr};
+    QToolButton* sliceNextBtns_[3] = {nullptr, nullptr, nullptr};
     MeshView* meshView_ = nullptr;
     QWidget* quadBoard_ = nullptr;
     QLabel* loadingOverlay_ = nullptr;
