@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import LumenCore
 
 // Observable bridge between SwiftUI and the C++ core. Holds the loaded volume
@@ -131,20 +132,67 @@ final class VolumeModel: ObservableObject {
     func load(path: String) {
         guard !isLoading else { return }
         isLoading = true
-        status = "Loading \(URL(fileURLWithPath: path).lastPathComponent)…"
+        status = "Inspecting DICOM scenes…"
 
-        // Parse off the main thread so the window/UI stay responsive — a real
-        // series can be hundreds of files. The opaque handle is passed back as a
-        // bit pattern to stay clear of cross-actor Sendable concerns.
+        // Inspect off the main thread first. A folder can contain scouts,
+        // derived series, and the actual stack; silently picking one is unsafe.
+        Task.detached(priority: .userInitiated) {
+            let jsonLength = path.withCString { lumen_list_dicom_series($0, nil, 0) }
+            var seriesJSON = [CChar](repeating: 0, count: max(1, Int(jsonLength) + 1))
+            if jsonLength > 0 {
+                path.withCString { cpath in
+                    _ = lumen_list_dicom_series(cpath, &seriesJSON, Int32(seriesJSON.count))
+                }
+            }
+            let seriesText = String(cString: seriesJSON)
+            await MainActor.run { self.chooseSeriesAndLoad(path: path, json: seriesText) }
+        }
+    }
+
+    private func chooseSeriesAndLoad(path: String, json: String) {
+        var selectedUID: String?
+        if let data = json.data(using: .utf8),
+           let series = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
+           series.count > 1 {
+            let popup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 420, height: 26))
+            for item in series {
+                let uid = item["uid"] as? String ?? ""
+                let slices = item["slices"] as? Int ?? 0
+                let width = item["width"] as? Int ?? 0
+                let height = item["height"] as? Int ?? 0
+                popup.addItem(withTitle: "\(slices) slices — \(width)×\(height) — \(uid)")
+            }
+            let alert = NSAlert()
+            alert.messageText = "Choose DICOM scene"
+            alert.informativeText = "This folder contains multiple image series."
+            alert.accessoryView = popup
+            alert.addButton(withTitle: "Open")
+            alert.addButton(withTitle: "Cancel")
+            guard alert.runModal() == .alertFirstButtonReturn else {
+                isLoading = false
+                status = "DICOM opening cancelled."
+                return
+            }
+            selectedUID = series[popup.indexOfSelectedItem]["uid"] as? String
+        } else if let data = json.data(using: .utf8),
+                  let series = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
+                  series.count == 1 {
+            selectedUID = series[0]["uid"] as? String
+        }
+        startLoad(path: path, seriesUID: selectedUID)
+    }
+
+    private func startLoad(path: String, seriesUID: String?) {
+        status = "Loading \(URL(fileURLWithPath: path).lastPathComponent)…"
         Task.detached(priority: .userInitiated) {
             var msg = [CChar](repeating: 0, count: 512)
             let raw = path.withCString { cpath in
-                UInt(bitPattern: lumen_load_folder(cpath, &msg, 512))
+                seriesUID?.withCString { uid in
+                    UInt(bitPattern: lumen_load_folder_series(cpath, uid, &msg, 512))
+                } ?? UInt(bitPattern: lumen_load_folder(cpath, &msg, 512))
             }
             let message = String(cString: msg)
-            await MainActor.run {
-                self.finishLoad(handleBits: raw, message: message)
-            }
+            await MainActor.run { self.finishLoad(handleBits: raw, message: message) }
         }
     }
 

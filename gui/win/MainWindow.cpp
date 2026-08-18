@@ -21,6 +21,7 @@
 #include <QPixmap>
 #include <QHBoxLayout>
 #include <QHeaderView>
+#include <QInputDialog>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -135,6 +136,8 @@ MainWindow::MainWindow() {
             &MainWindow::onMeshReady);
     connect(&loadWatcher_, &QFutureWatcher<LoadResult>::finished, this,
             &MainWindow::onLoadReady);
+    connect(&seriesWatcher_, &QFutureWatcher<QString>::finished, this,
+            &MainWindow::onSeriesListReady);
     connect(meshView_, &MeshView::scissorFinished, this,
             &MainWindow::onScissorFinished);
     connect(meshView_, &MeshView::generateRequested, this,
@@ -166,7 +169,7 @@ MainWindow::MainWindow() {
         refreshCanvas();
         updateSegmentCounts();
         updateUndoRedo();
-        scheduleMeshRefresh();
+        if (heavyRefreshMesh_) scheduleMeshRefresh();
     });
     // Throttle slice repaints while wheel-scrolling (see onSliceScrolled).
     scrollThrottle_.setSingleShot(true);
@@ -401,8 +404,8 @@ QWidget* MainWindow::buildSegmentPanel() {
     {
         auto* w = new QWidget;
         auto* f = new QVBoxLayout(w);
-        f->addWidget(new QLabel("Drag the handles to label every voxel in this HU "
-                                "window into the active segment (applies live)."));
+        f->addWidget(new QLabel("Drag the handles to preview the active segment in "
+                                "the three slice views. Press Apply to update 3D."));
         threshLabel_ = new QLabel("Low 300  —  High 3000 HU");
         f->addWidget(threshLabel_);
         threshSlider_ = new RangeSlider;
@@ -451,6 +454,14 @@ QWidget* MainWindow::buildSegmentPanel() {
         auto* otsuBtn = new QPushButton("Otsu auto-threshold");
         connect(otsuBtn, &QPushButton::clicked, this, &MainWindow::applyOtsu);
         f->addWidget(otsuBtn);
+        auto* applyBtn = new QPushButton("Apply threshold to 3D");
+        applyBtn->setObjectName("accent");
+        connect(applyBtn, &QPushButton::clicked, this, &MainWindow::commitThreshold);
+        f->addWidget(applyBtn);
+        auto* maskBtn = new QPushButton("Use for masking / Paint");
+        connect(maskBtn, &QPushButton::clicked, this,
+                &MainWindow::useThresholdForMasking);
+        f->addWidget(maskBtn);
         toolDetail_->addWidget(w);
     }
     // 1: region grow
@@ -953,11 +964,25 @@ QWidget* MainWindow::buildQuad() {
         connect(panes_[i], &SliceView::doubleClicked, this,
                 [this, i] { toggleMaximize(i); });
         col->addWidget(panes_[i], 1);
+        auto* sliceNav = new QHBoxLayout;
+        auto* previous = new QToolButton;
+        previous->setText("▲");
+        previous->setToolTip("Previous frame");
+        auto* next = new QToolButton;
+        next->setText("▼");
+        next->setToolTip("Next frame");
         sliders_[i] = new QSlider(Qt::Horizontal);
         const int axis = axes[i];
+        connect(previous, &QToolButton::clicked, this,
+                [this, axis] { onSliceScrolled(axis, st_.sliceIndex[axis] - 1); });
+        connect(next, &QToolButton::clicked, this,
+                [this, axis] { onSliceScrolled(axis, st_.sliceIndex[axis] + 1); });
         connect(sliders_[i], &QSlider::valueChanged, this,
                 [this, axis](int val) { onSliceScrolled(axis, val); });
-        col->addWidget(sliders_[i]);
+        sliceNav->addWidget(previous);
+        sliceNav->addWidget(sliders_[i], 1);
+        sliceNav->addWidget(next);
+        col->addLayout(sliceNav);
         quadCells_[i] = cell;
         quadLayout_->addWidget(cell, cellPos[i][0], cellPos[i][1]);
     }
@@ -1082,14 +1107,60 @@ void MainWindow::openFolder() {
 void MainWindow::loadPath(const QString& path) {
     if (loading_) return;
     loading_ = true;
+    pendingSeriesPath_ = path;
+    setStatus(QString("Inspecting DICOM scenes in %1 …").arg(path));
+    showBusy("Inspecting DICOM scenes…");
+    seriesWatcher_.setFuture(QtConcurrent::run([path]() -> QString {
+        const QByteArray p = path.toUtf8();
+        const int n = lumen_list_dicom_series(p.constData(), nullptr, 0);
+        if (n <= 0) return QString();
+        QByteArray json(n + 1, '\0');
+        lumen_list_dicom_series(p.constData(), json.data(), json.size());
+        return QString::fromUtf8(json.constData());
+    }));
+}
+
+void MainWindow::onSeriesListReady() {
+    const QString json = seriesWatcher_.result();
+    QJsonParseError error{};
+    const QJsonDocument doc = QJsonDocument::fromJson(json.toUtf8(), &error);
+    QJsonArray series = error.error == QJsonParseError::NoError && doc.isArray()
+                            ? doc.array() : QJsonArray{};
+    QString selectedUid;
+    if (series.size() > 1) {
+        QStringList choices;
+        for (const QJsonValue& value : series) {
+            const QJsonObject o = value.toObject();
+            choices << QString("%1 slices — %2×%3 — %4")
+                           .arg(o.value("slices").toInt())
+                           .arg(o.value("width").toInt())
+                           .arg(o.value("height").toInt())
+                           .arg(o.value("uid").toString());
+        }
+        bool accepted = false;
+        const QString choice = QInputDialog::getItem(
+            this, "Choose DICOM scene", "This folder contains multiple image series:",
+            choices, 0, false, &accepted);
+        if (!accepted) {
+            loading_ = false;
+            showBusy("");
+            setStatus("DICOM opening cancelled.");
+            return;
+        }
+        const int index = choices.indexOf(choice);
+        if (index >= 0) selectedUid = series.at(index).toObject().value("uid").toString();
+    } else if (series.size() == 1) {
+        selectedUid = series.first().toObject().value("uid").toString();
+    }
+    const QString path = pendingSeriesPath_;
     setStatus(QString("Loading %1 …").arg(path));
     showBusy("Loading DICOM…");
-    // Ingestion (recursive crawl + decode) runs off the UI thread so a large
-    // series never freezes the window; the volume is adopted back on the UI thread.
-    loadWatcher_.setFuture(QtConcurrent::run([path]() -> LoadResult {
+    loadWatcher_.setFuture(QtConcurrent::run([path, selectedUid]() -> LoadResult {
         char msg[512] = {0};
-        LumenVolume* v =
-            lumen_load_folder(path.toUtf8().constData(), msg, sizeof(msg));
+        const QByteArray p = path.toUtf8();
+        const QByteArray uid = selectedUid.toUtf8();
+        LumenVolume* v = lumen_load_folder_series(
+            p.constData(), uid.isEmpty() ? nullptr : uid.constData(), msg, sizeof(msg));
         return LoadResult{v, QString::fromUtf8(msg)};
     }));
 }
@@ -1283,19 +1354,18 @@ void MainWindow::onStrokeEnded() {
 void MainWindow::onFloodClicked(int x, int y, int z) {
     if (!st_.volume || st_.busy || heavyWatcher_.isRunning()) return;
     cancelGrowPreview();
-    lumen_seg_region_grow(st_.volume, x, y, z, st_.tolerance);
-    refreshCanvas();
-    updateSegmentCounts();
-    scheduleMeshRefresh();
+    const float tolerance = st_.tolerance;
+    runMaskOp("Filling region…", [v = st_.volume, x, y, z, tolerance] {
+        lumen_seg_region_grow(v, x, y, z, tolerance);
+    }, false);
 }
 
 void MainWindow::onLevelTraceClicked(int axis, int index, int cx, int cy) {
     if (!st_.volume || st_.busy || heavyWatcher_.isRunning()) return;
     cancelGrowPreview();
-    lumen_seg_level_trace(st_.volume, axis, index, cx, cy);
-    refreshCanvas();
-    updateSegmentCounts();
-    scheduleMeshRefresh();
+    runMaskOp("Tracing level…", [v = st_.volume, axis, index, cx, cy] {
+        lumen_seg_level_trace(v, axis, index, cx, cy);
+    }, false);
 }
 
 QColor MainWindow::nextSegmentColor() const {
@@ -1327,7 +1397,22 @@ void MainWindow::applyThreshold() {
                         float(threshSlider_->highValue()));
     refreshCanvas();
     updateSegmentCounts();
-    scheduleMeshRefresh();
+}
+
+void MainWindow::commitThreshold() {
+    if (!st_.volume || st_.busy || heavyWatcher_.isRunning()) return;
+    generateMesh();
+}
+
+void MainWindow::useThresholdForMasking() {
+    LumenVolume* v = st_.volume;
+    if (!v || st_.busy || heavyWatcher_.isRunning() || !threshSlider_) return;
+    const float lo = float(threshSlider_->lowValue());
+    const float hi = float(threshSlider_->highValue());
+    st_.tool = Tool::Paint;
+    runMaskOp("Applying intensity mask…", [v, lo, hi] {
+        lumen_seg_apply_mask(v, lo, hi);
+    }, false);
 }
 
 void MainWindow::applyOtsu() {
@@ -1343,12 +1428,14 @@ void MainWindow::applyOtsu() {
     });
 }
 
-void MainWindow::runMaskOp(const QString& busyText, std::function<void()> op) {
+void MainWindow::runMaskOp(const QString& busyText, std::function<void()> op,
+                           bool refreshMesh) {
     LumenVolume* v = st_.volume;
     if (!v || st_.busy || heavyWatcher_.isRunning()) return;
     lumen_seg_push_undo(v);
     updateUndoRedo();
     st_.busy = true;
+    heavyRefreshMesh_ = refreshMesh;
     showBusy(busyText);
     refreshCanvas();  // repaint hides the mask overlay (busy) before the mutation
     QCoreApplication::processEvents();  // ensure the overlay is on screen

@@ -13,6 +13,7 @@
 #include <cstring>
 #include <string>
 #include <utility>
+#include <sstream>
 
 #include "bridge/meta_copy.hpp"
 #include "core/volume.h"
@@ -29,8 +30,10 @@ constexpr lumen::Rgb kDefaultSegmentColor{0, 180, 210};
 
 extern "C" {
 
-LumenVolume* lumen_load_folder(const char* path, char* msg, int msg_cap) {
-    lumen::LoadResult r = lumen::LoadDicomFolder(path != nullptr ? path : "");
+LumenVolume* lumen_load_folder_series(const char* path, const char* series_uid,
+                                      char* msg, int msg_cap) {
+    lumen::LoadResult r = lumen::LoadDicomFolder(path != nullptr ? path : "",
+                                                  series_uid != nullptr ? series_uid : "");
     if (msg != nullptr && msg_cap > 0) {
         std::snprintf(msg, static_cast<size_t>(msg_cap), "%s", r.message.c_str());
     }
@@ -46,6 +49,29 @@ LumenVolume* lumen_load_folder(const char* path, char* msg, int msg_cap) {
                             ? lumen::serialize_meta_json(r.meta, r.tags)
                             : std::string();
     return handle;
+}
+
+LumenVolume* lumen_load_folder(const char* path, char* msg, int msg_cap) {
+    return lumen_load_folder_series(path, nullptr, msg, msg_cap);
+}
+
+int lumen_list_dicom_series(const char* path, char* out, int out_cap) {
+    const auto series = lumen::ListDicomSeries(path != nullptr ? path : "");
+    std::ostringstream json;
+    json << '[';
+    for (std::size_t i = 0; i < series.size(); ++i) {
+        if (i) json << ',';
+        json << "{\"uid\":\"";
+        for (const char c : series[i].uid) {
+            if (c == '\\' || c == '"') json << '\\';
+            json << c;
+        }
+        json << "\",\"slices\":" << series[i].slices
+             << ",\"width\":" << series[i].width
+             << ",\"height\":" << series[i].height << '}';
+    }
+    json << ']';
+    return lumen::copy_string_out(json.str(), out, out_cap);
 }
 
 void lumen_free(LumenVolume* v) { delete v; }
@@ -151,6 +177,20 @@ const unsigned char* lumen_extract_slice(LumenVolume* v, int axis, int index,
     if (out_w) *out_w = v->scratch.width;
     if (out_h) *out_h = v->scratch.height;
     return v->scratch.rgba.empty() ? nullptr : v->scratch.rgba.data();
+}
+
+const unsigned char* lumen_extract_threshold_slice(LumenVolume* v, int axis,
+                                                   int index, float lo, float hi,
+                                                   int* out_w, int* out_h) {
+    if (v == nullptr) return nullptr;
+    const auto colour = v->editor.color(v->editor.active());
+    lumen::ExtractThresholdOverlay(v->volume, static_cast<lumen::Axis>(axis), index,
+                                   lo, hi, colour.r, colour.g, colour.b,
+                                   v->threshold_scratch);
+    if (out_w) *out_w = v->threshold_scratch.width;
+    if (out_h) *out_h = v->threshold_scratch.height;
+    return v->threshold_scratch.rgba.empty()
+               ? nullptr : v->threshold_scratch.rgba.data();
 }
 
 int lumen_meta_json(const LumenVolume* v, char* out, int out_cap) {

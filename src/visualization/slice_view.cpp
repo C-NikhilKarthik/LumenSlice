@@ -56,4 +56,25 @@ void ExtractSlice(const Volume& vol, Axis axis, int index, float level,
     }
 }
 
+void ExtractThresholdOverlay(const Volume& vol, Axis axis, int index, float lo,
+                             float hi, std::uint8_t r, std::uint8_t g,
+                             std::uint8_t b, SliceImage& out) {
+    if (!vol.valid()) { out.width = out.height = 0; out.rgba.clear(); return; }
+    if (lo > hi) std::swap(lo, hi);
+    index = std::clamp(index, 0, vol.slice_count(axis) - 1);
+    const SliceDims d = slice_dims(vol, axis);
+    out.width = d.width;
+    out.height = d.height;
+    out.rgba.assign(static_cast<std::size_t>(d.width) * d.height * 4, 0);
+    for (int py = 0; py < d.height; ++py) {
+        for (int px = 0; px < d.width; ++px) {
+            const VoxelCoord c = plane_to_voxel(vol, axis, index, px, py);
+            const float hu = vol.voxel_buffer[vol.index(c.x, c.y, c.z)];
+            if (hu < lo || hu > hi) continue;
+            std::uint8_t* p = &out.rgba[(static_cast<std::size_t>(py) * d.width + px) * 4];
+            p[0] = r; p[1] = g; p[2] = b; p[3] = 150;
+        }
+    }
+}
+
 } // namespace lumen

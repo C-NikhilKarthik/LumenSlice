@@ -29,8 +29,23 @@ struct LoadResult {
     std::vector<DicomTag> tags;
 };
 
+struct DicomSeriesInfo {
+    std::string uid;
+    std::string description;
+    int slices = 0;
+    int width = 0;
+    int height = 0;
+};
+
 // Load every usable DICOM slice under `folder` (searched recursively) into a
 // single calibrated Volume. Never throws; failures are reported in the result.
 LoadResult LoadDicomFolder(const std::string& folder);
+
+// Same loader, restricted to one Series Instance UID. An empty UID preserves
+// the legacy behavior of choosing the largest image series.
+LoadResult LoadDicomFolder(const std::string& folder, const std::string& series_uid);
+
+// Enumerate image series in a folder for a caller-facing scene picker.
+std::vector<DicomSeriesInfo> ListDicomSeries(const std::string& folder);
 
 } // namespace lumen

@@ -155,7 +155,7 @@ bool ParseSlice(const fs::path& path, Slice& out) {
 
 } // namespace
 
-LoadResult LoadDicomFolder(const std::string& folder) {
+LoadResult LoadDicomFolder(const std::string& folder, const std::string& requested_series_uid) {
     LoadResult result;
     EnsureCodecsRegistered();
 
@@ -206,12 +206,23 @@ LoadResult LoadDicomFolder(const std::string& folder) {
     }
 
     // A folder often holds more than one series (the CT plus a scout/topogram, a
-    // dose report, or a secondary capture). Merging them yields nonsensical spacing
-    // and Z-ordering, so keep only the largest series (by Series Instance UID).
+    // dose report, or a secondary capture). Never merge them. A caller may choose
+    // a UID explicitly; otherwise retain the largest image series for compatibility.
     {
         std::unordered_map<std::string, int> counts;
         for (const auto& s : slices) ++counts[s.series_uid];
-        if (counts.size() > 1) {
+        if (!requested_series_uid.empty()) {
+            slices.erase(std::remove_if(slices.begin(), slices.end(),
+                                        [&](const Slice& s) {
+                                            return s.series_uid != requested_series_uid;
+                                        }),
+                         slices.end());
+            if (slices.empty()) {
+                result.message = "Requested DICOM series was not found: " + requested_series_uid;
+                result.ok = false;
+                return result;
+            }
+        } else if (counts.size() > 1) {
             const std::string& best =
                 std::max_element(counts.begin(), counts.end(),
                                  [](const auto& a, const auto& b) {
@@ -325,6 +336,35 @@ LoadResult LoadDicomFolder(const std::string& folder) {
     result.volume = std::move(vol);
     result.ok = true;
     result.message = buf;
+    return result;
+}
+
+LoadResult LoadDicomFolder(const std::string& folder) {
+    return LoadDicomFolder(folder, {});
+}
+
+std::vector<DicomSeriesInfo> ListDicomSeries(const std::string& folder) {
+    std::vector<DicomSeriesInfo> result;
+    std::error_code ec;
+    if (!fs::exists(folder, ec) || !fs::is_directory(folder, ec)) return result;
+    std::unordered_map<std::string, DicomSeriesInfo> by_uid;
+    for (auto it = fs::recursive_directory_iterator(
+             folder, fs::directory_options::skip_permission_denied, ec);
+         !ec && it != fs::recursive_directory_iterator(); it.increment(ec)) {
+        if (!it->is_regular_file(ec)) continue;
+        if (!HasDicmSignature(it->path()) && !HasDicomExtension(it->path())) continue;
+        Slice s;
+        if (!ParseSlice(it->path(), s)) continue;
+        auto& info = by_uid[s.series_uid];
+        info.uid = s.series_uid;
+        info.slices += 1;
+        info.width = s.cols;
+        info.height = s.rows;
+    }
+    for (auto& item : by_uid) result.push_back(std::move(item.second));
+    std::sort(result.begin(), result.end(), [](const auto& a, const auto& b) {
+        return a.slices > b.slices;
+    });
     return result;
 }
 

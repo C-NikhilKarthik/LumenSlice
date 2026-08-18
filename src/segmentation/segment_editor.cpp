@@ -1,9 +1,11 @@
 #include "segmentation/segment_editor.hpp"
 
 #include <cstddef>
+#include <algorithm>
 
 #include "segmentation/grow_from_seeds.hpp"
 #include "segmentation/scissor.hpp"
+#include "segmentation/segment.hpp"
 
 namespace lumen {
 
@@ -13,6 +15,7 @@ void SegmentEditor::reset_to(const Volume& volume, Rgb default_color) {
     segments_.clear();
     segments_.add(default_color); // one active segment to start
     undo_.reset();
+    intensity_mask_enabled_ = false;
 }
 
 std::uint8_t SegmentEditor::add_segment(Rgb color) {
@@ -58,7 +61,22 @@ long SegmentEditor::region_grow(int x, int y, int z, float tolerance) {
 
 long SegmentEditor::paint(Axis axis, int slice_index, int cx, int cy, int radius,
                           bool add) {
-    return apply(PaintEffect{axis, slice_index, cx, cy, radius, add});
+    if (!intensity_mask_enabled_) {
+        return apply(PaintEffect{axis, slice_index, cx, cy, radius, add});
+    }
+    return paint_disk(*volume_, axis, slice_index, cx, cy, radius, add, mask_,
+                      segments_.active(), true, intensity_mask_lo_, intensity_mask_hi_);
+}
+
+void SegmentEditor::apply_intensity_mask(float low_hu, float high_hu) {
+    if (volume_ == nullptr || !mask_.valid()) return;
+    if (low_hu > high_hu) std::swap(low_hu, high_hu);
+    // This is an editing constraint, not a segmentation operation. Slicer keeps
+    // the labelmap intact when the Threshold effect is switched to Paint; only
+    // subsequent paint additions are clipped to this HU range.
+    intensity_mask_enabled_ = true;
+    intensity_mask_lo_ = low_hu;
+    intensity_mask_hi_ = high_hu;
 }
 
 long SegmentEditor::level_trace(Axis axis, int slice_index, int cx, int cy) {

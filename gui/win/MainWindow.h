@@ -62,6 +62,7 @@ protected:
 private slots:
     void openFolder();
     void onLoadReady();
+    void onSeriesListReady();
     void selectTab(int tab);
 
     // Canvas intents.
@@ -77,6 +78,8 @@ private slots:
     // Segment ops.
     void addSegment();
     void applyThreshold();
+    void commitThreshold();
+    void useThresholdForMasking();
     void applyOtsu();
     void growFromSeeds();
     void applyGrowPreview();
@@ -120,7 +123,8 @@ private:
     // Run a mask-mutating op on a worker thread with a busy overlay (snapshots undo
     // first). Keeps heavy ops (grow-from-seeds) from freezing the UI on
     // large volumes.
-    void runMaskOp(const QString& busyText, std::function<void()> op);
+    void runMaskOp(const QString& busyText, std::function<void()> op,
+                   bool refreshMesh = true);
     void scheduleMeshRefresh();
 
     // Refresh helpers.
@@ -229,6 +233,8 @@ private:
 
     // Off-thread folder load.
     QFutureWatcher<LoadResult> loadWatcher_;
+    QFutureWatcher<QString> seriesWatcher_;
+    QString pendingSeriesPath_;
     bool loading_ = false;
     LoadResult pendingLoad_;
     bool hasPendingLoad_ = false;
@@ -241,6 +247,7 @@ private:
     bool meshRefreshPending_ = false;
     QTimer countsTimer_;  // debounces the full-volume segment histogram
     QFutureWatcher<void> heavyWatcher_;  // async grow-from-seeds mask operation
+    bool heavyRefreshMesh_ = true;
     bool growPreviewPending_ = false;
     bool growPreviewActive_ = false;
     QTimer scrollThrottle_;  // caps slice re-extraction rate during wheel-scroll

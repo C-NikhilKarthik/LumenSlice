@@ -57,14 +57,26 @@ struct SlicePane: View {
 
             imageArea
 
-            Slider(
-                value: Binding(
-                    get: { Double(model.sliceIndex[axis]) },
-                    set: { model.setSlice(axis, Int($0.rounded())) }),
-                in: 0...Double(max(count - 1, 1))
-            )
-            .controlSize(.small)
-            .disabled(count <= 1)
+            HStack(spacing: 6) {
+                Button { model.setSlice(axis, model.sliceIndex[axis] - 1) } label: {
+                    Image(systemName: "chevron.up")
+                }
+                .help("Previous frame")
+                .buttonStyle(.borderless)
+                Slider(
+                    value: Binding(
+                        get: { Double(model.sliceIndex[axis]) },
+                        set: { model.setSlice(axis, Int($0.rounded())) }),
+                    in: 0...Double(max(count - 1, 1))
+                )
+                .controlSize(.small)
+                .disabled(count <= 1)
+                Button { model.setSlice(axis, model.sliceIndex[axis] + 1) } label: {
+                    Image(systemName: "chevron.down")
+                }
+                .help("Next frame")
+                .buttonStyle(.borderless)
+            }
         }
         .padding(12)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
@@ -172,6 +184,16 @@ struct SlicePane: View {
                     .background(.black.opacity(0.5), in: Capsule())
                     .foregroundStyle(.white.opacity(0.9))
                     .padding(10)
+            }
+            .overlay {
+                if let seg = segment, seg.isBusy {
+                    ZStack {
+                        Color.black.opacity(0.42)
+                        ProgressView("Working…")
+                            .tint(.white)
+                            .foregroundStyle(.white)
+                    }
+                }
             }
         }
     }
