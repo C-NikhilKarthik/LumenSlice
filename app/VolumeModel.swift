@@ -1,6 +1,21 @@
 import SwiftUI
 import LumenCore
 
+// One selectable DICOM series from a folder scan, shown in the multi-series picker.
+// `id` is the series index into the live scan (largest-first), which is what gets
+// passed back to VolumeModel.chooseSeries.
+struct SeriesOption: Identifiable, Hashable {
+    let id: Int
+    let description: String
+    let modality: String
+    let sliceCount: Int
+
+    // Primary label: the series description, or "Series N" when it has none.
+    var title: String {
+        description.isEmpty ? "Series \(id + 1)" : description
+    }
+}
+
 // Observable bridge between SwiftUI and the C++ core. Holds the loaded volume
 // handle and republishes CGImages for the three slice planes whenever the user
 // scrolls or adjusts window/level.
@@ -17,6 +32,11 @@ final class VolumeModel: ObservableObject {
     // (finishLoad, pinHandle, releaseHandle), so the counter needs no locking.
     private var pinnedReaders = 0
     private var deferredFree: [OpaquePointer] = []
+
+    // Live header-only folder scan kept alive between opening a multi-series folder
+    // and the user's pick in the series sheet. Freed on choose, cancel, a superseding
+    // scan, or deinit - never leaked. Touched only on the main actor.
+    private var scanHandle: OpaquePointer?
 
     /// Pin the current handle so an in-flight load won't free it while background
     /// work (e.g. marching cubes) is reading it. Returns nil if no volume is loaded.
@@ -40,6 +60,10 @@ final class VolumeModel: ObservableObject {
     @Published var status = "Open a DICOM folder to begin."
     @Published var hasVolume = false
     @Published var isLoading = false
+
+    // Non-nil when a scanned folder holds several series: the picker sheet reads this
+    // to list them. Cleared once the user chooses a series or cancels.
+    @Published var pendingSeries: [SeriesOption]?
 
     // Geometry.
     @Published var width = 0
@@ -126,16 +150,131 @@ final class VolumeModel: ObservableObject {
     deinit {
         if let h = handle { lumen_free(h) }
         for h in deferredFree { lumen_free(h) }
+        if let s = scanHandle { lumen_scan_free(s) }
     }
 
+    // MARK: - Open flow (scan -> pick -> load)
+
+    // Open a folder: scan its series first, then either load straight through (one
+    // series) or hand a picker to the UI (several). This is the flow the Open Folder
+    // button and drag-drop use. `load(path:)` below is the older single-shot
+    // largest-series fallback, kept for the command-line auto-load.
+    func open(path: String) {
+        guard !isLoading else { return }
+        isLoading = true
+        status = "Scanning \(URL(fileURLWithPath: path).lastPathComponent)…"
+
+        // Scan off the main thread (a header-only pass, but a big folder still walks
+        // many files). The opaque scan handle rides back as a bit pattern to stay
+        // clear of cross-actor Sendable concerns.
+        Task.detached(priority: .userInitiated) {
+            var msg = [CChar](repeating: 0, count: 512)
+            let raw = path.withCString { cpath in
+                UInt(bitPattern: lumen_scan_folder(cpath, &msg, 512))
+            }
+            let message = String(cString: msg)
+            await MainActor.run {
+                self.finishScan(scanBits: raw, message: message)
+            }
+        }
+    }
+
+    private func finishScan(scanBits: UInt, message: String) {
+        // A fresh scan supersedes any earlier pending picker; never leak its handle.
+        freeScan()
+        pendingSeries = nil
+
+        guard let scan = OpaquePointer(bitPattern: scanBits) else {
+            // Scan found nothing DICOM-like: surface the reason, leave the volume be.
+            isLoading = false
+            status = message
+            return
+        }
+        scanHandle = scan
+
+        let count = Int(lumen_series_count(scan))
+        if count <= 1 {
+            // One series (or a lone unlabeled group): load it with no picker.
+            loadChosenSeries(index: 0)
+        } else {
+            // Several series: read each one's details and let the UI pick. Keep the
+            // scan handle alive until the user chooses or cancels.
+            var options: [SeriesOption] = []
+            options.reserveCapacity(count)
+            for i in 0..<count { options.append(Self.readSeriesInfo(scan, index: i)) }
+            pendingSeries = options
+            isLoading = false
+            status = "Multiple series found - choose one to load."
+        }
+    }
+
+    /// Load the series the user picked from the live scan, then free the scan.
+    func chooseSeries(_ index: Int) {
+        pendingSeries = nil
+        loadChosenSeries(index: index)
+    }
+
+    /// Dismiss the picker without loading: free the scan, no volume change. Guards on
+    /// isLoading so it can't free a scan a chosen load is still reading (the sheet's
+    /// dismissal setter fires this after chooseSeries has already started a load).
+    func cancelSeries() {
+        guard !isLoading else { return }
+        guard pendingSeries != nil || scanHandle != nil else { return }
+        pendingSeries = nil
+        freeScan()
+        if !hasVolume { status = "Open a DICOM folder to begin." }
+    }
+
+    // Load one series off the main thread, then adopt its handle and free the scan.
+    private func loadChosenSeries(index: Int) {
+        guard let scan = scanHandle else { return }
+        let scanBits = UInt(bitPattern: scan)
+        isLoading = true
+        status = "Loading series…"
+        Task.detached(priority: .userInitiated) {
+            var msg = [CChar](repeating: 0, count: 512)
+            let raw = UInt(bitPattern: lumen_load_series(
+                OpaquePointer(bitPattern: scanBits), Int32(index), &msg, 512))
+            let message = String(cString: msg)
+            await MainActor.run {
+                self.finishLoad(handleBits: raw, message: message)
+                self.freeScan()
+            }
+        }
+    }
+
+    private func freeScan() {
+        if let s = scanHandle { lumen_scan_free(s); scanHandle = nil }
+    }
+
+    // Read one series' description/modality/slice-count out of the scan into a value
+    // struct the picker can show without holding the C handle.
+    private static func readSeriesInfo(_ scan: OpaquePointer, index: Int) -> SeriesOption {
+        var desc = [CChar](repeating: 0, count: 256)
+        var modality = [CChar](repeating: 0, count: 64)
+        var sliceCount: Int32 = 0
+        desc.withUnsafeMutableBufferPointer { d in
+            modality.withUnsafeMutableBufferPointer { m in
+                lumen_series_info(scan, Int32(index), d.baseAddress, Int32(d.count),
+                                  m.baseAddress, Int32(m.count), &sliceCount)
+            }
+        }
+        return SeriesOption(id: index,
+                            description: String(cString: desc),
+                            modality: String(cString: modality),
+                            sliceCount: Int(sliceCount))
+    }
+
+    // The older single-shot open: load the largest series via lumen_load_folder with
+    // no picker. Kept for the command-line auto-load; the UI uses open(path:).
     func load(path: String) {
         guard !isLoading else { return }
         isLoading = true
         status = "Loading \(URL(fileURLWithPath: path).lastPathComponent)…"
 
-        // Parse off the main thread so the window/UI stay responsive — a real
-        // series can be hundreds of files. The opaque handle is passed back as a
-        // bit pattern to stay clear of cross-actor Sendable concerns.
+        // Parse off the main thread so the window/UI stay responsive - a real series
+        // can be hundreds of files. The opaque handle is passed back as a bit pattern
+        // to stay clear of cross-actor Sendable concerns.
         Task.detached(priority: .userInitiated) {
             var msg = [CChar](repeating: 0, count: 512)
             let raw = path.withCString { cpath in
@@ -152,9 +291,16 @@ final class VolumeModel: ObservableObject {
         isLoading = false
         status = message
         guard let newHandle = OpaquePointer(bitPattern: handleBits) else { return }
+        adopt(handle: newHandle)
+    }
 
-        // Defer freeing while a background reader (mesh generation) still holds a
-        // pin on the old handle — releaseHandle() frees it once that work finishes.
+    // Adopt a freshly loaded LumenVolume* as the current volume: retire the old handle
+    // (deferring the free while a background mesh reader still holds a pin on it -
+    // releaseHandle() frees it once that work finishes), publish geometry + HU range,
+    // pick a default window/level, recenter the crosshair, and extract the first
+    // slices. Shared by the folder fallback, the single-series path, and the
+    // series-picker path so all three adopt a handle identically.
+    private func adopt(handle newHandle: OpaquePointer) {
         if let old = handle {
             if pinnedReaders > 0 { deferredFree.append(old) } else { lumen_free(old) }
         }

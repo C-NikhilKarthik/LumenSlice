@@ -46,11 +46,29 @@ struct AppShell: View {
             }
             canvas
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .overlay {
+                    // Busy indicator for blocking segmentation ops. Only the Segment
+                    // tab sets busyMessage, so this stays hidden elsewhere.
+                    if let msg = segmentation.busyMessage {
+                        BusyOverlay(message: msg)
+                    }
+                }
                 .onDrop(of: [.fileURL], isTargeted: $dropTargeted) { providers in
                     handleDrop(providers, model)
                 }
         }
         .background(WindowAccessor())
+        .sheet(isPresented: Binding(
+            get: { model.pendingSeries != nil },
+            set: { presented in
+                // Dismissed without an explicit choice (Escape / click-away): treat as
+                // Cancel. chooseSeries() clears pendingSeries and sets isLoading, and
+                // cancelSeries() guards on isLoading, so a load in flight is left alone.
+                if !presented { model.cancelSeries() }
+            })) {
+            SeriesPicker()
+                .environmentObject(model)
+        }
         .toolbar {
             ToolbarItem(placement: .navigation) {
                 Button {

@@ -57,14 +57,35 @@ struct SlicePane: View {
 
             imageArea
 
-            Slider(
-                value: Binding(
-                    get: { Double(model.sliceIndex[axis]) },
-                    set: { model.setSlice(axis, Int($0.rounded())) }),
-                in: 0...Double(max(count - 1, 1))
-            )
-            .controlSize(.small)
-            .disabled(count <= 1)
+            // The slice scrubber, flanked by step buttons. Up = previous slice
+            // (index - 1), Down = next (index + 1). All three drive the same
+            // model.setSlice setter the scroll wheel uses, so slider, crosshair,
+            // and image stay in sync; setSlice clamps to [0, count - 1] and the
+            // buttons disable at the ends.
+            HStack(spacing: 6) {
+                Button { model.setSlice(axis, model.sliceIndex[axis] - 1) } label: {
+                    Image(systemName: "chevron.up")
+                }
+                .help("Previous slice")
+                .disabled(count <= 1 || model.sliceIndex[axis] <= 0)
+
+                Slider(
+                    value: Binding(
+                        get: { Double(model.sliceIndex[axis]) },
+                        set: { model.setSlice(axis, Int($0.rounded())) }),
+                    in: 0...Double(max(count - 1, 1))
+                )
+                .controlSize(.small)
+                .disabled(count <= 1)
+
+                Button { model.setSlice(axis, model.sliceIndex[axis] + 1) } label: {
+                    Image(systemName: "chevron.down")
+                }
+                .help("Next slice")
+                .disabled(count <= 1 || model.sliceIndex[axis] >= count - 1)
+            }
+            .font(.caption)
+            .buttonStyle(.borderless)
         }
         .padding(12)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))

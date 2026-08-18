@@ -74,6 +74,12 @@ final class SegmentationModel: ObservableObject {
     @Published private(set) var growPreviewActive = false
     @Published var showOverlay = true { didSet { refreshAllOverlays() } }
 
+    // Non-nil while a blocking bridge op (fill / level trace / grow-from-seeds /
+    // Otsu) runs. The op sets it, hops one runloop tick so SwiftUI can paint the
+    // busy overlay first, does the synchronous bridge work, then clears it. All on
+    // the main actor - no background thread, so there are no data races.
+    @Published var busyMessage: String?
+
     @Published private(set) var segments: [SegmentRow] = []
     @Published var activeID: Int = 0
     @Published private(set) var voxelCount: Int = 0          // total, all segments
@@ -291,6 +297,20 @@ final class SegmentationModel: ObservableObject {
 
     // MARK: - Editing operations
 
+    // Run a blocking bridge op behind the busy overlay: publish `message` now, hop
+    // one runloop tick so SwiftUI paints the overlay before the (synchronous) work
+    // runs, then clear the message. `work` runs on the main actor - keeping the
+    // bridge calls on main means zero data races. Any early return inside `work`
+    // still clears the message, since the clear runs after `work` returns.
+    private func runBusy(_ message: String, _ work: @escaping () -> Void) {
+        busyMessage = message
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            work()
+            self.busyMessage = nil
+        }
+    }
+
     func applyThreshold() {
         cancelGrowPreviewForEditing()
         guard let h = volume.handle, activeID > 0 else { return }
@@ -303,43 +323,53 @@ final class SegmentationModel: ObservableObject {
     }
 
     func applyOtsu() {
-        cancelGrowPreviewForEditing()
-        guard let h = volume.handle, activeID > 0 else { return }
-        let t = lumen_seg_otsu(h)
-        // We apply the threshold directly below; setting these @Published values
-        // also trips the debounced sink, so tell it to skip the redundant pass.
-        skipNextThresholdSink = true
-        thresholdLo = t
-        thresholdHi = volume.huHi
-        lumen_seg_push_undo(h)
-        thresholdNeedsUndoCapture = false
-        lumen_seg_threshold(h, thresholdLo, thresholdHi)
-        didMutateMask()
+        runBusy("Auto-threshold...") { [weak self] in
+            guard let self else { return }
+            self.cancelGrowPreviewForEditing()
+            guard let h = self.volume.handle, self.activeID > 0 else { return }
+            let t = lumen_seg_otsu(h)
+            // We apply the threshold directly below; setting these @Published values
+            // also trips the debounced sink, so tell it to skip the redundant pass.
+            self.skipNextThresholdSink = true
+            self.thresholdLo = t
+            self.thresholdHi = self.volume.huHi
+            lumen_seg_push_undo(h)
+            self.thresholdNeedsUndoCapture = false
+            lumen_seg_threshold(h, self.thresholdLo, self.thresholdHi)
+            self.didMutateMask()
+        }
     }
 
     func seedRegionGrow(axis: Int, px: Int, py: Int) {
-        cancelGrowPreviewForEditing()
-        guard let h = volume.handle, activeID > 0 else { return }
-        var x: Int32 = 0, y: Int32 = 0, z: Int32 = 0
-        lumen_slice_pixel_to_voxel(h, Int32(axis), Int32(volume.sliceIndex[axis]),
-                                   Int32(px), Int32(py), &x, &y, &z)
-        lumen_seg_push_undo(h)
-        thresholdNeedsUndoCapture = true
-        let added = lumen_seg_region_grow(h, x, y, z, tolerance)
-        if added > 0 { didMutateMask() } else { refreshUndoState() }
+        runBusy("Filling...") { [weak self] in
+            guard let self else { return }
+            self.cancelGrowPreviewForEditing()
+            guard let h = self.volume.handle, self.activeID > 0 else { return }
+            var x: Int32 = 0, y: Int32 = 0, z: Int32 = 0
+            lumen_slice_pixel_to_voxel(h, Int32(axis), Int32(self.volume.sliceIndex[axis]),
+                                       Int32(px), Int32(py), &x, &y, &z)
+            lumen_seg_push_undo(h)
+            self.thresholdNeedsUndoCapture = true
+            let added = lumen_seg_region_grow(h, x, y, z, self.tolerance)
+            if added > 0 { self.didMutateMask() } else { self.refreshUndoState() }
+        }
     }
 
     // Level trace: one click selects the iso-level (HU >= clicked pixel) region on
     // the clicked slice. The C++ kernel maps the pixel to a voxel itself, so we pass
     // slice-pixel coordinates straight through (unlike Fill, which seeds a voxel).
     func seedLevelTrace(axis: Int, px: Int, py: Int) {
-        cancelGrowPreviewForEditing()
-        guard let h = volume.handle, activeID > 0 else { return }
-        lumen_seg_push_undo(h)
-        thresholdNeedsUndoCapture = true
-        let added = lumen_seg_level_trace(h, Int32(axis), Int32(volume.sliceIndex[axis]),
-                                          Int32(px), Int32(py))
-        if added > 0 { didMutateMask() } else { refreshUndoState() }
+        runBusy("Tracing...") { [weak self] in
+            guard let self else { return }
+            self.cancelGrowPreviewForEditing()
+            guard let h = self.volume.handle, self.activeID > 0 else { return }
+            lumen_seg_push_undo(h)
+            self.thresholdNeedsUndoCapture = true
+            let added = lumen_seg_level_trace(h, Int32(axis),
+                                              Int32(self.volume.sliceIndex[axis]),
+                                              Int32(px), Int32(py))
+            if added > 0 { self.didMutateMask() } else { self.refreshUndoState() }
+        }
     }
 
     // Paint strokes: capture one undo entry at the start, paint per drag tick (only
@@ -398,15 +428,17 @@ final class SegmentationModel: ObservableObject {
     // mask change so Cancel restores the painted seeds and Apply leaves the result
     // available to Undo later.
     func initializeGrowPreview() {
-        guard let h = volume.handle, canGrowFromSeeds else { return }
-        if growPreviewActive { return }
-        lumen_seg_push_undo(h)
-        thresholdNeedsUndoCapture = true
-        if lumen_seg_grow_from_seeds(h, 1, growSeedLocality) > 0 {
-            growPreviewActive = true
-            didMutateMask()
+        guard volume.handle != nil, canGrowFromSeeds, !growPreviewActive else { return }
+        runBusy("Growing...") { [weak self] in
+            guard let self, let h = self.volume.handle else { return }
+            lumen_seg_push_undo(h)
+            self.thresholdNeedsUndoCapture = true
+            if lumen_seg_grow_from_seeds(h, 1, self.growSeedLocality) > 0 {
+                self.growPreviewActive = true
+                self.didMutateMask()
+            }
+            else { self.refreshUndoState() }
         }
-        else { refreshUndoState() }
     }
 
     func applyGrowPreview() { growPreviewActive = false; refreshUndoState() }

@@ -14,7 +14,7 @@ func chooseFolder(_ model: VolumeModel) {
     panel.prompt = "Open"
     panel.message = "Choose a folder containing a DICOM series"
     if panel.runModal() == .OK, let url = panel.url {
-        model.load(path: url.path)
+        model.open(path: url.path)
     }
 }
 
@@ -23,7 +23,7 @@ func handleDrop(_ providers: [NSItemProvider], _ model: VolumeModel) -> Bool {
     guard let provider = providers.first else { return false }
     _ = provider.loadObject(ofClass: URL.self) { url, _ in
         guard let url else { return }
-        Task { @MainActor in model.load(path: url.path) }
+        Task { @MainActor in model.open(path: url.path) }
     }
     return true
 }
