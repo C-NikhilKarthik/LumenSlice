@@ -153,9 +153,48 @@ bool ParseSlice(const fs::path& path, Slice& out) {
     return true;
 }
 
+// Crawl `folder` for files that look like DICOM (DICM magic or .dcm/.dicom
+// extension). Shared by the full load and the header-only series scan.
+std::vector<fs::path> CollectCandidates(const std::string& folder, int* files_scanned) {
+    std::vector<fs::path> candidates;
+    std::error_code ec;
+    for (auto it = fs::recursive_directory_iterator(
+             folder, fs::directory_options::skip_permission_denied, ec);
+         !ec && it != fs::recursive_directory_iterator(); it.increment(ec)) {
+        if (!it->is_regular_file(ec)) continue;
+        if (files_scanned != nullptr) ++(*files_scanned);
+        if (HasDicmSignature(it->path()) || HasDicomExtension(it->path()))
+            candidates.push_back(it->path());
+    }
+    return candidates;
+}
+
+// Read only the series-identifying header tags. Stops before PixelData, so this
+// never reads (or decompresses) the image itself - cheap enough to run over an
+// entire folder just to list the series. Returns false if the header won't parse.
+bool ReadSeriesId(const fs::path& path, std::string& uid, std::string& desc,
+                  std::string& modality) {
+    DcmFileFormat ff;
+    if (ff.loadFileUntilTag(path.string().c_str(), EXS_Unknown, EGL_noChange,
+                            DCM_MaxReadLength, ERM_autoDetect, DCM_PixelData)
+            .bad()) {
+        return false;
+    }
+    DcmDataset* ds = ff.getDataset();
+    if (ds == nullptr) return false;
+    OFString s;
+    if (ds->findAndGetOFString(DCM_SeriesInstanceUID, s).good()) uid = s.c_str();
+    if (ds->findAndGetOFString(DCM_SeriesDescription, s).good()) desc = s.c_str();
+    if (ds->findAndGetOFString(DCM_Modality, s).good()) modality = s.c_str();
+    return true;
+}
+
 } // namespace
 
-LoadResult LoadDicomFolder(const std::string& folder) {
+// Shared body. `filter_uid == nullptr` keeps the largest series (the historical
+// behaviour of LoadDicomFolder); a non-null pointer keeps exactly that Series
+// Instance UID (including the empty string, i.e. unlabeled slices).
+static LoadResult LoadDicomImpl(const std::string& folder, const std::string* filter_uid) {
     LoadResult result;
     EnsureCodecsRegistered();
 
@@ -165,18 +204,7 @@ LoadResult LoadDicomFolder(const std::string& folder) {
         return result;
     }
 
-    // Crawl: keep the fast signature path, plus conventional DICOM extensions
-    // for valid files that intentionally omit the optional preamble.
-    std::vector<fs::path> candidates;
-    for (auto it = fs::recursive_directory_iterator(
-             folder, fs::directory_options::skip_permission_denied, ec);
-         !ec && it != fs::recursive_directory_iterator(); it.increment(ec)) {
-        if (!it->is_regular_file(ec)) continue;
-        ++result.files_scanned;
-        if (HasDicmSignature(it->path()) || HasDicomExtension(it->path()))
-            candidates.push_back(it->path());
-    }
-
+    std::vector<fs::path> candidates = CollectCandidates(folder, &result.files_scanned);
     if (candidates.empty()) {
         result.message = "No DICOM files found under " + folder;
         return result;
@@ -207,25 +235,38 @@ LoadResult LoadDicomFolder(const std::string& folder) {
 
     // A folder often holds more than one series (the CT plus a scout/topogram, a
     // dose report, or a secondary capture). Merging them yields nonsensical spacing
-    // and Z-ordering, so keep only the largest series (by Series Instance UID).
+    // and Z-ordering, so we load a single series: either the caller's chosen one or
+    // (by default) the largest by Series Instance UID.
     {
-        std::unordered_map<std::string, int> counts;
-        for (const auto& s : slices) ++counts[s.series_uid];
-        if (counts.size() > 1) {
-            const std::string& best =
-                std::max_element(counts.begin(), counts.end(),
-                                 [](const auto& a, const auto& b) {
-                                     return a.second < b.second;
-                                 })
-                    ->first;
+        if (filter_uid != nullptr) {
             slices.erase(std::remove_if(slices.begin(), slices.end(),
                                         [&](const Slice& s) {
-                                            return s.series_uid != best;
+                                            return s.series_uid != *filter_uid;
                                         }),
                          slices.end());
-            // slices_loaded / files_skipped are reconciled by the dimension-lock
-            // block below, which recomputes them from the final slice count.
+            if (slices.empty()) {
+                result.message = "The selected series has no usable slices.";
+                return result;
+            }
+        } else {
+            std::unordered_map<std::string, int> counts;
+            for (const auto& s : slices) ++counts[s.series_uid];
+            if (counts.size() > 1) {
+                const std::string& best =
+                    std::max_element(counts.begin(), counts.end(),
+                                     [](const auto& a, const auto& b) {
+                                         return a.second < b.second;
+                                     })
+                        ->first;
+                slices.erase(std::remove_if(slices.begin(), slices.end(),
+                                            [&](const Slice& s) {
+                                                return s.series_uid != best;
+                                            }),
+                             slices.end());
+            }
         }
+        // slices_loaded / files_skipped are reconciled by the dimension-lock
+        // block below, which recomputes them from the final slice count.
     }
 
     // Phase 1 expects one consistent series: lock dimensions to the first slice
@@ -326,6 +367,44 @@ LoadResult LoadDicomFolder(const std::string& folder) {
     result.ok = true;
     result.message = buf;
     return result;
+}
+
+LoadResult LoadDicomFolder(const std::string& folder) {
+    return LoadDicomImpl(folder, nullptr);
+}
+
+LoadResult LoadDicomSeries(const std::string& folder, const std::string& series_uid) {
+    return LoadDicomImpl(folder, &series_uid);
+}
+
+std::vector<SeriesInfo> EnumerateSeries(const std::string& folder) {
+    EnsureCodecsRegistered();
+    std::vector<SeriesInfo> out;
+    std::error_code ec;
+    if (!fs::exists(folder, ec) || !fs::is_directory(folder, ec)) return out;
+
+    // Group cheap header-only reads by Series Instance UID: remember the first
+    // description / modality seen per series and count its slices.
+    std::unordered_map<std::string, SeriesInfo> by_uid;
+    for (const auto& path : CollectCandidates(folder, nullptr)) {
+        std::string uid, desc, modality;
+        if (!ReadSeriesId(path, uid, desc, modality)) continue;
+        SeriesInfo& info = by_uid[uid];
+        if (info.slice_count == 0) {
+            info.uid = uid;
+            info.description = desc;
+            info.modality = modality;
+        }
+        ++info.slice_count;
+    }
+
+    out.reserve(by_uid.size());
+    for (auto& kv : by_uid) out.push_back(std::move(kv.second));
+    // Largest series first: almost always the primary scan the user wants.
+    std::sort(out.begin(), out.end(), [](const SeriesInfo& a, const SeriesInfo& b) {
+        return a.slice_count > b.slice_count;
+    });
+    return out;
 }
 
 } // namespace lumen

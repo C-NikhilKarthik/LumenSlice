@@ -13,6 +13,7 @@
 #include <cstring>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "bridge/meta_copy.hpp"
 #include "core/volume.h"
@@ -21,16 +22,23 @@
 #include "lumen_handle.hpp"
 #include "visualization/slice_view.h"
 
+// Concrete type behind the opaque LumenSeriesScan* handle. Only this translation
+// unit needs it, so (like a header-only scan result) it lives here, not in the
+// public C header.
+struct LumenSeriesScan {
+    std::string folder;
+    std::vector<lumen::SeriesInfo> series;
+};
+
 namespace {
 // Colour of the segment auto-created on load (a cyan-teal, echoing the original
 // single-label overlay). The UI overrides colours via lumen_seg_set_color.
 constexpr lumen::Rgb kDefaultSegmentColor{0, 180, 210};
-} // namespace
 
-extern "C" {
-
-LumenVolume* lumen_load_folder(const char* path, char* msg, int msg_cap) {
-    lumen::LoadResult r = lumen::LoadDicomFolder(path != nullptr ? path : "");
+// Turn a load result into an owned bridge handle: move in the volume, reset the
+// segmentation editor, and serialize metadata. Writes the status string into
+// `msg`, and returns nullptr on failure. Shared by folder and series loads.
+LumenVolume* make_handle(lumen::LoadResult& r, char* msg, int msg_cap) {
     if (msg != nullptr && msg_cap > 0) {
         std::snprintf(msg, static_cast<size_t>(msg_cap), "%s", r.message.c_str());
     }
@@ -39,7 +47,7 @@ LumenVolume* lumen_load_folder(const char* path, char* msg, int msg_cap) {
     auto* handle = new LumenVolume();
     handle->volume = std::move(r.volume);
     handle->editor.reset_to(handle->volume, kDefaultSegmentColor);
-    // Leave the blob empty when extraction produced nothing — lumen_meta_json's
+    // Leave the blob empty when extraction produced nothing - lumen_meta_json's
     // contract is "0 / empty when there is no metadata", so we must not emit an
     // all-empty JSON object that the Swift side would treat as real metadata.
     handle->meta_json = lumen::metadata_present(r.meta, r.tags)
@@ -47,6 +55,64 @@ LumenVolume* lumen_load_folder(const char* path, char* msg, int msg_cap) {
                             : std::string();
     return handle;
 }
+} // namespace
+
+extern "C" {
+
+LumenVolume* lumen_load_folder(const char* path, char* msg, int msg_cap) {
+    lumen::LoadResult r = lumen::LoadDicomFolder(path != nullptr ? path : "");
+    return make_handle(r, msg, msg_cap);
+}
+
+LumenSeriesScan* lumen_scan_folder(const char* path, char* msg, int msg_cap) {
+    const std::string folder = path != nullptr ? path : "";
+    std::vector<lumen::SeriesInfo> series = lumen::EnumerateSeries(folder);
+    if (series.empty()) {
+        if (msg != nullptr && msg_cap > 0) {
+            std::snprintf(msg, static_cast<size_t>(msg_cap),
+                          "No DICOM series found under %s", folder.c_str());
+        }
+        return nullptr;
+    }
+    if (msg != nullptr && msg_cap > 0) msg[0] = '\0';
+    auto* scan = new LumenSeriesScan();
+    scan->folder = folder;
+    scan->series = std::move(series);
+    return scan;
+}
+
+int lumen_series_count(const LumenSeriesScan* s) {
+    return s != nullptr ? static_cast<int>(s->series.size()) : 0;
+}
+
+void lumen_series_info(const LumenSeriesScan* s, int index, char* desc, int desc_cap,
+                       char* modality, int modality_cap, int* slice_count) {
+    if (s == nullptr || index < 0 || index >= static_cast<int>(s->series.size())) return;
+    const lumen::SeriesInfo& info = s->series[static_cast<size_t>(index)];
+    if (desc != nullptr && desc_cap > 0) {
+        std::snprintf(desc, static_cast<size_t>(desc_cap), "%s", info.description.c_str());
+    }
+    if (modality != nullptr && modality_cap > 0) {
+        std::snprintf(modality, static_cast<size_t>(modality_cap), "%s",
+                      info.modality.c_str());
+    }
+    if (slice_count != nullptr) *slice_count = info.slice_count;
+}
+
+LumenVolume* lumen_load_series(const LumenSeriesScan* s, int index, char* msg,
+                               int msg_cap) {
+    if (s == nullptr || index < 0 || index >= static_cast<int>(s->series.size())) {
+        if (msg != nullptr && msg_cap > 0) {
+            std::snprintf(msg, static_cast<size_t>(msg_cap), "Invalid series index");
+        }
+        return nullptr;
+    }
+    lumen::LoadResult r =
+        lumen::LoadDicomSeries(s->folder, s->series[static_cast<size_t>(index)].uid);
+    return make_handle(r, msg, msg_cap);
+}
+
+void lumen_scan_free(LumenSeriesScan* s) { delete s; }
 
 void lumen_free(LumenVolume* v) { delete v; }
 

@@ -29,8 +29,27 @@ struct LoadResult {
     std::vector<DicomTag> tags;
 };
 
+// One DICOM series discovered under a folder, from a fast header-only scan.
+struct SeriesInfo {
+    std::string uid;         // Series Instance UID (may be empty for unlabeled data)
+    std::string description; // Series Description (may be empty)
+    std::string modality;    // e.g. "CT", "MR"
+    int slice_count = 0;     // number of DICOM-looking files in this series
+};
+
 // Load every usable DICOM slice under `folder` (searched recursively) into a
-// single calibrated Volume. Never throws; failures are reported in the result.
+// single calibrated Volume. When a folder holds more than one series, this keeps
+// the largest. Never throws; failures are reported in the result.
 LoadResult LoadDicomFolder(const std::string& folder);
+
+// Header-only scan (does not read pixel data): list the distinct DICOM series
+// found under `folder`, ordered largest-first. Empty when nothing DICOM-like is
+// found. Cheap enough to run before deciding which series to load.
+std::vector<SeriesInfo> EnumerateSeries(const std::string& folder);
+
+// Load exactly the series with Series Instance UID `series_uid` (as returned by
+// EnumerateSeries; the empty string selects unlabeled slices). Same result shape
+// as LoadDicomFolder.
+LoadResult LoadDicomSeries(const std::string& folder, const std::string& series_uid);
 
 } // namespace lumen

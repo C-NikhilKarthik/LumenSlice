@@ -18,11 +18,42 @@ typedef struct LumenVolume LumenVolume;
 // Axis selectors, matching lumen::Axis.
 enum { LUMEN_AXIS_AXIAL = 0, LUMEN_AXIS_CORONAL = 1, LUMEN_AXIS_SAGITTAL = 2 };
 
-// Load every usable DICOM slice under `path` into one calibrated volume.
-// Returns NULL on failure. `msg`/`msg_cap` (optional) receive a status string.
+// Load every usable DICOM slice under `path` into one calibrated volume. When the
+// folder holds more than one series, the largest is kept. Returns NULL on failure.
+// `msg`/`msg_cap` (optional) receive a status string.
 LumenVolume* lumen_load_folder(const char* path, char* msg, int msg_cap);
 
-// Release a handle returned by lumen_load_folder (NULL is ignored).
+// --- Multi-series open --------------------------------------------------------
+// A folder can hold several DICOM series (the CT plus a scout, a dose report, a
+// secondary capture). To let the user choose, scan the folder first (a fast,
+// header-only pass), inspect the series, then load the chosen one.
+
+// Opaque result of a header-only folder scan.
+typedef struct LumenSeriesScan LumenSeriesScan;
+
+// Scan `path` and group its DICOM files into series. Returns a scan handle (free
+// with lumen_scan_free) or NULL if nothing DICOM-like was found (msg gets why).
+LumenSeriesScan* lumen_scan_folder(const char* path, char* msg, int msg_cap);
+
+// Number of distinct series found (largest-first ordering).
+int lumen_series_count(const LumenSeriesScan* s);
+
+// Details of series `index` (0-based). `desc` and `modality` are written NUL-
+// terminated into the caller buffers (truncated to capacity); `slice_count`
+// (optional) receives how many slices the series holds. Out-of-range is a no-op.
+void lumen_series_info(const LumenSeriesScan* s, int index, char* desc, int desc_cap,
+                       char* modality, int modality_cap, int* slice_count);
+
+// Fully load series `index` from the scan into a calibrated volume. Returns NULL
+// on failure. `msg`/`msg_cap` (optional) receive a status string. The returned
+// handle is owned by the caller (release with lumen_free).
+LumenVolume* lumen_load_series(const LumenSeriesScan* s, int index, char* msg,
+                               int msg_cap);
+
+// Release a scan handle returned by lumen_scan_folder (NULL is ignored).
+void lumen_scan_free(LumenSeriesScan* s);
+
+// Release a handle returned by lumen_load_folder / lumen_load_series (NULL ignored).
 void lumen_free(LumenVolume* v);
 
 // Volume geometry.
