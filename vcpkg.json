@@ -1,6 +1,6 @@
 {
   "name": "lumenslice",
   "version-string": "0.1.0",
-  "builtin-baseline": "cd124b84feb0c02a24a2d90981e8358fdee0e077",
+  "builtin-baseline": "c76c06644034521fb761a39f8f52d8e87d1103d5",
   "dependencies": ["dcmtk", "zlib"]
 }

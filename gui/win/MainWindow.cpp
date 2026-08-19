@@ -418,17 +418,16 @@ QWidget* MainWindow::buildSegmentPanel() {
         threshTimer_->setInterval(120);
         connect(threshTimer_, &QTimer::timeout, this, &MainWindow::applyThreshold);
         connect(threshSlider_, &RangeSlider::editingStarted, this, [this] {
-            LumenVolume* v = st_.volume;
-            if (v && lumen_seg_active(v) != 0) {
-                lumen_seg_push_undo(v);
-                updateUndoRedo();
-            }
+            // Threshold is a non-destructive preview; undo is captured only when
+            // the explicit Apply action commits the labelmap.
         });
         connect(threshSlider_, &RangeSlider::rangeChanged, this,
                 [this](double lo, double hi) {
                     threshLabel_->setText(QString("Low %1  —  High %2 HU")
                                               .arg(qRound(lo))
                                               .arg(qRound(hi)));
+                    st_.thresholdLo = float(lo);
+                    st_.thresholdHi = float(hi);
                     threshTimer_->start();  // debounce, then applyThreshold()
                 });
         auto* presets = new QHBoxLayout;
@@ -438,14 +437,11 @@ QWidget* MainWindow::buildSegmentPanel() {
             auto* b = new QPushButton(t.n);
             connect(b, &QPushButton::clicked, this, [this, t] {
                 threshSlider_->setValues(t.lo, t.hi);
+                st_.thresholdLo = float(t.lo);
+                st_.thresholdHi = float(t.hi);
                 threshLabel_->setText(QString("Low %1  —  High %2 HU")
                                           .arg(qRound(t.lo))
                                           .arg(qRound(t.hi)));
-                LumenVolume* v = st_.volume;
-                if (v && lumen_seg_active(v) != 0) {
-                    lumen_seg_push_undo(v);
-                    updateUndoRedo();
-                }
                 applyThreshold();
             });
             presets->addWidget(b);
@@ -516,6 +512,7 @@ QWidget* MainWindow::buildSegmentPanel() {
             {Tool::Paint, 3}, {Tool::Erase, 3}};
         st_.tool = kMap[id].tool;
         toolDetail_->setCurrentIndex(kMap[id].page);
+        refreshCanvas();
     });
     st_.tool = Tool::Threshold;
 
@@ -1386,22 +1383,23 @@ void MainWindow::addSegment() {
 }
 
 void MainWindow::applyThreshold() {
-    // Fills the active segment from the slider's HU window. No undo snapshot here:
-    // the live drag snapshots once on editingStarted, and presets/Otsu snapshot
-    // before calling this.
-    LumenVolume* v = st_.volume;
-    if (!v || st_.busy || heavyWatcher_.isRunning() ||
-        lumen_seg_active(v) == 0 || !threshSlider_) return;
+    // Slicer-style non-destructive preview: only the three slice overlays change.
+    // The labelmap and 3D surface remain untouched until Apply threshold to 3D.
+    if (!st_.volume || st_.busy || heavyWatcher_.isRunning() ||
+        lumen_seg_active(st_.volume) == 0 || !threshSlider_) return;
     cancelGrowPreview();
-    lumen_seg_threshold(v, float(threshSlider_->lowValue()),
-                        float(threshSlider_->highValue()));
     refreshCanvas();
-    updateSegmentCounts();
 }
 
 void MainWindow::commitThreshold() {
-    if (!st_.volume || st_.busy || heavyWatcher_.isRunning()) return;
-    generateMesh();
+    LumenVolume* v = st_.volume;
+    if (!v || st_.busy || heavyWatcher_.isRunning() ||
+        lumen_seg_active(v) == 0) return;
+    const float lo = st_.thresholdLo;
+    const float hi = st_.thresholdHi;
+    runMaskOp("Applying threshold…", [v, lo, hi] {
+        lumen_seg_threshold(v, lo, hi);
+    });
 }
 
 void MainWindow::useThresholdForMasking() {
@@ -1412,28 +1410,33 @@ void MainWindow::useThresholdForMasking() {
     st_.tool = Tool::Paint;
     runMaskOp("Applying intensity mask…", [v, lo, hi] {
         lumen_seg_apply_mask(v, lo, hi);
-    }, false);
+    }, false, false);
 }
 
 void MainWindow::applyOtsu() {
     LumenVolume* v = st_.volume;
     if (!v || lumen_seg_active(v) == 0) return;
     cancelGrowPreview();
-    // Otsu + threshold are both full-volume passes; run off the UI thread.
-    runMaskOp("Auto-threshold (Otsu)…", [v] {
-        const float t = lumen_seg_otsu(v);
-        float lo = 0, hi = 0;
-        lumen_hu_range(v, &lo, &hi);
-        lumen_seg_threshold(v, t, hi);
-    });
+    // Otsu chooses the preview window; it does not mutate the segmentation.
+    const float t = lumen_seg_otsu(v);
+    float lo = 0, hi = 0;
+    lumen_hu_range(v, &lo, &hi);
+    st_.thresholdLo = t;
+    st_.thresholdHi = hi;
+    if (threshSlider_) threshSlider_->setValues(t, hi);
+    if (threshLabel_) threshLabel_->setText(QString("Low %1  —  High %2 HU")
+                                                 .arg(qRound(t)).arg(qRound(hi)));
+    refreshCanvas();
 }
 
 void MainWindow::runMaskOp(const QString& busyText, std::function<void()> op,
-                           bool refreshMesh) {
+                           bool refreshMesh, bool captureUndo) {
     LumenVolume* v = st_.volume;
     if (!v || st_.busy || heavyWatcher_.isRunning()) return;
-    lumen_seg_push_undo(v);
-    updateUndoRedo();
+    if (captureUndo) {
+        lumen_seg_push_undo(v);
+        updateUndoRedo();
+    }
     st_.busy = true;
     heavyRefreshMesh_ = refreshMesh;
     showBusy(busyText);

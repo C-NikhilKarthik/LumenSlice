@@ -30,6 +30,10 @@ struct ViewState {
     // Window/level transfer function (HU).
     float level = 40.0f;
     float window = 400.0f;
+    // Non-destructive Threshold preview range. This is rendered in the slice
+    // panes and is committed to the labelmap only by the explicit Apply action.
+    float thresholdLo = 150.0f;
+    float thresholdHi = 3000.0f;
 
     // Per-axis current slice index (LUMEN_AXIS_AXIAL / CORONAL / SAGITTAL).
     int sliceIndex[3] = {0, 0, 0};

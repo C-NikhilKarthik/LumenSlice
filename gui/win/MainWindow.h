@@ -124,7 +124,7 @@ private:
     // first). Keeps heavy ops (grow-from-seeds) from freezing the UI on
     // large volumes.
     void runMaskOp(const QString& busyText, std::function<void()> op,
-                   bool refreshMesh = true);
+                   bool refreshMesh = true, bool captureUndo = true);
     void scheduleMeshRefresh();
 
     // Refresh helpers.
