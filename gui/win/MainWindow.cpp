@@ -279,9 +279,13 @@ QWidget* MainWindow::buildVisualizePanel() {
     levelSpin_ = new QDoubleSpinBox;
     levelSpin_->setRange(-4000, 4000);
     levelSpin_->setDecimals(0);
+    levelSpin_->setToolTip(
+        "Level: image brightness - the HU value shown as mid-grey.");
     windowSpin_ = new QDoubleSpinBox;
     windowSpin_->setRange(1, 8000);
     windowSpin_->setDecimals(0);
+    windowSpin_->setToolTip(
+        "Window: image contrast - the width of the HU range mapped black to white.");
 
     auto* spinRow = new QHBoxLayout;
     spinRow->addWidget(new QLabel("Level"));
@@ -294,6 +298,8 @@ QWidget* MainWindow::buildVisualizePanel() {
     // window=hi-lo.
     wlRange_ = new RangeSlider;
     wlRange_->setBounds(-1024, 3072);
+    wlRange_->setToolTip(
+        "Drag the two handles to set the low and high HU bounds of the visible window.");
     body(wlBox)->addWidget(wlRange_);
 
     auto setWL = [this](float lvl, float win) {
@@ -320,6 +326,7 @@ QWidget* MainWindow::buildVisualizePanel() {
     struct P { const char* name; float l, w; };
     for (P p : {P{"Bone", 400, 1500}, P{"Soft", 40, 400}, P{"Lung", -600, 1500}}) {
         auto* b = new QPushButton(p.name);
+        b->setToolTip(QString("Apply the %1 window/level preset.").arg(p.name));
         connect(b, &QPushButton::clicked, this,
                 [setWL, p] { setWL(p.l, p.w); });
         presets->addWidget(b);
@@ -363,6 +370,7 @@ QWidget* MainWindow::buildSegmentPanel() {
     auto* segBox = section("Segments");
     auto* addBtn = new QPushButton("+ Add segment");
     addBtn->setObjectName("accent");
+    addBtn->setToolTip("Add a new empty segment to label.");
     connect(addBtn, &QPushButton::clicked, this, &MainWindow::addSegment);
     body(segBox)->addWidget(addBtn);
     segListContainer_ = new QWidget;
@@ -411,6 +419,9 @@ QWidget* MainWindow::buildSegmentPanel() {
         threshSlider_ = new RangeSlider;
         threshSlider_->setBounds(-1000, 3000);
         threshSlider_->setValues(300, 3000);
+        threshSlider_->setToolTip(
+            "Drag the low and high handles to preview voxels in that HU range for "
+            "the active segment.");
         f->addWidget(threshSlider_);
         // Live, debounced threshold; one undo snapshot per drag.
         threshTimer_ = new QTimer(this);
@@ -437,6 +448,7 @@ QWidget* MainWindow::buildSegmentPanel() {
         for (T t : {T{"Bone", 300, 3000}, T{"Soft", 40, 80},
                     T{"Lung", -900, -400}}) {
             auto* b = new QPushButton(t.n);
+            b->setToolTip(QString("Set the threshold to the %1 preset range.").arg(t.n));
             connect(b, &QPushButton::clicked, this, [this, t] {
                 threshSlider_->setValues(t.lo, t.hi);
                 st_.thresholdLo = float(t.lo);
@@ -451,13 +463,21 @@ QWidget* MainWindow::buildSegmentPanel() {
         }
         f->addLayout(presets);
         auto* otsuBtn = new QPushButton("Otsu auto-threshold");
+        otsuBtn->setToolTip(
+            "Pick a threshold automatically that best separates foreground from "
+            "background (Otsu's method).");
         connect(otsuBtn, &QPushButton::clicked, this, &MainWindow::applyOtsu);
         f->addWidget(otsuBtn);
         auto* applyBtn = new QPushButton("Apply threshold to 3D");
         applyBtn->setObjectName("accent");
+        applyBtn->setToolTip(
+            "Commit the current threshold preview into the active segment's mask.");
         connect(applyBtn, &QPushButton::clicked, this, &MainWindow::commitThreshold);
         f->addWidget(applyBtn);
         maskBtn_ = new QPushButton("Use for masking / Paint");
+        maskBtn_->setToolTip(
+            "Use the current threshold as a mask that limits where paint and fill "
+            "can apply.");
         connect(maskBtn_, &QPushButton::clicked, this,
                 &MainWindow::useThresholdForMasking);
         f->addWidget(maskBtn_);
@@ -468,6 +488,8 @@ QWidget* MainWindow::buildSegmentPanel() {
         f->addWidget(maskIndicator_);
         maskDeactivateBtn_ = new QPushButton("Deactivate mask");
         maskDeactivateBtn_->setVisible(false);
+        maskDeactivateBtn_->setToolTip(
+            "Turn off the active mask so edits are no longer constrained to it.");
         connect(maskDeactivateBtn_, &QPushButton::clicked, this,
                 &MainWindow::deactivateMask);
         f->addWidget(maskDeactivateBtn_);
@@ -483,6 +505,8 @@ QWidget* MainWindow::buildSegmentPanel() {
         toleranceSlider_ = new QSlider(Qt::Horizontal);
         toleranceSlider_->setRange(1, 1000);
         toleranceSlider_->setValue(100);
+        toleranceSlider_->setToolTip(
+            "How far in HU a click-to-fill may spread from the clicked voxel.");
         connect(toleranceSlider_, &QSlider::valueChanged, this, [this](int val) {
             st_.tolerance = float(val);
             toleranceLabel_->setText(QString("Tolerance: ± %1 HU").arg(val));
@@ -509,6 +533,8 @@ QWidget* MainWindow::buildSegmentPanel() {
         brushSlider_ = new QSlider(Qt::Horizontal);
         brushSlider_->setRange(1, 80);
         brushSlider_->setValue(12);
+        brushSlider_->setToolTip(
+            "Radius of the paint and erase brush, in pixels.");
         connect(brushSlider_, &QSlider::valueChanged, this, [this](int val) {
             st_.brushRadius = val;
             brushLabel_->setText(QString("Brush radius: %1 px").arg(val));
@@ -541,6 +567,8 @@ QWidget* MainWindow::buildSegmentPanel() {
     seedLocalitySlider_ = new QSlider(Qt::Horizontal);
     seedLocalitySlider_->setRange(0, 100);
     seedLocalitySlider_->setValue(0);
+    seedLocalitySlider_->setToolTip(
+        "Bias the grow toward each seed; higher keeps regions closer to their seeds.");
     connect(seedLocalitySlider_, &QSlider::valueChanged, this, [this](int val) {
         seedLocalityLabel_->setText(QString("Seed locality: %1").arg(val / 10.0, 0, 'f', 1));
     });
@@ -549,6 +577,8 @@ QWidget* MainWindow::buildSegmentPanel() {
     seedGateLabel_ = new QLabel("Seed at least two segments (0/2 seeded).");
     body(seedsBox)->addWidget(seedGateLabel_);
     growSeedsBtn_ = new QPushButton("Initialize preview");
+    growSeedsBtn_->setToolTip(
+        "Grow every seeded segment to fill the volume and show it as a preview.");
     connect(growSeedsBtn_, &QPushButton::clicked, this,
             &MainWindow::growFromSeeds);
     body(seedsBox)->addWidget(growSeedsBtn_);
@@ -558,6 +588,10 @@ QWidget* MainWindow::buildSegmentPanel() {
     growApplyBtn_->setObjectName("accent");
     growApplyBtn_->setVisible(false);
     growCancelBtn_->setVisible(false);
+    growApplyBtn_->setToolTip(
+        "Commit the grow-from-seeds preview into the segments.");
+    growCancelBtn_->setToolTip(
+        "Discard the grow-from-seeds preview and restore the previous segmentation.");
     connect(growApplyBtn_, &QPushButton::clicked, this, &MainWindow::applyGrowPreview);
     connect(growCancelBtn_, &QPushButton::clicked, this, &MainWindow::cancelGrowPreview);
     growActions->addWidget(growApplyBtn_);
@@ -570,6 +604,8 @@ QWidget* MainWindow::buildSegmentPanel() {
     auto* editRow = new QHBoxLayout;
     undoBtn_ = new QPushButton("Undo");
     redoBtn_ = new QPushButton("Redo");
+    undoBtn_->setToolTip("Undo the last segmentation edit.");
+    redoBtn_->setToolTip("Redo the last undone segmentation edit.");
     connect(undoBtn_, &QPushButton::clicked, this, &MainWindow::undo);
     connect(redoBtn_, &QPushButton::clicked, this, &MainWindow::redo);
     editRow->addWidget(undoBtn_);
@@ -585,6 +621,7 @@ QWidget* MainWindow::buildSegmentPanel() {
     totalVoxelsLabel_ = new QLabel("Total voxels: 0");
     body(editBox)->addWidget(totalVoxelsLabel_);
     auto* clearBtn = new QPushButton("Clear active segment");
+    clearBtn->setToolTip("Remove all voxels from the active segment.");
     connect(clearBtn, &QPushButton::clicked, this, &MainWindow::clearActive);
     body(editBox)->addWidget(clearBtn);
     v->addWidget(editBox);
@@ -622,6 +659,9 @@ QWidget* MainWindow::buildThreeDPanel() {
     smoothingSpin_ = new QSpinBox;
     smoothingSpin_->setRange(0, 5);
     smoothingSpin_->setValue(2);  // smoother default surface (less voxel-blocky)
+    smoothingSpin_->setToolTip(
+        "Number of surface-smoothing passes; 0 keeps raw voxel steps, higher is "
+        "smoother.");
     smoothRow->addWidget(smoothingSpin_);
     body(qualBox)->addLayout(smoothRow);
     auto* resRow = new QHBoxLayout;
@@ -630,12 +670,17 @@ QWidget* MainWindow::buildThreeDPanel() {
     resolutionCombo_->addItem("Full", 1);
     resolutionCombo_->addItem("Half", 2);
     resolutionCombo_->addItem("Third", 3);
+    resolutionCombo_->setToolTip(
+        "Sampling detail for the surface; lower resolution builds faster but looks "
+        "coarser.");
     resRow->addWidget(resolutionCombo_);
     body(qualBox)->addLayout(resRow);
     v->addWidget(qualBox);
 
     generateBtn_ = new QPushButton("Generate / Update 3D");
     generateBtn_->setObjectName("accent");
+    generateBtn_->setToolTip(
+        "Build or rebuild the 3D surface from the current segmentation.");
     connect(generateBtn_, &QPushButton::clicked, this,
             &MainWindow::generateMesh);
     v->addWidget(generateBtn_);
@@ -699,6 +744,8 @@ QWidget* MainWindow::buildExportPanel() {
     auto* allNone = new QHBoxLayout;
     auto* allBtn = new QPushButton("All");
     auto* noneBtn = new QPushButton("None");
+    allBtn->setToolTip("Select every segment for export.");
+    noneBtn->setToolTip("Clear all export selections.");
     connect(allBtn, &QPushButton::clicked, this, [this] {
         for (auto* c : exportSegChecks_) c->setChecked(true);
     });
@@ -711,15 +758,20 @@ QWidget* MainWindow::buildExportPanel() {
 
     oneFilePerSegCheck_ = new QCheckBox("One file per segment");
     oneFilePerSegCheck_->setChecked(true);
+    oneFilePerSegCheck_->setToolTip(
+        "Write each selected segment to its own STL file instead of one combined "
+        "file.");
     body(meshBox)->addWidget(oneFilePerSegCheck_);
 
     exportStlBtn_ = new QPushButton("Export STL…");
+    exportStlBtn_->setToolTip("Export the selected segments as STL mesh files.");
     connect(exportStlBtn_, &QPushButton::clicked, this, &MainWindow::exportStl);
     body(meshBox)->addWidget(exportStlBtn_);
     v->addWidget(meshBox);
 
     auto* sliceBox = section("Slice");
     exportPngBtn_ = new QPushButton("Export axial PNG…");
+    exportPngBtn_->setToolTip("Save the current axial slice as a PNG image.");
     connect(exportPngBtn_, &QPushButton::clicked, this, &MainWindow::exportPng);
     body(sliceBox)->addWidget(exportPngBtn_);
     v->addWidget(sliceBox);
@@ -2141,6 +2193,7 @@ void MainWindow::rebuildExportSegmentList() {
                                     .arg(hist[id]));
         c->setChecked(hist[id] > 0);
         c->setEnabled(hist[id] > 0);
+        c->setToolTip("Include this segment in the STL export.");
         exportSegChecks_[id] = c;
         exportSegLayout_->addWidget(c);
     }
