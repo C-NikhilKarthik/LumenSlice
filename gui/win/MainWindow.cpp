@@ -406,7 +406,7 @@ QWidget* MainWindow::buildSegmentPanel() {
         auto* f = new QVBoxLayout(w);
         f->addWidget(new QLabel("Drag the handles to preview the active segment in "
                                 "the three slice views. Press Apply to update 3D."));
-        threshLabel_ = new QLabel("Low 300  —  High 3000 HU");
+        threshLabel_ = new QLabel("Low 300  -  High 3000 HU");
         f->addWidget(threshLabel_);
         threshSlider_ = new RangeSlider;
         threshSlider_->setBounds(-1000, 3000);
@@ -423,11 +423,13 @@ QWidget* MainWindow::buildSegmentPanel() {
         });
         connect(threshSlider_, &RangeSlider::rangeChanged, this,
                 [this](double lo, double hi) {
-                    threshLabel_->setText(QString("Low %1  —  High %2 HU")
+                    threshLabel_->setText(QString("Low %1  -  High %2 HU")
                                               .arg(qRound(lo))
                                               .arg(qRound(hi)));
                     st_.thresholdLo = float(lo);
                     st_.thresholdHi = float(hi);
+                    // A real user drag of the range engages the preview.
+                    st_.thresholdPreviewArmed = true;
                     threshTimer_->start();  // debounce, then applyThreshold()
                 });
         auto* presets = new QHBoxLayout;
@@ -439,7 +441,8 @@ QWidget* MainWindow::buildSegmentPanel() {
                 threshSlider_->setValues(t.lo, t.hi);
                 st_.thresholdLo = float(t.lo);
                 st_.thresholdHi = float(t.hi);
-                threshLabel_->setText(QString("Low %1  —  High %2 HU")
+                st_.thresholdPreviewArmed = true;  // explicit engagement
+                threshLabel_->setText(QString("Low %1  -  High %2 HU")
                                           .arg(qRound(t.lo))
                                           .arg(qRound(t.hi)));
                 applyThreshold();
@@ -511,6 +514,9 @@ QWidget* MainWindow::buildSegmentPanel() {
             {Tool::Threshold, 0}, {Tool::RegionGrow, 1}, {Tool::LevelTrace, 2},
             {Tool::Paint, 3}, {Tool::Erase, 3}};
         st_.tool = kMap[id].tool;
+        // Selecting the threshold tool is an explicit engagement, so the preview
+        // may show from here on.
+        if (st_.tool == Tool::Threshold) st_.thresholdPreviewArmed = true;
         toolDetail_->setCurrentIndex(kMap[id].page);
         refreshCanvas();
     });
@@ -1246,6 +1252,9 @@ void MainWindow::adoptLoadedVolume(const LoadResult& r) {
     vol_.adopt(r.volume);
     growPreviewPending_ = false;
     growPreviewActive_ = false;
+    // A fresh scan starts with no threshold preview, so an untouched load never
+    // looks pre-segmented.
+    st_.thresholdPreviewArmed = false;
     const std::string status = r.message.toStdString();
     st_.volume = vol_.get();
     LumenVolume* v = st_.volume;
@@ -1487,8 +1496,9 @@ void MainWindow::applyOtsu() {
     lumen_hu_range(v, &lo, &hi);
     st_.thresholdLo = t;
     st_.thresholdHi = hi;
+    st_.thresholdPreviewArmed = true;  // Otsu is an explicit engagement
     if (threshSlider_) threshSlider_->setValues(t, hi);
-    if (threshLabel_) threshLabel_->setText(QString("Low %1  —  High %2 HU")
+    if (threshLabel_) threshLabel_->setText(QString("Low %1  -  High %2 HU")
                                                  .arg(qRound(t)).arg(qRound(hi)));
     refreshCanvas();
 }

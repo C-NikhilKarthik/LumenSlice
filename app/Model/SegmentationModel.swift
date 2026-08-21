@@ -66,6 +66,9 @@ final class SegmentationModel: ObservableObject {
     @Published var tool: SegTool = .threshold {
         didSet {
             thresholdNeedsUndoCapture = true
+            // Selecting the threshold tool is an explicit engagement, so the
+            // preview may show from here on.
+            if tool == .threshold { thresholdPreviewArmed = true }
             if oldValue != tool { refreshAllOverlays() }
         }
     }
@@ -96,6 +99,11 @@ final class SegmentationModel: ObservableObject {
     // fresh segment never reuses a colour still on screen just because a middle
     // segment was removed and the list count shrank.
     private var nextColorIndex = 0
+    // The threshold effect shows a live preview overlay. It must stay hidden until
+    // the user actually engages threshold (selects the tool, drags the range, or
+    // runs Otsu); otherwise a freshly loaded scan looks like a segment is already
+    // marked. Reset to false on every load; armed at the real engagement points.
+    private var thresholdPreviewArmed = false
     // Coalesces a run of live-threshold edits into a single undo entry.
     private var thresholdNeedsUndoCapture = true
     // Set when we apply a threshold programmatically (Otsu) so the debounced
@@ -136,6 +144,8 @@ final class SegmentationModel: ObservableObject {
                 guard let self else { return }
                 if self.skipNextThresholdSink { self.skipNextThresholdSink = false; return }
                 guard self.tool == .threshold else { return }
+                // A real user drag of the range engages the preview.
+                self.thresholdPreviewArmed = true
                 self.applyThreshold()
             }
             .store(in: &cancellables)
@@ -161,6 +171,9 @@ final class SegmentationModel: ObservableObject {
                 self.nextSegmentNumber = 1
                 self.nextColorIndex = 0
                 self.growPreviewActive = false
+                // A fresh scan starts with no threshold preview, so an untouched
+                // load never looks pre-segmented.
+                self.thresholdPreviewArmed = false
                 self.overlayStore.images = [nil, nil, nil]
                 if has {
                     self.reloadSegments()
@@ -327,6 +340,8 @@ final class SegmentationModel: ObservableObject {
         skipNextThresholdSink = true
         thresholdLo = t
         thresholdHi = volume.huHi
+        // Running Otsu is an explicit engagement, so the preview may show.
+        thresholdPreviewArmed = true
         refreshAllOverlays()
     }
 
@@ -559,7 +574,9 @@ final class SegmentationModel: ObservableObject {
         }
         var w: Int32 = 0, ht: Int32 = 0
         let ptr: UnsafePointer<UInt8>?
-        if tool == .threshold {
+        // Show the live threshold preview only once the user has engaged threshold;
+        // an untouched load falls through to the (empty) mask overlay instead.
+        if tool == .threshold && thresholdPreviewArmed {
             ptr = lumen_extract_threshold_slice(h, Int32(axis),
                                                 Int32(volume.sliceIndex[axis]),
                                                 thresholdLo, thresholdHi, &w, &ht)

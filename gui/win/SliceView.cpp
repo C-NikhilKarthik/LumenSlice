@@ -221,14 +221,18 @@ void SliceView::paintEvent(QPaintEvent*) {
     // Colored mask overlay (premultiplied RGBA, transparent where unlabelled).
     if (st_->showOverlay && !st_->busy) {
         const unsigned long long revision = lumen_seg_revision(v);
+        // Show the live threshold preview only once the user has engaged threshold;
+        // an untouched load falls through to the (empty) mask overlay instead.
+        const bool showThresholdPreview =
+            st_->tool == Tool::Threshold && st_->thresholdPreviewArmed;
         if (!overlayCacheValid_ || cachedVolume_ != v ||
             cachedOverlayIndex_ != index || cachedOverlayRevision_ != revision ||
-            (st_->tool == Tool::Threshold &&
+            (showThresholdPreview &&
              (cachedOverlayThresholdLo_ != st_->thresholdLo ||
               cachedOverlayThresholdHi_ != st_->thresholdHi))) {
             int mw = 0, mh = 0;
             const unsigned char* mask = nullptr;
-            if (st_->tool == Tool::Threshold) {
+            if (showThresholdPreview) {
                 mask = lumen_extract_threshold_slice(v, axis_, index,
                                                      st_->thresholdLo,
                                                      st_->thresholdHi,
