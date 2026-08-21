@@ -96,7 +96,7 @@ QString sanitizeFilename(const QString& name) {
 }  // namespace
 
 MainWindow::MainWindow() {
-    setWindowTitle("LumenSlice");
+    setWindowTitle("SurgNetra");
     setAcceptDrops(true);
     resize(1360, 820);
 
@@ -1152,7 +1152,7 @@ void MainWindow::loadPath(const QString& path) {
         const QString m = QString::fromUtf8(scanMsg);
         setStatus(QString("Could not load: %1").arg(m));
         QMessageBox::warning(
-            this, "LumenSlice",
+            this, "SurgNetra",
             m.isEmpty() ? "Could not scan the DICOM folder." : m);
         return;
     }
@@ -1242,7 +1242,7 @@ void MainWindow::onLoadReady() {
     if (!r.volume) {
         setStatus(QString("Could not load: %1").arg(r.message));
         QMessageBox::warning(
-            this, "LumenSlice",
+            this, "SurgNetra",
             r.message.isEmpty() ? "Could not load the DICOM folder." : r.message);
         return;
     }
@@ -1830,7 +1830,7 @@ void MainWindow::exportStl() {
     } else {
         // Fuse the chosen segments into a single STL (union via the bridge).
         const QString path = QFileDialog::getSaveFileName(
-            this, "Export fused STL", QDir::homePath() + "/LumenSlice.stl",
+            this, "Export fused STL", QDir::homePath() + "/SurgNetra.stl",
             "STL mesh (*.stl)");
         if (path.isEmpty()) return;
         QApplication::setOverrideCursor(Qt::WaitCursor);

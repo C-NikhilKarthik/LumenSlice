@@ -17,7 +17,7 @@ static void configureDicomDictionary() {
 
 int main(int argc, char** argv) {
     QApplication app(argc, argv);
-    QApplication::setApplicationName("LumenSlice");
+    QApplication::setApplicationName("SurgNetra");
     QApplication::setOrganizationName("LumenSlice");
     QApplication::setStyle(QStyleFactory::create("Fusion"));
     app.setStyleSheet(lumenwin::kAppStyle);

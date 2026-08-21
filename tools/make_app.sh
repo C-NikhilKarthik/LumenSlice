@@ -34,7 +34,11 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# APP_NAME names the bundle folder + the executable inside it (internal, kept
+# stable so packaging / notarization / CI paths don't move). DISPLAY_NAME is the
+# user-facing brand shown in the menu bar, Finder, and the About panel.
 APP_NAME="LumenSlice"
+DISPLAY_NAME="SurgNetra"
 BUNDLE_ID="com.flamapp.lumenslice"
 VERSION="0.1.0"
 NOTARY_PROFILE="${NOTARY_PROFILE:-lumenslice-notary}"
@@ -129,8 +133,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <plist version="1.0"><dict>
   <key>CFBundleExecutable</key><string>$APP_NAME</string>
   <key>CFBundleIdentifier</key><string>$BUNDLE_ID</string>
-  <key>CFBundleName</key><string>$APP_NAME</string>
-  <key>CFBundleDisplayName</key><string>$APP_NAME</string>
+  <key>CFBundleName</key><string>$DISPLAY_NAME</string>
+  <key>CFBundleDisplayName</key><string>$DISPLAY_NAME</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
   <key>CFBundleShortVersionString</key><string>$VERSION</string>

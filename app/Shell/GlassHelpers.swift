@@ -37,8 +37,8 @@ struct WindowAccessor: NSViewRepresentable {
             guard let window = view.window else { return }
             // The window title is the app name and shows on the LEFT of the titlebar.
             // The toolbar's principal (center) item shows only the active tab name, so
-            // "LumenSlice" appears exactly once.
-            window.title = "LumenSlice"
+            // "SurgNetra" appears exactly once.
+            window.title = "SurgNetra"
             window.titleVisibility = .visible
             // NOTE: do NOT set isMovableByWindowBackground — it makes AppKit steal
             // drags from controls like the slice sliders and move the window instead.
