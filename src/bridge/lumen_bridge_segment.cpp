@@ -118,6 +118,12 @@ long lumen_seg_paint(LumenVolume* v, int axis, int index, int cx, int cy,
     return changed;
 }
 
+void lumen_seg_apply_mask(LumenVolume* v, float low_hu, float high_hu) {
+    if (v == nullptr) return;
+    v->editor.apply_intensity_mask(low_hu, high_hu);
+    lumen_bridge_detail::invalidate_mask_cache(v);
+}
+
 long lumen_seg_level_trace(LumenVolume* v, int axis, int index, int cx, int cy) {
     if (v == nullptr) return 0;
     const long changed =

@@ -222,10 +222,20 @@ void SliceView::paintEvent(QPaintEvent*) {
     if (st_->showOverlay && !st_->busy) {
         const unsigned long long revision = lumen_seg_revision(v);
         if (!overlayCacheValid_ || cachedVolume_ != v ||
-            cachedOverlayIndex_ != index || cachedOverlayRevision_ != revision) {
+            cachedOverlayIndex_ != index || cachedOverlayRevision_ != revision ||
+            (st_->tool == Tool::Threshold &&
+             (cachedOverlayThresholdLo_ != st_->thresholdLo ||
+              cachedOverlayThresholdHi_ != st_->thresholdHi))) {
             int mw = 0, mh = 0;
-            const unsigned char* mask =
-                lumen_extract_mask_slice(v, axis_, index, &mw, &mh);
+            const unsigned char* mask = nullptr;
+            if (st_->tool == Tool::Threshold) {
+                mask = lumen_extract_threshold_slice(v, axis_, index,
+                                                     st_->thresholdLo,
+                                                     st_->thresholdHi,
+                                                     &mw, &mh);
+            } else {
+                mask = lumen_extract_mask_slice(v, axis_, index, &mw, &mh);
+            }
             cachedOverlay_ = (mask && mw == w && mh == h)
                                  ? QImage(reinterpret_cast<const uchar*>(mask), w,
                                           h, w * 4,
@@ -234,6 +244,8 @@ void SliceView::paintEvent(QPaintEvent*) {
                                  : QImage();
             cachedOverlayIndex_ = index;
             cachedOverlayRevision_ = revision;
+            cachedOverlayThresholdLo_ = st_->thresholdLo;
+            cachedOverlayThresholdHi_ = st_->thresholdHi;
             overlayCacheValid_ = true;
         }
         if (!cachedOverlay_.isNull()) painter.drawImage(target, cachedOverlay_);

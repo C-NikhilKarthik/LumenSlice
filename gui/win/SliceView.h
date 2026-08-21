@@ -97,6 +97,8 @@ private:
     bool overlayCacheValid_ = false;
     int cachedOverlayIndex_ = 0;
     unsigned long long cachedOverlayRevision_ = 0;
+    float cachedOverlayThresholdLo_ = 0.0f;
+    float cachedOverlayThresholdHi_ = 0.0f;
     QImage cachedOverlay_;
 };
 

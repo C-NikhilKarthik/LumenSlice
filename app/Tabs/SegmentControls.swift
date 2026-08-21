@@ -20,6 +20,7 @@ struct SegmentControls: View {
                 segmentsSection
                 toolSection
                 toolDetailSection
+                maskSection
                 growSeedsSection
                 editSection
             }
@@ -104,10 +105,35 @@ struct SegmentControls: View {
             .buttonStyle(.bordered)
             .controlSize(.small)
             .disabled(seg.activeID == 0)
+            Button {
+                seg.commitThreshold()
+            } label: {
+                Label("Apply threshold to 3D", systemImage: "checkmark.circle.fill")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+            .disabled(seg.activeID == 0 || seg.isBusy)
         } header: {
             InfoHeader("Threshold (HU)",
-                       help: "Label every voxel in this HU window into the active "
-                           + "segment. Drag either handle to update live.")
+                       help: "Preview this HU range in the three slice views. Apply "
+                           + "commits it to the active segment and 3D.")
+        }
+    }
+
+    private var maskSection: some View {
+        Section("Mask") {
+            Button {
+                seg.applyMask()
+            } label: {
+                Label("Use for masking", systemImage: "paintbrush.pointed.fill")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(seg.activeID == 0 || seg.isBusy)
+            Text("The threshold HU range becomes an invisible Paint constraint. Paint additions outside it are ignored.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
         }
     }
 

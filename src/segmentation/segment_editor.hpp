@@ -83,6 +83,10 @@ public:
     void threshold(float low_hu, float high_hu);
     long region_grow(int x, int y, int z, float tolerance);
     long paint(Axis axis, int slice_index, int cx, int cy, int radius, bool add);
+    // Use the source-volume HU range as an editable-area mask, matching Slicer's
+    // Threshold effect. The existing labelmap is preserved and subsequent paint
+    // additions are clipped to this range.
+    void apply_intensity_mask(float low_hu, float high_hu);
     // Level tracing: select the iso-level (>= clicked HU) region on one slice.
     long level_trace(Axis axis, int slice_index, int cx, int cy);
     void clear_active();
@@ -121,6 +125,9 @@ private:
     LabelVolume mask_;
     SegmentTable segments_;
     UndoStack undo_;
+    bool intensity_mask_enabled_ = false;
+    float intensity_mask_lo_ = 0.0f;
+    float intensity_mask_hi_ = 0.0f;
 };
 
 } // namespace lumen

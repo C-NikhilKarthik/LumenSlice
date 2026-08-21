@@ -219,6 +219,20 @@ const unsigned char* lumen_extract_slice(LumenVolume* v, int axis, int index,
     return v->scratch.rgba.empty() ? nullptr : v->scratch.rgba.data();
 }
 
+const unsigned char* lumen_extract_threshold_slice(LumenVolume* v, int axis,
+                                                   int index, float lo, float hi,
+                                                   int* out_w, int* out_h) {
+    if (v == nullptr) return nullptr;
+    const auto colour = v->editor.color(v->editor.active());
+    lumen::ExtractThresholdOverlay(v->volume, static_cast<lumen::Axis>(axis), index,
+                                   lo, hi, colour.r, colour.g, colour.b,
+                                   v->threshold_scratch);
+    if (out_w) *out_w = v->threshold_scratch.width;
+    if (out_h) *out_h = v->threshold_scratch.height;
+    return v->threshold_scratch.rgba.empty()
+               ? nullptr : v->threshold_scratch.rgba.data();
+}
+
 int lumen_meta_json(const LumenVolume* v, char* out, int out_cap) {
     if (v == nullptr) {
         if (out != nullptr && out_cap > 0) out[0] = '\0';

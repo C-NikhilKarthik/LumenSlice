@@ -44,15 +44,9 @@ final class MeshModel: ObservableObject {
             }
             .store(in: &cancellables)
 
-        // Mask edits publish a new voxel count at stroke/effect boundaries, and
-        // segment appearance changes publish the segment list. Coalesce either
-        // signal so a brush drag produces one background rebuild after the user
-        // pauses instead of one marching-cubes job per input event.
-        segmentation.$voxelCount
-            .dropFirst()
-            .sink { [weak self] _ in self?.scheduleAutomaticGenerate() }
-            .store(in: &cancellables)
-        segmentation.$segments
+        // Only committed segmentation actions invalidate the 3D surface.
+        // Threshold slider previews and mask-source previews remain 2D-only.
+        segmentation.$meshRevision
             .dropFirst()
             .sink { [weak self] _ in self?.scheduleAutomaticGenerate() }
             .store(in: &cancellables)

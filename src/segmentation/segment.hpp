@@ -35,7 +35,9 @@ long region_grow(const Volume& vol, int sx, int sy, int sz, float tol,
 // another. Returns the number of voxels changed.
 long paint_disk(const Volume& vol, Axis axis, int index, int cx, int cy,
                 int radius, bool add, LabelVolume& mask,
-                std::uint8_t label = kActiveLabel);
+                std::uint8_t label = kActiveLabel,
+                bool restrict_to_hu = false, float hu_lo = 0.0f,
+                float hu_hi = 0.0f);
 
 // Level tracing on ONE slice: from pixel (cx,cy) of `axis`/`index`, flood the
 // 4-connected region of pixels whose HU is at or above the clicked pixel's HU (its

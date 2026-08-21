@@ -39,18 +39,28 @@ struct AppShell: View {
                     // back to navigation / painting instead of dropping points.
                     if newTab != .markups { markup.placing = false }
                 }
-            if !panelCollapsed {
+            // Keep the panel in the layout even while collapsed. Removing a
+            // Form-backed SwiftUI subtree during slider updates can cause macOS
+            // to recalculate the HStack with a zero-width sidebar and leave it
+            // visually missing. Clipping preserves a stable layout identity.
+            ZStack(alignment: .topLeading) {
                 controlPanel
-                    .frame(width: panelWidth)
-                Divider()
+                    .frame(width: panelWidth, alignment: .topLeading)
             }
+            .frame(width: panelCollapsed ? 0 : panelWidth)
+            .frame(maxHeight: .infinity, alignment: .topLeading)
+            .clipped()
+            .opacity(panelCollapsed ? 0 : 1)
+            .layoutPriority(1)
+            Divider()
+                .frame(width: panelCollapsed ? 0 : 1)
             canvas
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .overlay {
                     // Busy indicator for blocking segmentation ops. Only the Segment
-                    // tab sets busyMessage, so this stays hidden elsewhere.
-                    if let msg = segmentation.busyMessage {
-                        BusyOverlay(message: msg)
+                    // tab runs mask work, so isBusy stays false elsewhere.
+                    if segmentation.isBusy {
+                        BusyOverlay(message: "Working…")
                     }
                 }
                 .onDrop(of: [.fileURL], isTargeted: $dropTargeted) { providers in

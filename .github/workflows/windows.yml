@@ -30,7 +30,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/vcpkg_cache
-          key: vcpkg-x64-windows-rel-${{ hashFiles('vcpkg.json', 'triplets/x64-windows-rel.cmake') }}-9e593bb1
+          key: vcpkg-x64-windows-rel-${{ hashFiles('vcpkg.json', 'triplets/x64-windows-rel.cmake') }}-c76c0664
           restore-keys: |
             vcpkg-x64-windows-rel-
 
@@ -44,7 +44,7 @@ jobs:
         uses: lukka/run-vcpkg@v11
         with:
           vcpkgDirectory: '${{ github.workspace }}/vcpkg'
-          vcpkgGitCommitId: 9e593bb18ea69cc5095e012465dcd675a822ed0d
+          vcpkgGitCommitId: c76c06644034521fb761a39f8f52d8e87d1103d5
           vcpkgJsonGlob: '${{ github.workspace }}/vcpkg.json'
 
       # Prebuilt Qt 6 (Widgets / OpenGLWidgets / Concurrent all ship in qtbase).

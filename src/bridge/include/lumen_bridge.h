@@ -137,6 +137,10 @@ long lumen_seg_region_grow(LumenVolume* v, int x, int y, int z, float tol);
 long lumen_seg_paint(LumenVolume* v, int axis, int index, int cx, int cy,
                      int radius, int add);
 
+// Use the source-volume HU range as an editable-area mask, matching Slicer's
+// Threshold effect. It preserves the labelmap and clips subsequent Paint adds.
+void lumen_seg_apply_mask(LumenVolume* v, float low_hu, float high_hu);
+
 // Level trace on one slice: from pixel (cx,cy) of `axis`/`index`, add the iso-level
 // (HU >= clicked pixel) 4-connected region to the active segment. Slice-only.
 // Returns the number of voxels newly labelled.
@@ -209,6 +213,12 @@ int lumen_seg_can_redo(const LumenVolume* v);
 // valid until the next mask-slice extract on the same handle. NULL on error.
 const unsigned char* lumen_extract_mask_slice(LumenVolume* v, int axis, int index,
                                               int* out_w, int* out_h);
+
+// Non-destructive Threshold effect preview. It uses the active segment colour,
+// but does not modify the segmentation mask.
+const unsigned char* lumen_extract_threshold_slice(LumenVolume* v, int axis,
+                                                   int index, float lo, float hi,
+                                                   int* out_w, int* out_h);
 
 // Prepare a normalized R8 scalar 3D texture for a GPU volume renderer. The
 // buffer is X-fastest and valid until the next call on this handle. If

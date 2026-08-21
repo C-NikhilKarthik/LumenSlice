@@ -105,7 +105,8 @@ long region_grow(const Volume& vol, int sx, int sy, int sz, float tol,
 }
 
 long paint_disk(const Volume& vol, Axis axis, int index, int cx, int cy,
-                int radius, bool add, LabelVolume& mask, std::uint8_t label) {
+                int radius, bool add, LabelVolume& mask, std::uint8_t label,
+                bool restrict_to_hu, float hu_lo, float hu_hi) {
     if (!vol.valid() || !mask.valid() || radius < 0 || label == 0) return 0;
 
     const SliceDims dims = slice_dims(vol, axis);
@@ -124,6 +125,10 @@ long paint_disk(const Volume& vol, Axis axis, int index, int cx, int cy,
             if (dx * dx + dy * dy > r2) continue;
             const VoxelCoord c = plane_to_voxel(vol, axis, index, px, py);
             if (!mask.in_bounds(c.x, c.y, c.z)) continue;
+            if (add && restrict_to_hu) {
+                const float hu = vol.voxel_buffer[vol.index(c.x, c.y, c.z)];
+                if (hu < hu_lo || hu > hu_hi) continue;
+            }
             const std::uint8_t cur = mask.at(c.x, c.y, c.z);
             if (add) {
                 if (cur != label) { // brush wins: overwrite whatever is here

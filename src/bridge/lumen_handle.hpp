@@ -24,6 +24,7 @@ struct LumenVolume {
     lumen::Volume volume;
     lumen::SliceImage scratch;      // reused grayscale slice buffer
     lumen::SliceImage mask_scratch; // reused overlay buffer
+    lumen::SliceImage threshold_scratch; // non-destructive threshold preview
     lumen::VolumeTexture volume_texture_scratch; // reused GPU upload texture
     bool volume_texture_cache_valid = false;
     float volume_texture_cache_level = 0.0f;

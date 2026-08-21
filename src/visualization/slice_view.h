@@ -26,4 +26,10 @@ struct SliceImage {
 void ExtractSlice(const Volume& vol, Axis axis, int index, float level,
                   float window, SliceImage& out);
 
+// Build the non-destructive Threshold effect preview used by the three slice
+// panes. It never writes to the segmentation label volume.
+void ExtractThresholdOverlay(const Volume& vol, Axis axis, int index, float lo,
+                             float hi, std::uint8_t r, std::uint8_t g,
+                             std::uint8_t b, SliceImage& out);
+
 } // namespace lumen
