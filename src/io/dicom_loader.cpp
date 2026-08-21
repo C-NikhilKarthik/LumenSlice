@@ -417,7 +417,14 @@ std::vector<SeriesInfo> EnumerateSeries(const std::string& folder) {
     }
 
     out.reserve(by_uid.size());
-    for (auto& kv : by_uid) out.push_back(std::move(kv.second));
+    // Only list loadable image series. A folder can also hold non-image DICOM
+    // objects (structured reports, dose reports, DICOMDIR, presentation states);
+    // the header-only reader parses them too, but they carry no Rows/Columns and
+    // would show as 0x0 and fail to load, so drop anything without a pixel size.
+    for (auto& kv : by_uid) {
+        if (kv.second.width > 0 && kv.second.height > 0)
+            out.push_back(std::move(kv.second));
+    }
     // Largest series first: almost always the primary scan the user wants.
     std::sort(out.begin(), out.end(), [](const SeriesInfo& a, const SeriesInfo& b) {
         return a.slice_count > b.slice_count;

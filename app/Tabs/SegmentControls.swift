@@ -142,6 +142,7 @@ struct SegmentControls: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+                .disabled(seg.isBusy)
             } else {
                 Button {
                     seg.applyMask()

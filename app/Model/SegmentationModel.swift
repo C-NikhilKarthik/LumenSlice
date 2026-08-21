@@ -388,9 +388,11 @@ final class SegmentationModel: ObservableObject {
         tool = .paint
     }
 
-    // Turn off the editable-area mask so painting is unconstrained again.
+    // Turn off the editable-area mask so painting is unconstrained again. Guarded
+    // on isBusy like every other mask mutation, so it never races a detached op
+    // that holds the pinned handle.
     func deactivateMask() {
-        guard let h = volume.handle else { return }
+        guard let h = volume.handle, !isBusy else { return }
         lumen_seg_clear_mask(h)
         maskActive = false
     }

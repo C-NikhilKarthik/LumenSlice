@@ -169,6 +169,10 @@ MainWindow::MainWindow() {
         refreshCanvas();
         updateSegmentCounts();
         updateUndoRedo();
+        // The intensity mask is applied inside a worker op (useThresholdForMasking),
+        // so reflect its state here, once the worker has finished. Harmless for the
+        // other mask ops that share this watcher (their mask state is unchanged).
+        updateMaskIndicator();
         if (heavyRefreshMesh_) scheduleMeshRefresh();
     });
     // Throttle slice repaints while wheel-scrolling (see onSliceScrolled).
@@ -1547,12 +1551,15 @@ void MainWindow::useThresholdForMasking() {
     runMaskOp("Applying intensity mask…", [v, lo, hi] {
         lumen_seg_apply_mask(v, lo, hi);
     }, false, false);
-    updateMaskIndicator();
+    // The indicator is refreshed in the worker-finished handler, once the mask is
+    // actually applied (querying it here would race the worker thread).
 }
 
 void MainWindow::deactivateMask() {
     LumenVolume* v = st_.volume;
-    if (!v) return;
+    // Guard on busy like every other mask mutation, so clearing the mask never
+    // races a worker op still holding the volume.
+    if (!v || st_.busy || heavyWatcher_.isRunning()) return;
     lumen_seg_clear_mask(v);
     updateMaskIndicator();
 }
