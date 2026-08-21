@@ -1184,15 +1184,25 @@ int MainWindow::pickSeries(LumenSeriesScan* scan) {
     for (int i = 0; i < n; ++i) {
         char desc[256] = {0};
         char modality[64] = {0};
+        char created[32] = {0};
         int sliceCount = 0;
+        int width = 0, height = 0;
         lumen_series_info(scan, i, desc, sizeof(desc), modality,
-                          sizeof(modality), &sliceCount);
+                          sizeof(modality), &sliceCount, &width, &height,
+                          created, sizeof(created));
         QString d = QString::fromUtf8(desc).trimmed();
         QString m = QString::fromUtf8(modality).trimmed();
+        const QString date = QString::fromUtf8(created).trimmed();
         if (d.isEmpty()) d = QString("Series %1").arg(i + 1);
         if (m.isEmpty()) m = "?";
-        list->addItem(
-            QString("%1  -  %2  -  %3 slices").arg(d, m).arg(sliceCount));
+        // Description - Modality - Size - Count - Date Created (fields the scan
+        // did not report are omitted).
+        QStringList parts{m};
+        if (width > 0 && height > 0)
+            parts << QString("%1 × %2").arg(width).arg(height);
+        parts << QString("%1 slices").arg(sliceCount);
+        if (!date.isEmpty()) parts << date;
+        list->addItem(QString("%1  -  %2").arg(d, parts.join("  -  ")));
     }
     list->setCurrentRow(0);
     layout->addWidget(list, 1);

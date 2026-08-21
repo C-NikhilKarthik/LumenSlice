@@ -55,11 +55,14 @@ struct SeriesPicker: View {
         .onAppear { if selection == nil { selection = options.first?.id } }
     }
 
-    // "<modality> · <n> slices" - the secondary line under the series title.
+    // "<modality> · <W × H> · <n> slices · <date>" - the secondary line under the
+    // series title. Fields the scan didn't report are simply omitted.
     private func subtitle(_ o: SeriesOption) -> String {
         var parts: [String] = []
         if !o.modality.isEmpty { parts.append(o.modality) }
+        if !o.sizeText.isEmpty { parts.append(o.sizeText) }
         parts.append("\(o.sliceCount) slice\(o.sliceCount == 1 ? "" : "s")")
+        if !o.created.isEmpty { parts.append(o.created) }
         return parts.joined(separator: " · ")
     }
 }

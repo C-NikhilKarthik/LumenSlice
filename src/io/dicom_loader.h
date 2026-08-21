@@ -35,6 +35,9 @@ struct SeriesInfo {
     std::string description; // Series Description (may be empty)
     std::string modality;    // e.g. "CT", "MR"
     int slice_count = 0;     // number of DICOM-looking files in this series
+    int width = 0;           // Columns (per-slice pixel width)
+    int height = 0;          // Rows (per-slice pixel height)
+    std::string created;     // acquisition/series/study date, normalized YYYY-MM-DD
 };
 
 // Load every usable DICOM slice under `folder` (searched recursively) into a

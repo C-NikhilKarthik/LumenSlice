@@ -38,11 +38,14 @@ LumenSeriesScan* lumen_scan_folder(const char* path, char* msg, int msg_cap);
 // Number of distinct series found (largest-first ordering).
 int lumen_series_count(const LumenSeriesScan* s);
 
-// Details of series `index` (0-based). `desc` and `modality` are written NUL-
-// terminated into the caller buffers (truncated to capacity); `slice_count`
-// (optional) receives how many slices the series holds. Out-of-range is a no-op.
+// Details of series `index` (0-based). `desc`, `modality`, and `created` (an
+// acquisition date, "YYYY-MM-DD") are written NUL-terminated into the caller
+// buffers (truncated to capacity). `slice_count`, `width`, and `height` (all
+// optional) receive the slice count and per-slice pixel size. Any output pointer
+// may be NULL. Out-of-range is a no-op.
 void lumen_series_info(const LumenSeriesScan* s, int index, char* desc, int desc_cap,
-                       char* modality, int modality_cap, int* slice_count);
+                       char* modality, int modality_cap, int* slice_count,
+                       int* width, int* height, char* created, int created_cap);
 
 // Fully load series `index` from the scan into a calibrated volume. Returns NULL
 // on failure. `msg`/`msg_cap` (optional) receive a status string. The returned

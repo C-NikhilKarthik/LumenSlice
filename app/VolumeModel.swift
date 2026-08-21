@@ -9,10 +9,18 @@ struct SeriesOption: Identifiable, Hashable {
     let description: String
     let modality: String
     let sliceCount: Int
+    let width: Int
+    let height: Int
+    let created: String
 
     // Primary label: the series description, or "Series N" when it has none.
     var title: String {
         description.isEmpty ? "Series \(id + 1)" : description
+    }
+
+    // "512 × 512", or empty when the scan didn't report a pixel size.
+    var sizeText: String {
+        (width > 0 && height > 0) ? "\(width) × \(height)" : ""
     }
 }
 
@@ -247,22 +255,31 @@ final class VolumeModel: ObservableObject {
         if let s = scanHandle { lumen_scan_free(s); scanHandle = nil }
     }
 
-    // Read one series' description/modality/slice-count out of the scan into a value
-    // struct the picker can show without holding the C handle.
+    // Read one series' description/modality/geometry/date out of the scan into a
+    // value struct the picker can show without holding the C handle.
     private static func readSeriesInfo(_ scan: OpaquePointer, index: Int) -> SeriesOption {
         var desc = [CChar](repeating: 0, count: 256)
         var modality = [CChar](repeating: 0, count: 64)
+        var created = [CChar](repeating: 0, count: 32)
         var sliceCount: Int32 = 0
+        var width: Int32 = 0
+        var height: Int32 = 0
         desc.withUnsafeMutableBufferPointer { d in
             modality.withUnsafeMutableBufferPointer { m in
-                lumen_series_info(scan, Int32(index), d.baseAddress, Int32(d.count),
-                                  m.baseAddress, Int32(m.count), &sliceCount)
+                created.withUnsafeMutableBufferPointer { c in
+                    lumen_series_info(scan, Int32(index), d.baseAddress, Int32(d.count),
+                                      m.baseAddress, Int32(m.count), &sliceCount,
+                                      &width, &height, c.baseAddress, Int32(c.count))
+                }
             }
         }
         return SeriesOption(id: index,
                             description: String(cString: desc),
                             modality: String(cString: modality),
-                            sliceCount: Int(sliceCount))
+                            sliceCount: Int(sliceCount),
+                            width: Int(width),
+                            height: Int(height),
+                            created: String(cString: created))
     }
 
     // The older single-shot open: load the largest series via lumen_load_folder with

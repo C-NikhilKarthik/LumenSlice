@@ -86,7 +86,8 @@ int lumen_series_count(const LumenSeriesScan* s) {
 }
 
 void lumen_series_info(const LumenSeriesScan* s, int index, char* desc, int desc_cap,
-                       char* modality, int modality_cap, int* slice_count) {
+                       char* modality, int modality_cap, int* slice_count,
+                       int* width, int* height, char* created, int created_cap) {
     if (s == nullptr || index < 0 || index >= static_cast<int>(s->series.size())) return;
     const lumen::SeriesInfo& info = s->series[static_cast<size_t>(index)];
     if (desc != nullptr && desc_cap > 0) {
@@ -97,6 +98,11 @@ void lumen_series_info(const LumenSeriesScan* s, int index, char* desc, int desc
                       info.modality.c_str());
     }
     if (slice_count != nullptr) *slice_count = info.slice_count;
+    if (width != nullptr) *width = info.width;
+    if (height != nullptr) *height = info.height;
+    if (created != nullptr && created_cap > 0) {
+        std::snprintf(created, static_cast<size_t>(created_cap), "%s", info.created.c_str());
+    }
 }
 
 LumenVolume* lumen_load_series(const LumenSeriesScan* s, int index, char* msg,

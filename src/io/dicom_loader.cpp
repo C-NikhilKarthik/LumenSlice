@@ -169,11 +169,20 @@ std::vector<fs::path> CollectCandidates(const std::string& folder, int* files_sc
     return candidates;
 }
 
-// Read only the series-identifying header tags. Stops before PixelData, so this
-// never reads (or decompresses) the image itself - cheap enough to run over an
-// entire folder just to list the series. Returns false if the header won't parse.
-bool ReadSeriesId(const fs::path& path, std::string& uid, std::string& desc,
-                  std::string& modality) {
+// Normalize a DICOM DA date ("YYYYMMDD") to "YYYY-MM-DD" for display. Anything
+// that is not 8 digits is passed through unchanged (some files omit the date).
+std::string NormalizeDicomDate(const std::string& raw) {
+    if (raw.size() != 8) return raw;
+    for (char c : raw)
+        if (c < '0' || c > '9') return raw;
+    return raw.substr(0, 4) + "-" + raw.substr(4, 2) + "-" + raw.substr(6, 2);
+}
+
+// Read only the series-identifying header tags (plus per-slice geometry and an
+// acquisition date). Stops before PixelData, so this never reads (or decompresses)
+// the image itself - cheap enough to run over an entire folder just to list the
+// series. Returns false if the header won't parse.
+bool ReadSeriesId(const fs::path& path, SeriesInfo& info) {
     DcmFileFormat ff;
     if (ff.loadFileUntilTag(path.string().c_str(), EXS_Unknown, EGL_noChange,
                             DCM_MaxReadLength, ERM_autoDetect, DCM_PixelData)
@@ -183,9 +192,20 @@ bool ReadSeriesId(const fs::path& path, std::string& uid, std::string& desc,
     DcmDataset* ds = ff.getDataset();
     if (ds == nullptr) return false;
     OFString s;
-    if (ds->findAndGetOFString(DCM_SeriesInstanceUID, s).good()) uid = s.c_str();
-    if (ds->findAndGetOFString(DCM_SeriesDescription, s).good()) desc = s.c_str();
-    if (ds->findAndGetOFString(DCM_Modality, s).good()) modality = s.c_str();
+    if (ds->findAndGetOFString(DCM_SeriesInstanceUID, s).good()) info.uid = s.c_str();
+    if (ds->findAndGetOFString(DCM_SeriesDescription, s).good()) info.description = s.c_str();
+    if (ds->findAndGetOFString(DCM_Modality, s).good()) info.modality = s.c_str();
+    Uint16 u16 = 0;
+    if (ds->findAndGetUint16(DCM_Columns, u16).good()) info.width = u16;
+    if (ds->findAndGetUint16(DCM_Rows, u16).good()) info.height = u16;
+    // Prefer the series date, then study, then acquisition - whichever the file
+    // actually carries. Displayed as the series' "Date Created".
+    if (ds->findAndGetOFString(DCM_SeriesDate, s).good() && !s.empty())
+        info.created = NormalizeDicomDate(s.c_str());
+    else if (ds->findAndGetOFString(DCM_StudyDate, s).good() && !s.empty())
+        info.created = NormalizeDicomDate(s.c_str());
+    else if (ds->findAndGetOFString(DCM_AcquisitionDate, s).good() && !s.empty())
+        info.created = NormalizeDicomDate(s.c_str());
     return true;
 }
 
@@ -384,17 +404,15 @@ std::vector<SeriesInfo> EnumerateSeries(const std::string& folder) {
     if (!fs::exists(folder, ec) || !fs::is_directory(folder, ec)) return out;
 
     // Group cheap header-only reads by Series Instance UID: remember the first
-    // description / modality seen per series and count its slices.
+    // description / modality / geometry / date seen per series and count its slices.
     std::unordered_map<std::string, SeriesInfo> by_uid;
     for (const auto& path : CollectCandidates(folder, nullptr)) {
-        std::string uid, desc, modality;
-        if (!ReadSeriesId(path, uid, desc, modality)) continue;
-        SeriesInfo& info = by_uid[uid];
-        if (info.slice_count == 0) {
-            info.uid = uid;
-            info.description = desc;
-            info.modality = modality;
-        }
+        SeriesInfo slice_info;
+        if (!ReadSeriesId(path, slice_info)) continue;
+        SeriesInfo& info = by_uid[slice_info.uid];
+        // The first slice of a series defines its display metadata; later slices
+        // only bump the count (slice_info.slice_count is always 0 from the reader).
+        if (info.slice_count == 0) info = slice_info;
         ++info.slice_count;
     }
 
