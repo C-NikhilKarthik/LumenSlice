@@ -144,6 +144,16 @@ long lumen_seg_paint(LumenVolume* v, int axis, int index, int cx, int cy,
 // Threshold effect. It preserves the labelmap and clips subsequent Paint adds.
 void lumen_seg_apply_mask(LumenVolume* v, float low_hu, float high_hu);
 
+// Drop the editable-area mask so Paint additions are unconstrained again.
+void lumen_seg_clear_mask(LumenVolume* v);
+
+// Whether an editable-area mask is currently active (for the UI indicator).
+int lumen_seg_mask_enabled(const LumenVolume* v);
+
+// The active mask's HU range (only meaningful when lumen_seg_mask_enabled != 0).
+// Either output pointer may be NULL.
+void lumen_seg_mask_range(const LumenVolume* v, float* lo, float* hi);
+
 // Level trace on one slice: from pixel (cx,cy) of `axis`/`index`, add the iso-level
 // (HU >= clicked pixel) 4-connected region to the active segment. Slice-only.
 // Returns the number of voxels newly labelled.

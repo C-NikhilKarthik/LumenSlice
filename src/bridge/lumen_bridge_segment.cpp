@@ -124,6 +124,21 @@ void lumen_seg_apply_mask(LumenVolume* v, float low_hu, float high_hu) {
     lumen_bridge_detail::invalidate_mask_cache(v);
 }
 
+void lumen_seg_clear_mask(LumenVolume* v) {
+    if (v == nullptr) return;
+    v->editor.clear_intensity_mask();
+}
+
+int lumen_seg_mask_enabled(const LumenVolume* v) {
+    return (v != nullptr && v->editor.intensity_mask_enabled()) ? 1 : 0;
+}
+
+void lumen_seg_mask_range(const LumenVolume* v, float* lo, float* hi) {
+    if (v == nullptr) return;
+    if (lo != nullptr) *lo = v->editor.intensity_mask_lo();
+    if (hi != nullptr) *hi = v->editor.intensity_mask_hi();
+}
+
 long lumen_seg_level_trace(LumenVolume* v, int axis, int index, int cx, int cy) {
     if (v == nullptr) return 0;
     const long changed =

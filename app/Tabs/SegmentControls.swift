@@ -123,17 +123,38 @@ struct SegmentControls: View {
 
     private var maskSection: some View {
         Section("Mask") {
-            Button {
-                seg.applyMask()
-            } label: {
-                Label("Use for masking", systemImage: "paintbrush.pointed.fill")
-                    .frame(maxWidth: .infinity)
+            if seg.maskActive {
+                // Active-mask indicator + a way to turn it off.
+                HStack(spacing: 6) {
+                    Image(systemName: "circle.fill")
+                        .font(.system(size: 8))
+                        .foregroundStyle(.green)
+                    Text("Mask active: \(Int(seg.maskRange.lowerBound)) to "
+                         + "\(Int(seg.maskRange.upperBound)) HU")
+                        .font(.caption)
+                    Spacer()
+                }
+                Button(role: .destructive) {
+                    seg.deactivateMask()
+                } label: {
+                    Label("Deactivate mask", systemImage: "xmark.circle")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            } else {
+                Button {
+                    seg.applyMask()
+                } label: {
+                    Label("Use for masking", systemImage: "paintbrush.pointed.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(seg.activeID == 0 || seg.isBusy)
+                Text("The threshold HU range becomes an invisible Paint constraint. Paint additions outside it are ignored.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
-            .buttonStyle(.borderedProminent)
-            .disabled(seg.activeID == 0 || seg.isBusy)
-            Text("The threshold HU range becomes an invisible Paint constraint. Paint additions outside it are ignored.")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
         }
     }
 

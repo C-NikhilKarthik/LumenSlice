@@ -457,10 +457,20 @@ QWidget* MainWindow::buildSegmentPanel() {
         applyBtn->setObjectName("accent");
         connect(applyBtn, &QPushButton::clicked, this, &MainWindow::commitThreshold);
         f->addWidget(applyBtn);
-        auto* maskBtn = new QPushButton("Use for masking / Paint");
-        connect(maskBtn, &QPushButton::clicked, this,
+        maskBtn_ = new QPushButton("Use for masking / Paint");
+        connect(maskBtn_, &QPushButton::clicked, this,
                 &MainWindow::useThresholdForMasking);
-        f->addWidget(maskBtn);
+        f->addWidget(maskBtn_);
+        // Active-mask indicator + a way to turn it off (hidden until a mask is set).
+        maskIndicator_ = new QLabel;
+        maskIndicator_->setStyleSheet("color:#57c785;");  // green: mask active
+        maskIndicator_->setVisible(false);
+        f->addWidget(maskIndicator_);
+        maskDeactivateBtn_ = new QPushButton("Deactivate mask");
+        maskDeactivateBtn_->setVisible(false);
+        connect(maskDeactivateBtn_, &QPushButton::clicked, this,
+                &MainWindow::deactivateMask);
+        f->addWidget(maskDeactivateBtn_);
         toolDetail_->addWidget(w);
     }
     // 1: region grow
@@ -1296,6 +1306,7 @@ void MainWindow::adoptLoadedVolume(const LoadResult& r) {
     if (volumeRenderCheck_ && volumeRenderCheck_->isChecked())
         refreshVolumeTexture();
     refreshAll();
+    updateMaskIndicator();  // a fresh load clears any intensity mask
     meshView_->clearMeshes();
     meshInfoLabel_->setText("No surface yet.");
 }
@@ -1484,6 +1495,31 @@ void MainWindow::useThresholdForMasking() {
     runMaskOp("Applying intensity mask…", [v, lo, hi] {
         lumen_seg_apply_mask(v, lo, hi);
     }, false, false);
+    updateMaskIndicator();
+}
+
+void MainWindow::deactivateMask() {
+    LumenVolume* v = st_.volume;
+    if (!v) return;
+    lumen_seg_clear_mask(v);
+    updateMaskIndicator();
+}
+
+// Swap the "Use for masking" button for an active indicator + Deactivate button
+// while an intensity mask is in effect, mirroring the macOS control.
+void MainWindow::updateMaskIndicator() {
+    if (!maskBtn_ || !maskIndicator_ || !maskDeactivateBtn_) return;
+    LumenVolume* v = st_.volume;
+    const bool active = v != nullptr && lumen_seg_mask_enabled(v) != 0;
+    if (active) {
+        float lo = 0, hi = 0;
+        lumen_seg_mask_range(v, &lo, &hi);
+        maskIndicator_->setText(QString("Mask active: %1 to %2 HU")
+                                    .arg(qRound(lo)).arg(qRound(hi)));
+    }
+    maskBtn_->setVisible(!active);
+    maskIndicator_->setVisible(active);
+    maskDeactivateBtn_->setVisible(active);
 }
 
 void MainWindow::applyOtsu() {

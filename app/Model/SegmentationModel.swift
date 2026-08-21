@@ -80,6 +80,10 @@ final class SegmentationModel: ObservableObject {
     @Published private(set) var growPreviewActive = false
     @Published var showOverlay = true { didSet { refreshAllOverlays() } }
     @Published var isBusy = false
+    // An editable-area (intensity) mask is active: paint additions are clipped to
+    // maskRange. The UI shows an indicator and a Deactivate button while true.
+    @Published private(set) var maskActive = false
+    @Published private(set) var maskRange: ClosedRange<Float> = 0...0
 
     @Published private(set) var segments: [SegmentRow] = []
     @Published var activeID: Int = 0
@@ -174,6 +178,8 @@ final class SegmentationModel: ObservableObject {
                 // A fresh scan starts with no threshold preview, so an untouched
                 // load never looks pre-segmented.
                 self.thresholdPreviewArmed = false
+                // The bridge editor resets its intensity mask on load; mirror that.
+                self.maskActive = false
                 self.overlayStore.images = [nil, nil, nil]
                 if has {
                     self.reloadSegments()
@@ -371,13 +377,22 @@ final class SegmentationModel: ObservableObject {
 
     func applyMask() {
         guard let h = volume.handle, activeID > 0, !isBusy else { return }
-        let lo = thresholdLo
-        let hi = thresholdHi
+        let lo = min(thresholdLo, thresholdHi)
+        let hi = max(thresholdLo, thresholdHi)
         runAsyncMaskOperation(h, committed: false, captureUndo: false) { _ in
             lumen_seg_apply_mask(h, lo, hi)
             return 0
         }
+        maskActive = true
+        maskRange = lo...hi
         tool = .paint
+    }
+
+    // Turn off the editable-area mask so painting is unconstrained again.
+    func deactivateMask() {
+        guard let h = volume.handle else { return }
+        lumen_seg_clear_mask(h)
+        maskActive = false
     }
 
     private func runAsyncMaskOperation(_ handle: OpaquePointer, committed: Bool = true,

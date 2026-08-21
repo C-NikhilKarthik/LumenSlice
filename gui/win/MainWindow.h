@@ -79,6 +79,7 @@ private slots:
     void applyThreshold();
     void commitThreshold();
     void useThresholdForMasking();
+    void deactivateMask();
     void applyOtsu();
     void growFromSeeds();
     void applyGrowPreview();
@@ -141,6 +142,7 @@ private:
     void rebuildExportSegmentList();
     void updateSegmentCounts();      // debounced: schedules recompute
     void recomputeSegmentCounts();   // the actual full-volume histogram scan
+    void updateMaskIndicator();      // reflect the intensity-mask active state
     void updateUndoRedo();
     void updateWlControls();
     void setStatus(const QString& text);
@@ -192,6 +194,11 @@ private:
     RangeSlider* threshSlider_ = nullptr;
     QLabel* threshLabel_ = nullptr;
     QTimer* threshTimer_ = nullptr;
+    // Intensity-mask controls: the "Use for masking" button is swapped for an
+    // active indicator + a Deactivate button while a mask is in effect.
+    QPushButton* maskBtn_ = nullptr;
+    QLabel* maskIndicator_ = nullptr;
+    QPushButton* maskDeactivateBtn_ = nullptr;
     QSlider* toleranceSlider_ = nullptr;
     QLabel* toleranceLabel_ = nullptr;
     QSlider* brushSlider_ = nullptr;
