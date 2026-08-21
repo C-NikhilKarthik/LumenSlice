@@ -68,6 +68,11 @@ final class CanvasInputNSView: NSView {
     private var zoomMonitor: Any?
     private var flagsMonitor: Any?
     private var panMonitor: Any?
+    private var keyMonitor: Any?
+    // Whether the pointer is currently over this pane. The Up/Down arrow keys step
+    // the slice of the hovered pane (the same pane the scroll wheel would step), so
+    // only the catcher under the cursor reacts to a key press.
+    private var isMouseInside = false
     private var accumulated: CGFloat = 0
     private let threshold: CGFloat = 8
     // A right-drag that began inside this pane keeps zooming even if the cursor
@@ -109,6 +114,7 @@ final class CanvasInputNSView: NSView {
                 guard let self, let w = self.window, event.window == w else { return event }
                 let p = self.convert(event.locationInWindow, from: nil)
                 let inside = self.bounds.contains(p)
+                self.isMouseInside = inside
 
                 // ⌥ + left-drag = pan. Claim the whole gesture (consume the events) so
                 // the window/level drag and tap-to-locate underneath never see it.
@@ -175,6 +181,22 @@ final class CanvasInputNSView: NSView {
                 [weak self] event in
                 guard let self, let w = self.window, event.window == w else { return event }
                 return self.handleMiddleMouse(event)
+            }
+        }
+        if keyMonitor == nil {
+            // Up / Down arrows step the hovered pane's slice, mirroring the wheel and
+            // the on-screen step buttons: Up = previous slice (-1), Down = next (+1).
+            // Only the pane under the cursor reacts, so the other panes pass the key
+            // through untouched. keyCode 126 = Up, 125 = Down (layout-independent).
+            keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) {
+                [weak self] event in
+                guard let self, let w = self.window, event.window == w,
+                      self.isMouseInside else { return event }
+                switch event.keyCode {
+                case 126: self.onStep?(-1); return nil
+                case 125: self.onStep?(1); return nil
+                default: return event
+                }
             }
         }
     }
@@ -250,12 +272,14 @@ final class CanvasInputNSView: NSView {
         if let zoomMonitor { NSEvent.removeMonitor(zoomMonitor) }
         if let flagsMonitor { NSEvent.removeMonitor(flagsMonitor) }
         if let panMonitor { NSEvent.removeMonitor(panMonitor) }
+        if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
         scrollMonitor = nil
         moveMonitor = nil
         magnifyMonitor = nil
         zoomMonitor = nil
         flagsMonitor = nil
         panMonitor = nil
+        keyMonitor = nil
     }
 
     deinit { teardown() }

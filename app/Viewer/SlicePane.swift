@@ -541,7 +541,7 @@ private struct SliceHelpPopover: View {
         let id = UUID(); let keys: String; let action: String
     }
     private let rows = [
-        Row(keys: "Scroll", action: "Change slice"),
+        Row(keys: "Scroll / ↑ ↓ arrows", action: "Change slice"),
         Row(keys: "Pinch / right-drag / ± buttons", action: "Zoom in and out"),
         Row(keys: "⌥ Option + drag", action: "Pan (when zoomed in)"),
         Row(keys: "Click", action: "Recenter all three views here"),

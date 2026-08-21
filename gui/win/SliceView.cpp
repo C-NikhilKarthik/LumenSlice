@@ -1,6 +1,11 @@
 #include "SliceView.h"
 
+#include <QAbstractSpinBox>
+#include <QApplication>
+#include <QEnterEvent>
 #include <QHBoxLayout>
+#include <QKeyEvent>
+#include <QLineEdit>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
@@ -10,7 +15,6 @@
 #include <QToolButton>
 #include <QWheelEvent>
 #include <algorithm>
-#include <cmath>
 #include <cmath>
 
 #include "MarkupModel.h"
@@ -507,11 +511,42 @@ void SliceView::wheelEvent(QWheelEvent* e) {
     while (std::abs(wheelAccum_) >= 10.0) {
         const int step = wheelAccum_ > 0 ? 1 : -1;
         wheelAccum_ -= step * 10.0;
-        const int current = std::clamp(st_->sliceIndex[axis_], 0, count - 1);
-        const int next = std::clamp(current + step, 0, count - 1);
-        if (next != st_->sliceIndex[axis_]) emit sliceScrolled(axis_, next);
+        stepSlice(step);
     }
     e->accept();
+}
+
+// Step this pane's slice, clamped to [0, count-1]. Shared by the wheel and the
+// Up/Down arrow keys so all three stay in sync with the slider and step buttons.
+void SliceView::stepSlice(int delta) {
+    LumenVolume* v = st_->volume;
+    if (!v) return;
+    const int count = lumen_slice_count(v, axis_);
+    if (count <= 0) return;
+    const int current = std::clamp(st_->sliceIndex[axis_], 0, count - 1);
+    const int next = std::clamp(current + delta, 0, count - 1);
+    if (next != st_->sliceIndex[axis_]) emit sliceScrolled(axis_, next);
+}
+
+// Up = previous slice (-1), Down = next (+1) - matching the wheel and the on-screen
+// step buttons. The pane grabs focus on hover (see enterEvent) so the arrows drive
+// whichever pane the cursor is over.
+void SliceView::keyPressEvent(QKeyEvent* e) {
+    switch (e->key()) {
+        case Qt::Key_Up:   stepSlice(-1); e->accept(); return;
+        case Qt::Key_Down: stepSlice(1);  e->accept(); return;
+        default: QWidget::keyPressEvent(e);
+    }
+}
+
+// Give the hovered pane keyboard focus so the arrow keys act on it - but never
+// steal focus from a spin box or text field the user is editing.
+void SliceView::enterEvent(QEnterEvent* e) {
+    QWidget* focused = QApplication::focusWidget();
+    const bool editing = qobject_cast<QAbstractSpinBox*>(focused) != nullptr ||
+                         qobject_cast<QLineEdit*>(focused) != nullptr;
+    if (!editing) setFocus(Qt::MouseFocusReason);
+    QWidget::enterEvent(e);
 }
 
 void SliceView::mousePressEvent(QMouseEvent* e) {

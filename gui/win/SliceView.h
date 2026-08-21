@@ -49,12 +49,17 @@ signals:
 protected:
     void paintEvent(QPaintEvent*) override;
     void wheelEvent(QWheelEvent*) override;
+    void keyPressEvent(QKeyEvent*) override;
+    void enterEvent(QEnterEvent*) override;
     void mousePressEvent(QMouseEvent*) override;
     void mouseMoveEvent(QMouseEvent*) override;
     void mouseReleaseEvent(QMouseEvent*) override;
     void mouseDoubleClickEvent(QMouseEvent*) override;
     void leaveEvent(QEvent*) override;
     void resizeEvent(QResizeEvent*) override;
+
+    // Step this pane's slice by +/-1 (shared by the wheel and the arrow keys).
+    void stepSlice(int delta);
 
 private:
     // Geometry of the drawn slice image inside the widget (aspect-preserving).
