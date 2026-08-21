@@ -137,6 +137,9 @@ private:
     void refreshVolumeTexture();
     void rebuildSegmentList();
     void rebuildExportSegmentList();
+    void rebuildThreeDSegmentList();
+    QWidget* buildSegmentVisibilityRow(int id);
+    void updateActiveMaskLabel();
     void updateSegmentCounts();      // debounced: schedules recompute
     void recomputeSegmentCounts();   // the actual full-volume histogram scan
     void updateUndoRedo();
@@ -176,8 +179,15 @@ private:
     QDoubleSpinBox* windowSpin_ = nullptr;
     RangeSlider* wlRange_ = nullptr;
     QCheckBox* crosshairCheck_ = nullptr;
+    // Usable HU band for the Level/Window controls: a clinically useful range
+    // (covers every built-in preset) clamped to the loaded volume's actual HU
+    // span, widened only enough to include the current window. Mirrors macOS's
+    // VisualizeControls.wlBounds. Updated in refreshVolumeInfo().
+    float huBoundLo_ = -1400.0f;
+    float huBoundHi_ = 1600.0f;
 
     // Segment controls.
+    QLabel* activeMaskLabel_ = nullptr;  // "Active mask: <name>" / "No active mask"
     QVBoxLayout* segListLayout_ = nullptr;
     QWidget* segListContainer_ = nullptr;
     QHash<int, QLabel*> segCountLabels_;
@@ -207,6 +217,10 @@ private:
     QComboBox* resolutionCombo_ = nullptr;
     QPushButton* generateBtn_ = nullptr;
     QLabel* meshInfoLabel_ = nullptr;
+    // Visibility-only segment picker, live-mirrored from the Segment tab so a
+    // segment can be shown/hidden in the 3D surface without switching tabs.
+    QVBoxLayout* threeDSegListLayout_ = nullptr;
+    bool meshAutoShownForVolume_ = false;  // one-shot: auto-Generate on first 3D visit
     QCheckBox* scissorModeCheck_ = nullptr;
     QComboBox* scissorEraseCombo_ = nullptr;
     QCheckBox* scissorActiveOnlyCheck_ = nullptr;

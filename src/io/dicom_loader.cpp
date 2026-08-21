@@ -6,9 +6,11 @@
 #include <cctype>
 #include <cstdint>
 #include <cstdio>
+#include <execution>
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <numeric>
 #include <unordered_map>
 #include <vector>
 
@@ -150,6 +152,57 @@ bool ParseSlice(const fs::path& path, Slice& out) {
                                     : static_cast<float>(pixels[i]);
         out.hu[i] = raw * static_cast<float>(slope) + static_cast<float>(intercept);
     }
+    return true;
+}
+
+// Everything ListDicomSeries needs about one file, read without ever touching
+// DCM_PixelData — no encapsulated-format transcoding, no per-voxel HU
+// calibration. That decode+calibrate cost (the expensive part of ParseSlice) is
+// wasted work for a scene picker that only ever shows counts and text fields.
+struct SeriesFileMeta {
+    std::string series_uid;
+    int cols = 0;
+    int rows = 0;
+    std::string description;
+    std::string modality;
+    std::string date;
+    std::uintmax_t bytes = 0;
+};
+
+bool ParseSeriesFileMeta(const fs::path& path, SeriesFileMeta& out) {
+    DcmFileFormat ff;
+    if (ff.loadFile(path.string().c_str()).bad()) return false;
+    DcmDataset* ds = ff.getDataset();
+    if (ds == nullptr) return false;
+
+    Uint16 rows = 0, cols = 0;
+    if (ds->findAndGetUint16(DCM_Rows, rows).bad() ||
+        ds->findAndGetUint16(DCM_Columns, cols).bad() || rows == 0 || cols == 0) {
+        return false;
+    }
+    out.rows = rows;
+    out.cols = cols;
+
+    OFString series_uid;
+    if (ds->findAndGetOFString(DCM_SeriesInstanceUID, series_uid).good())
+        out.series_uid = series_uid.c_str();
+
+    const StudyMeta meta = extract_study_meta(*ds);
+    out.description = meta.series_description;
+    out.modality = meta.modality;
+
+    // Series Date is the acquisition date for this specific series; Study Date
+    // is the same across every series in the study and is a reasonable
+    // fallback when Series Date is absent.
+    OFString date;
+    if (ds->findAndGetOFString(DCM_SeriesDate, date).good() && !date.empty()) {
+        out.date = date.c_str();
+    } else if (ds->findAndGetOFString(DCM_StudyDate, date).good()) {
+        out.date = date.c_str();
+    }
+
+    std::error_code ec;
+    out.bytes = fs::file_size(path, ec);
     return true;
 }
 
@@ -347,19 +400,41 @@ std::vector<DicomSeriesInfo> ListDicomSeries(const std::string& folder) {
     std::vector<DicomSeriesInfo> result;
     std::error_code ec;
     if (!fs::exists(folder, ec) || !fs::is_directory(folder, ec)) return result;
-    std::unordered_map<std::string, DicomSeriesInfo> by_uid;
+
+    std::vector<fs::path> candidates;
     for (auto it = fs::recursive_directory_iterator(
              folder, fs::directory_options::skip_permission_denied, ec);
          !ec && it != fs::recursive_directory_iterator(); it.increment(ec)) {
         if (!it->is_regular_file(ec)) continue;
-        if (!HasDicmSignature(it->path()) && !HasDicomExtension(it->path())) continue;
-        Slice s;
-        if (!ParseSlice(it->path(), s)) continue;
-        auto& info = by_uid[s.series_uid];
-        info.uid = s.series_uid;
+        if (HasDicmSignature(it->path()) || HasDicomExtension(it->path()))
+            candidates.push_back(it->path());
+    }
+
+    // Metadata-only scan, in parallel — each file is independent (no pixel
+    // decode, no shared mutable state), and grouping by series happens
+    // single-threaded afterward, so there's nothing to race.
+    std::vector<SeriesFileMeta> parsed(candidates.size());
+    std::vector<char> parsed_ok(candidates.size(), 0);
+    std::vector<std::size_t> indices(candidates.size());
+    std::iota(indices.begin(), indices.end(), std::size_t{0});
+    std::for_each(std::execution::par, indices.begin(), indices.end(),
+                  [&](std::size_t i) {
+        parsed_ok[i] = ParseSeriesFileMeta(candidates[i], parsed[i]) ? 1 : 0;
+    });
+
+    std::unordered_map<std::string, DicomSeriesInfo> by_uid;
+    for (std::size_t i = 0; i < candidates.size(); ++i) {
+        if (!parsed_ok[i]) continue;
+        const SeriesFileMeta& m = parsed[i];
+        auto& info = by_uid[m.series_uid];
+        info.uid = m.series_uid;
         info.slices += 1;
-        info.width = s.cols;
-        info.height = s.rows;
+        info.width = m.cols;
+        info.height = m.rows;
+        info.total_bytes += m.bytes;
+        if (info.description.empty()) info.description = m.description;
+        if (info.modality.empty()) info.modality = m.modality;
+        if (info.date.empty()) info.date = m.date;
     }
     for (auto& item : by_uid) result.push_back(std::move(item.second));
     std::sort(result.begin(), result.end(), [](const auto& a, const auto& b) {

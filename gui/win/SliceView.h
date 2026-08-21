@@ -49,6 +49,7 @@ signals:
 protected:
     void paintEvent(QPaintEvent*) override;
     void wheelEvent(QWheelEvent*) override;
+    void keyPressEvent(QKeyEvent*) override;
     void mousePressEvent(QMouseEvent*) override;
     void mouseMoveEvent(QMouseEvent*) override;
     void mouseReleaseEvent(QMouseEvent*) override;
@@ -63,6 +64,9 @@ private:
     bool widgetToPixel(const QPoint& p, int imgW, int imgH, int* px, int* py) const;
     void buildZoomBar();
     void positionZoomBar();
+    // Clamp sliceIndex[axis_] + delta into range and emit sliceScrolled if it
+    // actually moved. Shared by wheelEvent and keyPressEvent (Up/Down).
+    void stepSlice(int delta);
 
     int axis_;
     ViewState* st_;

@@ -86,18 +86,19 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist-windows/resources | Out-Null
-          Copy-Item build/Release/LumenSlice.exe dist-windows/LumenSlice.exe
+          Copy-Item build/Release/SurgNetra.exe dist-windows/SurgNetra.exe
           Copy-Item build/vcpkg_installed/x64-windows-rel/bin/*.dll dist-windows/ -ErrorAction SilentlyContinue
           # Bundle the Qt runtime (DLLs + platform/style plugins) beside the exe.
-          & "$env:QT_ROOT_DIR/bin/windeployqt.exe" --release --no-translations --no-compiler-runtime dist-windows/LumenSlice.exe
+          & "$env:QT_ROOT_DIR/bin/windeployqt.exe" --release --no-translations --no-compiler-runtime dist-windows/SurgNetra.exe
           $dictionary = Get-ChildItem -Path build/vcpkg_installed -Filter dicom.dic -Recurse | Select-Object -First 1
           if (-not $dictionary) { throw "DCMTK dicom.dic was not installed" }
           Copy-Item $dictionary.FullName dist-windows/resources/dicom.dic
-          Compress-Archive -Path dist-windows/* -DestinationPath LumenSlice-windows-x64.zip -Force
+          Copy-Item build/Release/resources/app.ico dist-windows/resources/app.ico
+          Compress-Archive -Path dist-windows/* -DestinationPath SurgNetra-windows-x64.zip -Force
 
       - name: Upload Windows package
         uses: actions/upload-artifact@v4
         with:
-          name: LumenSlice-windows-x64
-          path: LumenSlice-windows-x64.zip
+          name: SurgNetra-windows-x64
+          path: SurgNetra-windows-x64.zip
           if-no-files-found: error

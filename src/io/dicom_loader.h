@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -32,6 +33,9 @@ struct LoadResult {
 struct DicomSeriesInfo {
     std::string uid;
     std::string description;
+    std::string modality;
+    std::string date;              // Series (falling back to Study) date, "YYYYMMDD"
+    std::uintmax_t total_bytes = 0; // sum of on-disk file sizes for this series
     int slices = 0;
     int width = 0;
     int height = 0;

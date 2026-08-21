@@ -13,7 +13,6 @@
 #include <cstring>
 #include <string>
 #include <utility>
-#include <sstream>
 
 #include "bridge/meta_copy.hpp"
 #include "core/volume.h"
@@ -57,21 +56,22 @@ LumenVolume* lumen_load_folder(const char* path, char* msg, int msg_cap) {
 
 int lumen_list_dicom_series(const char* path, char* out, int out_cap) {
     const auto series = lumen::ListDicomSeries(path != nullptr ? path : "");
-    std::ostringstream json;
-    json << '[';
+    std::string json = "[";
     for (std::size_t i = 0; i < series.size(); ++i) {
-        if (i) json << ',';
-        json << "{\"uid\":\"";
-        for (const char c : series[i].uid) {
-            if (c == '\\' || c == '"') json << '\\';
-            json << c;
-        }
-        json << "\",\"slices\":" << series[i].slices
-             << ",\"width\":" << series[i].width
-             << ",\"height\":" << series[i].height << '}';
+        if (i) json += ',';
+        json += '{';
+        lumen::append_pair(json, "uid", series[i].uid, true);
+        lumen::append_pair(json, "description", series[i].description, true);
+        lumen::append_pair(json, "modality", series[i].modality, true);
+        lumen::append_pair(json, "date", series[i].date, true);
+        json += "\"slices\":" + std::to_string(series[i].slices) + ",";
+        json += "\"width\":" + std::to_string(series[i].width) + ",";
+        json += "\"height\":" + std::to_string(series[i].height) + ",";
+        json += "\"bytes\":" + std::to_string(series[i].total_bytes);
+        json += '}';
     }
-    json << ']';
-    return lumen::copy_string_out(json.str(), out, out_cap);
+    json += ']';
+    return lumen::copy_string_out(json, out, out_cap);
 }
 
 void lumen_free(LumenVolume* v) { delete v; }

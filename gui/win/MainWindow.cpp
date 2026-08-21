@@ -94,7 +94,7 @@ QString sanitizeFilename(const QString& name) {
 }  // namespace
 
 MainWindow::MainWindow() {
-    setWindowTitle("LumenSlice");
+    setWindowTitle("SurgNetra");
     setAcceptDrops(true);
     resize(1360, 820);
 
@@ -220,7 +220,7 @@ QWidget* MainWindow::buildTabRail() {
             "QToolButton{color:#aeb4c1;border:none;border-radius:14px;font-size:12px;"
             "padding-top:5px;}"
             "QToolButton:hover{background:#22252d;color:#e7e9ef;}"
-            "QToolButton:checked{background:#4f7cf0;color:white;}");
+            "QToolButton:checked{background:#16b8c9;color:white;}");
         group->addButton(b, i);
         v->addWidget(b, 0, Qt::AlignHCenter);
     }
@@ -277,10 +277,10 @@ QWidget* MainWindow::buildVisualizePanel() {
         "Drag the two handles to set the visible HU window (low … high), drag on "
         "a slice, or type exact Level / Window values."));
     levelSpin_ = new QDoubleSpinBox;
-    levelSpin_->setRange(-4000, 4000);
+    levelSpin_->setRange(huBoundLo_, huBoundHi_);
     levelSpin_->setDecimals(0);
     windowSpin_ = new QDoubleSpinBox;
-    windowSpin_->setRange(1, 8000);
+    windowSpin_->setRange(1, huBoundHi_ - huBoundLo_);
     windowSpin_->setDecimals(0);
 
     auto* spinRow = new QHBoxLayout;
@@ -297,8 +297,8 @@ QWidget* MainWindow::buildVisualizePanel() {
     body(wlBox)->addWidget(wlRange_);
 
     auto setWL = [this](float lvl, float win) {
-        st_.level = std::clamp(lvl, -4000.0f, 4000.0f);
-        st_.window = std::clamp(win, 1.0f, 8000.0f);
+        st_.level = std::clamp(lvl, huBoundLo_, huBoundHi_);
+        st_.window = std::clamp(win, 1.0f, huBoundHi_ - huBoundLo_);
         updateWlControls();
         refreshCanvas();
     };
@@ -365,6 +365,24 @@ QWidget* MainWindow::buildSegmentPanel() {
     addBtn->setObjectName("accent");
     connect(addBtn, &QPushButton::clicked, this, &MainWindow::addSegment);
     body(segBox)->addWidget(addBtn);
+
+    // Persistent active-mask indicator — otherwise the only signal is the
+    // highlighted row below, invisible whenever this list scrolls out of view.
+    auto* activeRow = new QHBoxLayout;
+    activeMaskLabel_ = new QLabel("No active mask");
+    activeMaskLabel_->setStyleSheet("color:#98a0b0;");
+    activeRow->addWidget(activeMaskLabel_, 1);
+    auto* deactivateBtn = new QPushButton("Deactivate");
+    deactivateBtn->setToolTip(
+        "Stop editing into any segment — paint, threshold apply, and other "
+        "mask operations become no-ops until a segment is selected again.");
+    connect(deactivateBtn, &QPushButton::clicked, this, [this] {
+        if (st_.volume) lumen_seg_set_active(st_.volume, 0);
+        rebuildSegmentList();
+    });
+    activeRow->addWidget(deactivateBtn);
+    body(segBox)->addLayout(activeRow);
+
     segListContainer_ = new QWidget;
     segListLayout_ = new QVBoxLayout(segListContainer_);
     segListLayout_->setContentsMargins(0, 0, 0, 0);
@@ -390,7 +408,7 @@ QWidget* MainWindow::buildSegmentPanel() {
         b->setStyleSheet(
             "QToolButton{background:#2a2d36;border:1px solid #3a3f4c;padding:6px 2px;"
             "color:#c3c8d2;font-size:12px;" + ends +
-            "}QToolButton:checked{background:#4f7cf0;color:white;border-color:#4f7cf0;}");
+            "}QToolButton:checked{background:#16b8c9;color:white;border-color:#16b8c9;}");
         toolGroup->addButton(b, i);
         toolRow->addWidget(b, 1);
     }
@@ -590,6 +608,16 @@ QWidget* MainWindow::buildThreeDPanel() {
 
     v->addWidget(new QLabel("Build a 3D surface from the segmentation mask using "
                             "marching cubes."));
+
+    // Segment visibility, mirrored live from the Segment tab, so a segment can
+    // be shown/hidden in the surface without switching tabs to find it.
+    auto* segVisBox = section("Segments");
+    auto* threeDSegContainer = new QWidget;
+    threeDSegListLayout_ = new QVBoxLayout(threeDSegContainer);
+    threeDSegListLayout_->setContentsMargins(0, 0, 0, 0);
+    threeDSegListLayout_->setSpacing(4);
+    body(segVisBox)->addWidget(threeDSegContainer);
+    v->addWidget(segVisBox);
 
     volumeRenderCheck_ = new QCheckBox("Enable volume rendering");
     volumeRenderCheck_->setToolTip(
@@ -1125,14 +1153,30 @@ void MainWindow::onSeriesListReady() {
                             ? doc.array() : QJsonArray{};
     QString selectedUid;
     if (series.size() > 1) {
+        // Series Description / Modality / Size / Count / Date Created, per
+        // scene, so a multi-series folder is actually distinguishable at a
+        // glance instead of showing only dimensions and a raw UID.
+        auto formatBytes = [](double bytes) {
+            const double mb = bytes / (1024.0 * 1024.0);
+            return mb >= 1.0 ? QString("%1 MB").arg(mb, 0, 'f', 1)
+                              : QString("%1 KB").arg(bytes / 1024.0, 0, 'f', 0);
+        };
+        auto formatDate = [](const QString& yyyymmdd) {
+            if (yyyymmdd.size() != 8) return yyyymmdd.isEmpty() ? QString("—") : yyyymmdd;
+            return QString("%1-%2-%3").arg(yyyymmdd.left(4), yyyymmdd.mid(4, 2),
+                                            yyyymmdd.mid(6, 2));
+        };
         QStringList choices;
         for (const QJsonValue& value : series) {
             const QJsonObject o = value.toObject();
-            choices << QString("%1 slices — %2×%3 — %4")
+            const QString description = o.value("description").toString();
+            const QString modality = o.value("modality").toString();
+            choices << QString("%1 — %2 — %3 slices — %4 — %5")
+                           .arg(description.isEmpty() ? "(no description)" : description,
+                                modality.isEmpty() ? "?" : modality)
                            .arg(o.value("slices").toInt())
-                           .arg(o.value("width").toInt())
-                           .arg(o.value("height").toInt())
-                           .arg(o.value("uid").toString());
+                           .arg(formatBytes(o.value("bytes").toDouble()),
+                                formatDate(o.value("date").toString()));
         }
         bool accepted = false;
         const QString choice = QInputDialog::getItem(
@@ -1169,7 +1213,7 @@ void MainWindow::onLoadReady() {
     if (!r.volume) {
         setStatus(QString("Could not load: %1").arg(r.message));
         QMessageBox::warning(
-            this, "LumenSlice",
+            this, "SurgNetra",
             r.message.isEmpty() ? "Could not load the DICOM folder." : r.message);
         return;
     }
@@ -1217,6 +1261,23 @@ void MainWindow::adoptLoadedVolume(const LoadResult& r) {
         segNames_[id] = QString("Segment %1").arg(id);
     }
 
+    // A fresh volume gets a fresh, genuinely empty segment (SegmentEditor::reset_to
+    // already guarantees that) — but a leftover Tool::Threshold from a previous
+    // session would still paint a live threshold-preview overlay using the old HU
+    // window over this new, empty segment (SliceView::paintEvent draws it whenever
+    // showOverlay is on, with no check that segment editing is even active), which
+    // looks exactly like "a segment is already marked". Reset tool + threshold
+    // window so a new load always starts from a neutral state.
+    st_.tool = Tool::None;
+    float huLo = 0, huHi = 0;
+    lumen_hu_range(v, &huLo, &huHi);
+    st_.thresholdLo = huLo;
+    st_.thresholdHi = huHi;
+
+    // So arrow-key slice navigation works immediately after loading, without
+    // requiring the user to click a pane first.
+    if (panes_[0]) panes_[0]->setFocus(Qt::OtherFocusReason);
+
     // A fresh volume invalidates all markups (their voxel coords no longer map).
     float sx = 1, sy = 1, sz = 1;
     lumen_spacing(v, &sx, &sy, &sz);
@@ -1232,6 +1293,7 @@ void MainWindow::adoptLoadedVolume(const LoadResult& r) {
     refreshAll();
     meshView_->clearMeshes();
     meshInfoLabel_->setText("No surface yet.");
+    meshAutoShownForVolume_ = false;  // this volume hasn't had its one-shot 3D auto-build yet
 }
 
 void MainWindow::selectTab(int tab) {
@@ -1244,6 +1306,17 @@ void MainWindow::selectTab(int tab) {
     st_.markupPlacing = (tab == 4) && markups_.placing();
     if (tab == 3) rebuildExportSegmentList();  // reflect current segments/names
     if (tab == 4) rebuildMarkupList();
+    // First-time 3D visit for this volume: build the surface automatically so
+    // segments are visible without the user needing to know to click Generate.
+    // Only once per volume (meshAutoShownForVolume_ resets on load) and only
+    // when nothing has been built yet — autoMesh3D_'s on-every-edit refresh
+    // stays opt-in (full marching cubes per paint stroke would make a real CT
+    // crawl); this is a single, one-time convenience build instead.
+    if (tab == 2 && st_.volume && !meshAutoShownForVolume_ && !generating_ &&
+        meshView_ && !meshView_->hasMesh()) {
+        meshAutoShownForVolume_ = true;
+        generateMesh();
+    }
     refreshCanvas();
 }
 
@@ -1273,8 +1346,8 @@ void MainWindow::onSliceScrolled(int axis, int index) {
 }
 
 void MainWindow::onWindowLevelDragged(float dLevel, float dWindow) {
-    st_.level = std::clamp(st_.level + dLevel, -4000.0f, 4000.0f);
-    st_.window = std::clamp(st_.window + dWindow, 1.0f, 8000.0f);
+    st_.level = std::clamp(st_.level + dLevel, huBoundLo_, huBoundHi_);
+    st_.window = std::clamp(st_.window + dWindow, 1.0f, huBoundHi_ - huBoundLo_);
     updateWlControls();
     if (volumeRenderCheck_ && volumeRenderCheck_->isChecked())
         refreshVolumeTexture();
@@ -1397,6 +1470,10 @@ void MainWindow::commitThreshold() {
         lumen_seg_active(v) == 0) return;
     const float lo = st_.thresholdLo;
     const float hi = st_.thresholdHi;
+    // Consistent with useThresholdForMasking() below: any action that commits
+    // voxels into the active segment drops the user into Paint to refine the
+    // result, instead of leaving them in Threshold looking at an empty preview.
+    st_.tool = Tool::Paint;
     runMaskOp("Applying threshold…", [v, lo, hi] {
         lumen_seg_threshold(v, lo, hi);
     });
@@ -1822,6 +1899,22 @@ void MainWindow::refreshVolumeInfo() {
         updateWlControls();  // reflect current level/window on the new bounds
     }
 
+    // Clinically useful Level/Window band (see huBoundLo_/huBoundHi_ doc comment
+    // in MainWindow.h): clamp the volume's raw HU span into [-1400, 1600], but
+    // never so tight that it excludes the window already in effect.
+    const float curLo = st_.level - st_.window / 2.0f;
+    const float curHi = st_.level + st_.window / 2.0f;
+    huBoundLo_ = std::min(std::max(lo, -1400.0f), curLo);
+    huBoundHi_ = std::max(std::min(hi, 1600.0f), curHi);
+    if (levelSpin_) {
+        QSignalBlocker b(levelSpin_);
+        levelSpin_->setRange(huBoundLo_, huBoundHi_);
+    }
+    if (windowSpin_) {
+        QSignalBlocker b(windowSpin_);
+        windowSpin_->setRange(1, huBoundHi_ - huBoundLo_);
+    }
+
     // Curated patient/study summary from the meta JSON.
     QStringList lines;
     const QJsonDocument doc = QJsonDocument::fromJson(metaJson_.toUtf8());
@@ -1840,6 +1933,65 @@ void MainWindow::refreshVolumeInfo() {
     patientLabel_->setText(lines.isEmpty() ? "No metadata." : lines.join("\n"));
 }
 
+// A visibility checkbox + read-only color swatch + name — the part of a
+// segment row that both the Segment tab's full-featured list and the 3D tab's
+// simpler visibility-only picker need. The Segment tab adds an active-select
+// button, an editable name, a live voxel count, and delete on top of this;
+// the 3D tab uses this alone (deleting/renaming/activating stays Segment-tab-
+// only, so a glance at the 3D tab can't accidentally lose work).
+QWidget* MainWindow::buildSegmentVisibilityRow(int id) {
+    LumenVolume* v = st_.volume;
+    auto* row = new QWidget;
+    auto* h = new QHBoxLayout(row);
+    h->setContentsMargins(2, 2, 2, 2);
+    h->setSpacing(6);
+
+    auto* vis = new QCheckBox;
+    vis->setChecked(lumen_seg_get_visible(v, id) != 0);
+    connect(vis, &QCheckBox::toggled, this, [this, id](bool on) {
+        lumen_seg_set_visible(st_.volume, id, on ? 1 : 0);
+        refreshCanvas();
+        scheduleMeshRefresh();
+    });
+    h->addWidget(vis);
+
+    int r = 0, g = 0, b = 0;
+    lumen_seg_get_color(v, id, &r, &g, &b);
+    auto* swatch = new QLabel;
+    swatch->setFixedSize(16, 16);
+    swatch->setStyleSheet(
+        QString("background:rgb(%1,%2,%3);border:1px solid #555;border-radius:3px;")
+            .arg(r).arg(g).arg(b));
+    h->addWidget(swatch);
+
+    h->addWidget(new QLabel(segNames_.value(id, QString("Segment %1").arg(id))), 1);
+    return row;
+}
+
+void MainWindow::updateActiveMaskLabel() {
+    if (!activeMaskLabel_) return;
+    LumenVolume* v = st_.volume;
+    const int active = v ? lumen_seg_active(v) : 0;
+    activeMaskLabel_->setText(
+        active == 0 ? "No active mask"
+                    : QString("Active mask: %1")
+                          .arg(segNames_.value(active, QString("Segment %1").arg(active))));
+}
+
+void MainWindow::rebuildThreeDSegmentList() {
+    if (!threeDSegListLayout_) return;
+    QLayoutItem* item = nullptr;
+    while ((item = threeDSegListLayout_->takeAt(0)) != nullptr) {
+        if (item->widget()) item->widget()->deleteLater();
+        delete item;
+    }
+    LumenVolume* v = st_.volume;
+    if (!v) return;
+    const int count = lumen_seg_segment_count(v);
+    for (int i = 0; i < count; ++i)
+        threeDSegListLayout_->addWidget(buildSegmentVisibilityRow(lumen_seg_segment_id_at(v, i)));
+}
+
 void MainWindow::rebuildSegmentList() {
     // Tear down existing rows.
     QLayoutItem* item = nullptr;
@@ -1850,7 +2002,12 @@ void MainWindow::rebuildSegmentList() {
     segCountLabels_.clear();
 
     LumenVolume* v = st_.volume;
-    if (!v) return;
+    if (!v) {
+        rebuildThreeDSegmentList();
+        rebuildExportSegmentList();
+        updateActiveMaskLabel();
+        return;
+    }
     const int count = lumen_seg_segment_count(v);
     const int active = lumen_seg_active(v);
     for (int i = 0; i < count; ++i) {
@@ -1858,7 +2015,7 @@ void MainWindow::rebuildSegmentList() {
         auto* row = new QWidget;
         row->setObjectName("segmentRow");
         row->setStyleSheet(id == active
-                               ? "QWidget#segmentRow{background:#283b66;border:1px solid #4f7cf0;"
+                               ? "QWidget#segmentRow{background:#0f3a3d;border:1px solid #16b8c9;"
                                  "border-radius:6px;}"
                                : "QWidget#segmentRow{background:transparent;border:1px solid transparent;"
                                  "border-radius:6px;}");
@@ -1872,6 +2029,7 @@ void MainWindow::rebuildSegmentList() {
         connect(vis, &QCheckBox::toggled, this, [this, id](bool on) {
             lumen_seg_set_visible(st_.volume, id, on ? 1 : 0);
             refreshCanvas();
+            scheduleMeshRefresh();
         });
         h->addWidget(vis);
 
@@ -1888,7 +2046,7 @@ void MainWindow::rebuildSegmentList() {
         activeBtn->setToolTip("Select active segment");
         activeBtn->setStyleSheet(
             "QToolButton{border:1px solid transparent;border-radius:5px;padding:2px;}"
-            "QToolButton:checked{background:#4f7cf0;border-color:#79a0ff;}"
+            "QToolButton:checked{background:#16b8c9;border-color:#4fe0ec;}"
             "QToolButton:!checked{opacity:0.55;}");
         connect(activeBtn, &QToolButton::clicked, this, [this, id] {
             if (st_.volume) lumen_seg_set_active(st_.volume, id);
@@ -1950,6 +2108,9 @@ void MainWindow::rebuildSegmentList() {
 
         segListLayout_->addWidget(row);
     }
+    rebuildThreeDSegmentList();
+    rebuildExportSegmentList();
+    updateActiveMaskLabel();
 }
 
 void MainWindow::updateSegmentCounts() {

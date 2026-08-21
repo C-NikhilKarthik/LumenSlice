@@ -1,6 +1,7 @@
 #include "SliceView.h"
 
 #include <QHBoxLayout>
+#include <QKeyEvent>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
@@ -500,17 +501,50 @@ void SliceView::wheelEvent(QWheelEvent* e) {
         return;
     }
     wheelAccum_ += delta;
+    // Collapse every threshold crossed within this one event into a single net
+    // step count, then emit once at the final index. A fast trackpad swipe can
+    // deliver a large pixelDelta in one wheelEvent call; stepping+repainting
+    // once per crossed threshold inside that same call reads as stutter for no
+    // benefit over reaching the same final slice in a single repaint.
+    int steps = 0;
     while (std::abs(wheelAccum_) >= 10.0) {
         const int step = wheelAccum_ > 0 ? 1 : -1;
         wheelAccum_ -= step * 10.0;
-        const int current = std::clamp(st_->sliceIndex[axis_], 0, count - 1);
-        const int next = std::clamp(current + step, 0, count - 1);
-        if (next != st_->sliceIndex[axis_]) emit sliceScrolled(axis_, next);
+        steps += step;
     }
+    if (steps != 0) stepSlice(steps);
     e->accept();
 }
 
+void SliceView::keyPressEvent(QKeyEvent* e) {
+    if (e->key() == Qt::Key_Up || e->key() == Qt::Key_Right) {
+        stepSlice(1);
+        e->accept();
+        return;
+    }
+    if (e->key() == Qt::Key_Down || e->key() == Qt::Key_Left) {
+        stepSlice(-1);
+        e->accept();
+        return;
+    }
+    QWidget::keyPressEvent(e);
+}
+
+void SliceView::stepSlice(int delta) {
+    LumenVolume* v = st_->volume;
+    if (!v || delta == 0) return;
+    const int count = lumen_slice_count(v, axis_);
+    if (count <= 0) return;
+    const int current = std::clamp(st_->sliceIndex[axis_], 0, count - 1);
+    const int next = std::clamp(current + delta, 0, count - 1);
+    if (next != current) emit sliceScrolled(axis_, next);
+}
+
 void SliceView::mousePressEvent(QMouseEvent* e) {
+    // The event is handled entirely here (never chained to QWidget::mousePressEvent),
+    // which would otherwise grant click-to-focus for free — claim it explicitly so
+    // arrow-key slice navigation (keyPressEvent) targets whichever pane was clicked.
+    setFocus(Qt::MouseFocusReason);
     LumenVolume* v = st_->volume;
     if (!v) return;
     const int index = st_->sliceIndex[axis_];
@@ -529,7 +563,11 @@ void SliceView::mousePressEvent(QMouseEvent* e) {
         return;
     }
 
-    if (e->button() == Qt::RightButton || e->button() == Qt::MiddleButton) {
+    // Pan also works without a middle button: Alt+left-drag, mirroring macOS's
+    // Option+left-drag for trackpad users (app/Viewer/ScrollCatcher.swift).
+    const bool altPan =
+        e->button() == Qt::LeftButton && (e->modifiers() & Qt::AltModifier);
+    if (e->button() == Qt::RightButton || e->button() == Qt::MiddleButton || altPan) {
         if (!inside) return;
         navigation_ = e->button() == Qt::RightButton ? Navigation::Zoom
                                                        : Navigation::Pan;
