@@ -6,6 +6,8 @@ dist/
 cmake-build-*/
 *.log
 
+dist-windows/
+
 # Python virtualenv (used by CI to generate the test phantom)
 .venv/
 

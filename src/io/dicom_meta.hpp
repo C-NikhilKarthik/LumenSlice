@@ -73,4 +73,14 @@ struct DicomTag {
 [[nodiscard]] std::string serialize_meta_json(const StudyMeta& meta,
                                               const std::vector<DicomTag>& tags);
 
+// Append `s` to `out` as a JSON string literal, escaping per RFC 8259. Shared
+// by serialize_meta_json and other bridge JSON builders (e.g. the DICOM series
+// listing) that need the same escaping without duplicating it.
+void append_json_string(std::string& out, const std::string& s);
+
+// Append `"key":"value"` (value escaped) to `out`. `trailing_comma` controls
+// whether a separating comma follows.
+void append_pair(std::string& out, const char* key, const std::string& value,
+                 bool trailing_comma);
+
 } // namespace lumen

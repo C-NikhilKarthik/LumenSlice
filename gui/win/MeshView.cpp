@@ -180,7 +180,7 @@ void MeshView::buildToolbar() {
     scissorBtn_->setCheckable(true);
     scissorBtn_->setStyleSheet(
         scissorBtn_->styleSheet() +
-        "QToolButton:checked{background:#4f7cf0;color:white;border-radius:5px;}");
+        "QToolButton:checked{background:#16b8c9;color:white;border-radius:5px;}");
     connect(scissorBtn_, &QToolButton::toggled, this, [this](bool on) {
         setScissorMode(on);
         emit scissorModeChanged(on);

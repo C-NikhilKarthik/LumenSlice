@@ -42,6 +42,8 @@ bool is_binary_vr(DcmEVR vr) {
     }
 }
 
+} // namespace
+
 // Append `s` to `out` as a JSON string literal, escaping per RFC 8259 so any
 // DICOM byte value survives the round-trip to the Swift parser.
 void append_json_string(std::string& out, const std::string& s) {
@@ -76,8 +78,6 @@ void append_pair(std::string& out, const char* key, const std::string& value,
     append_json_string(out, value);
     if (trailing_comma) out.push_back(',');
 }
-
-} // namespace
 
 StudyMeta extract_study_meta(DcmItem& dataset) {
     StudyMeta m;

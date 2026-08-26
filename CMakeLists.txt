@@ -74,19 +74,28 @@ if(WIN32)
     set(CMAKE_AUTOMOC ON)
     find_package(Qt6 REQUIRED COMPONENTS Widgets OpenGLWidgets Concurrent)
 
-    add_executable(LumenSlice WIN32
+    # Target/exe name is the user-facing "SurgNetra" brand; the underlying
+    # project/library names (LumenCore, the CMake project() above) are internal
+    # and left alone to avoid unrelated churn.
+    add_executable(SurgNetra WIN32
         gui/win/main.cpp
         gui/win/MainWindow.cpp
         gui/win/SliceView.cpp
         gui/win/MeshView.cpp
-        gui/win/RangeSlider.h)  # header-only Q_OBJECT: list it so AUTOMOC mocs it
-    target_link_libraries(LumenSlice PRIVATE
+        gui/win/RangeSlider.h  # header-only Q_OBJECT: list it so AUTOMOC mocs it
+        gui/win/app.rc)        # embeds resources/app.ico as the exe's icon
+    target_link_libraries(SurgNetra PRIVATE
         LumenCore
         Qt6::Widgets Qt6::OpenGLWidgets Qt6::Concurrent
         comctl32 shell32 ole32)
-    target_compile_definitions(LumenSlice PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_compile_definitions(SurgNetra PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 
-    # Keep the DICOM dictionary beside the executable in packaged builds.
-    add_custom_command(TARGET LumenSlice POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:LumenSlice>/resources")
+    # Keep the DICOM dictionary and app icon beside the executable in packaged
+    # builds (main.cpp loads resources/app.ico from here for the runtime window
+    # icon; app.rc embeds the same file into the .exe itself for Explorer/taskbar).
+    add_custom_command(TARGET SurgNetra POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:SurgNetra>/resources"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/gui/win/resources/app.ico"
+            "$<TARGET_FILE_DIR:SurgNetra>/resources/app.ico")
 endif()
