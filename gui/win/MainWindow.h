@@ -186,6 +186,12 @@ private:
     QDoubleSpinBox* windowSpin_ = nullptr;
     RangeSlider* wlRange_ = nullptr;
     QCheckBox* crosshairCheck_ = nullptr;
+    // Clinically useful HU band for the Level/Window spin boxes: a fixed range
+    // that covers every preset, clamped to the loaded volume's HU span and
+    // widened to include the current window. Mirrors macOS VisualizeControls'
+    // wlBounds. Refined per volume in refreshVolumeInfo().
+    float huBoundLo_ = -1400.0f;
+    float huBoundHi_ = 1600.0f;
 
     // Segment controls.
     QVBoxLayout* segListLayout_ = nullptr;

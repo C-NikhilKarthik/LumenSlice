@@ -281,12 +281,12 @@ QWidget* MainWindow::buildVisualizePanel() {
         "Drag the two handles to set the visible HU window (low … high), drag on "
         "a slice, or type exact Level / Window values."));
     levelSpin_ = new QDoubleSpinBox;
-    levelSpin_->setRange(-4000, 4000);
+    levelSpin_->setRange(huBoundLo_, huBoundHi_);
     levelSpin_->setDecimals(0);
     levelSpin_->setToolTip(
         "Level: image brightness - the HU value shown as mid-grey.");
     windowSpin_ = new QDoubleSpinBox;
-    windowSpin_->setRange(1, 8000);
+    windowSpin_->setRange(1, huBoundHi_ - huBoundLo_);
     windowSpin_->setDecimals(0);
     windowSpin_->setToolTip(
         "Window: image contrast - the width of the HU range mapped black to white.");
@@ -307,8 +307,8 @@ QWidget* MainWindow::buildVisualizePanel() {
     body(wlBox)->addWidget(wlRange_);
 
     auto setWL = [this](float lvl, float win) {
-        st_.level = std::clamp(lvl, -4000.0f, 4000.0f);
-        st_.window = std::clamp(win, 1.0f, 8000.0f);
+        st_.level = std::clamp(lvl, huBoundLo_, huBoundHi_);
+        st_.window = std::clamp(win, 1.0f, huBoundHi_ - huBoundLo_);
         updateWlControls();
         refreshCanvas();
     };
@@ -1438,8 +1438,8 @@ void MainWindow::onSliceScrolled(int axis, int index) {
 }
 
 void MainWindow::onWindowLevelDragged(float dLevel, float dWindow) {
-    st_.level = std::clamp(st_.level + dLevel, -4000.0f, 4000.0f);
-    st_.window = std::clamp(st_.window + dWindow, 1.0f, 8000.0f);
+    st_.level = std::clamp(st_.level + dLevel, huBoundLo_, huBoundHi_);
+    st_.window = std::clamp(st_.window + dWindow, 1.0f, huBoundHi_ - huBoundLo_);
     updateWlControls();
     if (volumeRenderCheck_ && volumeRenderCheck_->isChecked())
         refreshVolumeTexture();
@@ -2054,6 +2054,16 @@ void MainWindow::refreshVolumeInfo() {
     lumen_hu_range(v, &lo, &hi);
     huLabel_->setText(QString("%1 … %2").arg(lo, 0, 'f', 0).arg(hi, 0, 'f', 0));
     if (threshSlider_) threshSlider_->setBounds(lo, hi);
+    // Clinically useful Level/Window band for the spin boxes: cap the raw HU span
+    // to a range that still covers every preset, clamped to this volume and
+    // widened to the current window so a value never sits off-range. Mirrors the
+    // macOS VisualizeControls.wlBounds. The slider keeps the full volume range.
+    const float curLo = st_.level - st_.window / 2.0f;
+    const float curHi = st_.level + st_.window / 2.0f;
+    huBoundLo_ = std::min(std::max(lo, -1400.0f), curLo);
+    huBoundHi_ = std::max(std::min(hi, 1600.0f), curHi);
+    if (levelSpin_) levelSpin_->setRange(huBoundLo_, huBoundHi_);
+    if (windowSpin_) windowSpin_->setRange(1, huBoundHi_ - huBoundLo_);
     if (wlRange_) {
         wlRange_->setBounds(lo, hi);
         updateWlControls();  // reflect current level/window on the new bounds
