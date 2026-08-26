@@ -397,6 +397,15 @@ final class SegmentationModel: ObservableObject {
         maskActive = false
     }
 
+    // Retune an active mask: drop it and jump back to the Threshold tool with the
+    // same range still loaded, so the user tweaks the range and re-applies in one
+    // step instead of starting over.
+    func editMaskRange() {
+        guard !isBusy else { return }
+        deactivateMask()
+        tool = .threshold   // didSet arms the preview so the range is visible again
+    }
+
     private func runAsyncMaskOperation(_ handle: OpaquePointer, committed: Bool = true,
                                         captureUndo: Bool = true,
                                         _ operation: @escaping (OpaquePointer) -> Int64) {

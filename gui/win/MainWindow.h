@@ -21,6 +21,7 @@
 #include "RangeSlider.h"
 #include "ViewState.h"
 
+class QButtonGroup;
 class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
@@ -80,6 +81,7 @@ private slots:
     void commitThreshold();
     void useThresholdForMasking();
     void deactivateMask();
+    void adjustMask();
     void applyOtsu();
     void growFromSeeds();
     void applyGrowPreview();
@@ -148,6 +150,7 @@ private:
     void setStatus(const QString& text);
     void showBusy(const QString& text);  // empty text hides the busy overlay
     void positionBusy();
+    void positionMaskBadge();  // keep the canvas mask badge centered at the top
     void showMetadataInspector();
     QColor nextSegmentColor() const;
 
@@ -190,15 +193,19 @@ private:
     QHash<int, QLabel*> segCountLabels_;
     QHash<int, QString> segNames_;
     QComboBox* toolCombo_ = nullptr;
+    QButtonGroup* toolGroup_ = nullptr;  // 5 tool buttons; index 0 = Threshold
     QStackedWidget* toolDetail_ = nullptr;
     RangeSlider* threshSlider_ = nullptr;
     QLabel* threshLabel_ = nullptr;
     QTimer* threshTimer_ = nullptr;
-    // Intensity-mask controls: the "Use for masking" button is swapped for an
-    // active indicator + a Deactivate button while a mask is in effect.
+    // Intensity-mask controls: the "Use as paint mask" button is swapped for an
+    // active indicator + Adjust/Turn-off buttons while a mask is in effect, and a
+    // canvas badge (maskBadge_) mirrors the state over the slice panes.
     QPushButton* maskBtn_ = nullptr;
     QLabel* maskIndicator_ = nullptr;
+    QPushButton* maskAdjustBtn_ = nullptr;
     QPushButton* maskDeactivateBtn_ = nullptr;
+    QLabel* maskBadge_ = nullptr;
     QSlider* toleranceSlider_ = nullptr;
     QLabel* toleranceLabel_ = nullptr;
     QSlider* brushSlider_ = nullptr;

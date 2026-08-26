@@ -56,6 +56,14 @@ struct AppShell: View {
                 .frame(width: panelCollapsed ? 0 : 1)
             canvas
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .overlay(alignment: .top) {
+                    // Persistent reminder that paint/fill are confined to a HU range,
+                    // so masked painting is never done blind. Only on the Segment tab.
+                    if selectedTab == .segment && segmentation.maskActive {
+                        MaskBadge(range: segmentation.maskRange)
+                            .padding(.top, 10)
+                    }
+                }
                 .overlay {
                     // Busy indicator for blocking segmentation ops. Only the Segment
                     // tab runs mask work, so isBusy stays false elsewhere.

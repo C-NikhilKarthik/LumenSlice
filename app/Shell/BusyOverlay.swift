@@ -29,3 +29,25 @@ struct BusyOverlay: View {
         .allowsHitTesting(true)
     }
 }
+
+// A small non-blocking pill pinned to the top of the canvas while an intensity
+// mask is active, so the user always sees that paint/fill are confined to a HU
+// range. Purely informational, so it never intercepts canvas clicks.
+struct MaskBadge: View {
+    let range: ClosedRange<Float>
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "paintbrush.pointed.fill")
+                .font(.caption2)
+            Text("Paint mask \(Int(range.lowerBound)) to \(Int(range.upperBound)) HU")
+                .font(.caption.weight(.medium))
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(Color.green.opacity(0.85), in: Capsule())
+        .shadow(color: .black.opacity(0.25), radius: 4, y: 2)
+        .allowsHitTesting(false)
+    }
+}

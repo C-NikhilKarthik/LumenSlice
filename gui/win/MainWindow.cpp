@@ -389,6 +389,7 @@ QWidget* MainWindow::buildSegmentPanel() {
     auto* toolRow = new QHBoxLayout;
     toolRow->setSpacing(0);
     auto* toolGroup = new QButtonGroup(this);
+    toolGroup_ = toolGroup;  // kept so adjustMask() can re-check the Threshold button
     const char* toolLabels[5] = {"Thresh", "Fill", "Trace", "Paint", "Erase"};
     for (int i = 0; i < 5; ++i) {
         auto* b = new QToolButton;
@@ -478,25 +479,36 @@ QWidget* MainWindow::buildSegmentPanel() {
             "Commit the current threshold preview into the active segment's mask.");
         connect(applyBtn, &QPushButton::clicked, this, &MainWindow::commitThreshold);
         f->addWidget(applyBtn);
-        maskBtn_ = new QPushButton("Use for masking / Paint");
+        maskBtn_ = new QPushButton("Use as paint mask");
+        maskBtn_->setObjectName("accent");
         maskBtn_->setToolTip(
-            "Use the current threshold as a mask that limits where paint and fill "
-            "can apply.");
+            "Limit paint and fill to the current threshold HU range, so you can "
+            "brush freely without spilling into other tissue.");
         connect(maskBtn_, &QPushButton::clicked, this,
                 &MainWindow::useThresholdForMasking);
         f->addWidget(maskBtn_);
-        // Active-mask indicator + a way to turn it off (hidden until a mask is set).
+        // Active-mask indicator + edit / turn-off controls (hidden until a mask
+        // is set). A canvas badge (built in buildQuad) mirrors this state.
         maskIndicator_ = new QLabel;
         maskIndicator_->setStyleSheet("color:#57c785;");  // green: mask active
         maskIndicator_->setVisible(false);
         f->addWidget(maskIndicator_);
-        maskDeactivateBtn_ = new QPushButton("Deactivate mask");
+        auto* maskBtnRow = new QHBoxLayout;
+        maskAdjustBtn_ = new QPushButton("Adjust range");
+        maskAdjustBtn_->setVisible(false);
+        maskAdjustBtn_->setToolTip(
+            "Drop the mask and return to Threshold with the same range, to retune "
+            "and re-apply it.");
+        connect(maskAdjustBtn_, &QPushButton::clicked, this, &MainWindow::adjustMask);
+        maskBtnRow->addWidget(maskAdjustBtn_);
+        maskDeactivateBtn_ = new QPushButton("Turn off");
         maskDeactivateBtn_->setVisible(false);
         maskDeactivateBtn_->setToolTip(
-            "Turn off the active mask so edits are no longer constrained to it.");
+            "Turn off the mask so edits are no longer constrained to it.");
         connect(maskDeactivateBtn_, &QPushButton::clicked, this,
                 &MainWindow::deactivateMask);
-        f->addWidget(maskDeactivateBtn_);
+        maskBtnRow->addWidget(maskDeactivateBtn_);
+        f->addLayout(maskBtnRow);
         toolDetail_->addWidget(w);
     }
     // 1: region grow
@@ -1100,6 +1112,17 @@ QWidget* MainWindow::buildQuad() {
         "background:rgba(16,18,24,225);color:#e7e9ef;border:1px solid #3a4150;"
         "border-radius:14px;padding:18px 30px;font-size:15px;font-weight:600;");
     loadingOverlay_->hide();
+
+    // Non-blocking pill pinned to the top of the canvas while an intensity mask is
+    // active, so masked painting is never done blind. Informational only, so it
+    // ignores mouse events and lets clicks reach the panes beneath.
+    maskBadge_ = new QLabel(board);
+    maskBadge_->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+    maskBadge_->setAlignment(Qt::AlignCenter);
+    maskBadge_->setStyleSheet(
+        "background:rgba(37,153,110,220);color:#ffffff;border-radius:12px;"
+        "padding:5px 12px;font-size:12px;font-weight:600;");
+    maskBadge_->hide();
     return board;
 }
 
@@ -1123,9 +1146,17 @@ void MainWindow::positionBusy() {
                           (quadBoard_->height() - s.height()) / 2);
 }
 
+void MainWindow::positionMaskBadge() {
+    if (!maskBadge_ || !quadBoard_ || maskBadge_->isHidden()) return;
+    maskBadge_->adjustSize();
+    maskBadge_->move((quadBoard_->width() - maskBadge_->width()) / 2, 10);
+    maskBadge_->raise();
+}
+
 void MainWindow::resizeEvent(QResizeEvent* e) {
     QMainWindow::resizeEvent(e);
     positionBusy();
+    positionMaskBadge();
 }
 
 // The dedicated 3D tab uses the same MeshView as the quad, but expands it to
@@ -1564,8 +1595,23 @@ void MainWindow::deactivateMask() {
     updateMaskIndicator();
 }
 
-// Swap the "Use for masking" button for an active indicator + Deactivate button
-// while an intensity mask is in effect, mirroring the macOS control.
+// Retune an active mask: drop it and jump back to the Threshold tool with the same
+// range still loaded, so the user tweaks and re-applies in one step. Mirrors the
+// macOS "Adjust range" control.
+void MainWindow::adjustMask() {
+    if (st_.busy || heavyWatcher_.isRunning()) return;
+    deactivateMask();
+    st_.tool = Tool::Threshold;
+    st_.thresholdPreviewArmed = true;
+    // Reflect the switch in the tool selector: Threshold is button/page 0.
+    if (toolDetail_) toolDetail_->setCurrentIndex(0);
+    if (toolGroup_ && toolGroup_->button(0)) toolGroup_->button(0)->setChecked(true);
+    refreshCanvas();
+}
+
+// Swap the "Use for masking" button for an active indicator + Adjust/Deactivate
+// buttons while an intensity mask is in effect, and show a canvas badge. Mirrors
+// the macOS control.
 void MainWindow::updateMaskIndicator() {
     if (!maskBtn_ || !maskIndicator_ || !maskDeactivateBtn_) return;
     LumenVolume* v = st_.volume;
@@ -1573,12 +1619,21 @@ void MainWindow::updateMaskIndicator() {
     if (active) {
         float lo = 0, hi = 0;
         lumen_seg_mask_range(v, &lo, &hi);
-        maskIndicator_->setText(QString("Mask active: %1 to %2 HU")
+        maskIndicator_->setText(QString("Painting limited to %1 to %2 HU")
                                     .arg(qRound(lo)).arg(qRound(hi)));
+        if (maskBadge_) {
+            maskBadge_->setText(QString("Paint mask %1 to %2 HU")
+                                    .arg(qRound(lo)).arg(qRound(hi)));
+        }
     }
     maskBtn_->setVisible(!active);
     maskIndicator_->setVisible(active);
     maskDeactivateBtn_->setVisible(active);
+    if (maskAdjustBtn_) maskAdjustBtn_->setVisible(active);
+    if (maskBadge_) {
+        maskBadge_->setVisible(active);
+        positionMaskBadge();
+    }
 }
 
 void MainWindow::applyOtsu() {
