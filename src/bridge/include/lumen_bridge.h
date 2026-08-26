@@ -18,17 +18,45 @@ typedef struct LumenVolume LumenVolume;
 // Axis selectors, matching lumen::Axis.
 enum { LUMEN_AXIS_AXIAL = 0, LUMEN_AXIS_CORONAL = 1, LUMEN_AXIS_SAGITTAL = 2 };
 
-// Load every usable DICOM slice under `path` into one calibrated volume.
-// Returns NULL on failure. `msg`/`msg_cap` (optional) receive a status string.
+// Load every usable DICOM slice under `path` into one calibrated volume. When the
+// folder holds more than one series, the largest is kept. Returns NULL on failure.
+// `msg`/`msg_cap` (optional) receive a status string.
 LumenVolume* lumen_load_folder(const char* path, char* msg, int msg_cap);
-LumenVolume* lumen_load_folder_series(const char* path, const char* series_uid,
-                                      char* msg, int msg_cap);
 
-// Returns a JSON array of image series: [{"uid":"...","slices":N,
-// "width":W,"height":H}]. Use the returned byte count to size `out`.
-int lumen_list_dicom_series(const char* path, char* out, int out_cap);
+// --- Multi-series open --------------------------------------------------------
+// A folder can hold several DICOM series (the CT plus a scout, a dose report, a
+// secondary capture). To let the user choose, scan the folder first (a fast,
+// header-only pass), inspect the series, then load the chosen one.
 
-// Release a handle returned by lumen_load_folder (NULL is ignored).
+// Opaque result of a header-only folder scan.
+typedef struct LumenSeriesScan LumenSeriesScan;
+
+// Scan `path` and group its DICOM files into series. Returns a scan handle (free
+// with lumen_scan_free) or NULL if nothing DICOM-like was found (msg gets why).
+LumenSeriesScan* lumen_scan_folder(const char* path, char* msg, int msg_cap);
+
+// Number of distinct series found (largest-first ordering).
+int lumen_series_count(const LumenSeriesScan* s);
+
+// Details of series `index` (0-based). `desc`, `modality`, and `created` (an
+// acquisition date, "YYYY-MM-DD") are written NUL-terminated into the caller
+// buffers (truncated to capacity). `slice_count`, `width`, and `height` (all
+// optional) receive the slice count and per-slice pixel size. Any output pointer
+// may be NULL. Out-of-range is a no-op.
+void lumen_series_info(const LumenSeriesScan* s, int index, char* desc, int desc_cap,
+                       char* modality, int modality_cap, int* slice_count,
+                       int* width, int* height, char* created, int created_cap);
+
+// Fully load series `index` from the scan into a calibrated volume. Returns NULL
+// on failure. `msg`/`msg_cap` (optional) receive a status string. The returned
+// handle is owned by the caller (release with lumen_free).
+LumenVolume* lumen_load_series(const LumenSeriesScan* s, int index, char* msg,
+                               int msg_cap);
+
+// Release a scan handle returned by lumen_scan_folder (NULL is ignored).
+void lumen_scan_free(LumenSeriesScan* s);
+
+// Release a handle returned by lumen_load_folder / lumen_load_series (NULL ignored).
 void lumen_free(LumenVolume* v);
 
 // Volume geometry.
@@ -115,6 +143,16 @@ long lumen_seg_paint(LumenVolume* v, int axis, int index, int cx, int cy,
 // Use the source-volume HU range as an editable-area mask, matching Slicer's
 // Threshold effect. It preserves the labelmap and clips subsequent Paint adds.
 void lumen_seg_apply_mask(LumenVolume* v, float low_hu, float high_hu);
+
+// Drop the editable-area mask so Paint additions are unconstrained again.
+void lumen_seg_clear_mask(LumenVolume* v);
+
+// Whether an editable-area mask is currently active (for the UI indicator).
+int lumen_seg_mask_enabled(const LumenVolume* v);
+
+// The active mask's HU range (only meaningful when lumen_seg_mask_enabled != 0).
+// Either output pointer may be NULL.
+void lumen_seg_mask_range(const LumenVolume* v, float* lo, float* hi);
 
 // Level trace on one slice: from pixel (cx,cy) of `axis`/`index`, add the iso-level
 // (HU >= clicked pixel) 4-connected region to the active segment. Slice-only.

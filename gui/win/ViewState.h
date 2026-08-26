@@ -34,6 +34,11 @@ struct ViewState {
     // panes and is committed to the labelmap only by the explicit Apply action.
     float thresholdLo = 150.0f;
     float thresholdHi = 3000.0f;
+    // The threshold preview stays hidden until the user actually engages threshold
+    // (selects the tool, drags the range, or runs Otsu). Otherwise a freshly loaded
+    // scan renders a full-HU-range overlay and looks like a segment is already
+    // marked. Reset to false on every load.
+    bool thresholdPreviewArmed = false;
 
     // Per-axis current slice index (LUMEN_AXIS_AXIAL / CORONAL / SAGITTAL).
     int sliceIndex[3] = {0, 0, 0};

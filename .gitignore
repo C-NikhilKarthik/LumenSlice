@@ -54,3 +54,6 @@ yashdocs/
 # Python tooling venv (fixture generation)
 .venv/
 .ua/
+
+# Next.js docs handbook (local only, not part of the app)
+docs/site/

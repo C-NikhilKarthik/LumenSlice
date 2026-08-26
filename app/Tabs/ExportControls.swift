@@ -87,7 +87,7 @@ struct ExportControls: View {
 
     private func exportSTL() {
         let panel = NSSavePanel()
-        panel.nameFieldStringValue = "LumenSlice.stl"
+        panel.nameFieldStringValue = "SurgNetra.stl"
         if let stl = UTType(filenameExtension: "stl") {
             panel.allowedContentTypes = [stl]
         }

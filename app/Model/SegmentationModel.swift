@@ -66,6 +66,9 @@ final class SegmentationModel: ObservableObject {
     @Published var tool: SegTool = .threshold {
         didSet {
             thresholdNeedsUndoCapture = true
+            // Selecting the threshold tool is an explicit engagement, so the
+            // preview may show from here on.
+            if tool == .threshold { thresholdPreviewArmed = true }
             if oldValue != tool { refreshAllOverlays() }
         }
     }
@@ -77,6 +80,10 @@ final class SegmentationModel: ObservableObject {
     @Published private(set) var growPreviewActive = false
     @Published var showOverlay = true { didSet { refreshAllOverlays() } }
     @Published var isBusy = false
+    // An editable-area (intensity) mask is active: paint additions are clipped to
+    // maskRange. The UI shows an indicator and a Deactivate button while true.
+    @Published private(set) var maskActive = false
+    @Published private(set) var maskRange: ClosedRange<Float> = 0...0
 
     @Published private(set) var segments: [SegmentRow] = []
     @Published var activeID: Int = 0
@@ -96,6 +103,11 @@ final class SegmentationModel: ObservableObject {
     // fresh segment never reuses a colour still on screen just because a middle
     // segment was removed and the list count shrank.
     private var nextColorIndex = 0
+    // The threshold effect shows a live preview overlay. It must stay hidden until
+    // the user actually engages threshold (selects the tool, drags the range, or
+    // runs Otsu); otherwise a freshly loaded scan looks like a segment is already
+    // marked. Reset to false on every load; armed at the real engagement points.
+    private var thresholdPreviewArmed = false
     // Coalesces a run of live-threshold edits into a single undo entry.
     private var thresholdNeedsUndoCapture = true
     // Set when we apply a threshold programmatically (Otsu) so the debounced
@@ -136,6 +148,8 @@ final class SegmentationModel: ObservableObject {
                 guard let self else { return }
                 if self.skipNextThresholdSink { self.skipNextThresholdSink = false; return }
                 guard self.tool == .threshold else { return }
+                // A real user drag of the range engages the preview.
+                self.thresholdPreviewArmed = true
                 self.applyThreshold()
             }
             .store(in: &cancellables)
@@ -161,6 +175,11 @@ final class SegmentationModel: ObservableObject {
                 self.nextSegmentNumber = 1
                 self.nextColorIndex = 0
                 self.growPreviewActive = false
+                // A fresh scan starts with no threshold preview, so an untouched
+                // load never looks pre-segmented.
+                self.thresholdPreviewArmed = false
+                // The bridge editor resets its intensity mask on load; mirror that.
+                self.maskActive = false
                 self.overlayStore.images = [nil, nil, nil]
                 if has {
                     self.reloadSegments()
@@ -327,6 +346,8 @@ final class SegmentationModel: ObservableObject {
         skipNextThresholdSink = true
         thresholdLo = t
         thresholdHi = volume.huHi
+        // Running Otsu is an explicit engagement, so the preview may show.
+        thresholdPreviewArmed = true
         refreshAllOverlays()
     }
 
@@ -356,13 +377,33 @@ final class SegmentationModel: ObservableObject {
 
     func applyMask() {
         guard let h = volume.handle, activeID > 0, !isBusy else { return }
-        let lo = thresholdLo
-        let hi = thresholdHi
+        let lo = min(thresholdLo, thresholdHi)
+        let hi = max(thresholdLo, thresholdHi)
         runAsyncMaskOperation(h, committed: false, captureUndo: false) { _ in
             lumen_seg_apply_mask(h, lo, hi)
             return 0
         }
+        maskActive = true
+        maskRange = lo...hi
         tool = .paint
+    }
+
+    // Turn off the editable-area mask so painting is unconstrained again. Guarded
+    // on isBusy like every other mask mutation, so it never races a detached op
+    // that holds the pinned handle.
+    func deactivateMask() {
+        guard let h = volume.handle, !isBusy else { return }
+        lumen_seg_clear_mask(h)
+        maskActive = false
+    }
+
+    // Retune an active mask: drop it and jump back to the Threshold tool with the
+    // same range still loaded, so the user tweaks the range and re-applies in one
+    // step instead of starting over.
+    func editMaskRange() {
+        guard !isBusy else { return }
+        deactivateMask()
+        tool = .threshold   // didSet arms the preview so the range is visible again
     }
 
     private func runAsyncMaskOperation(_ handle: OpaquePointer, committed: Bool = true,
@@ -559,7 +600,9 @@ final class SegmentationModel: ObservableObject {
         }
         var w: Int32 = 0, ht: Int32 = 0
         let ptr: UnsafePointer<UInt8>?
-        if tool == .threshold {
+        // Show the live threshold preview only once the user has engaged threshold;
+        // an untouched load falls through to the (empty) mask overlay instead.
+        if tool == .threshold && thresholdPreviewArmed {
             ptr = lumen_extract_threshold_slice(h, Int32(axis),
                                                 Int32(volume.sliceIndex[axis]),
                                                 thresholdLo, thresholdHi, &w, &ht)

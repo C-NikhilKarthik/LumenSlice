@@ -87,6 +87,12 @@ public:
     // Threshold effect. The existing labelmap is preserved and subsequent paint
     // additions are clipped to this range.
     void apply_intensity_mask(float low_hu, float high_hu);
+    // Drop the intensity mask so paint additions are unconstrained again.
+    void clear_intensity_mask() { intensity_mask_enabled_ = false; }
+    // The UI reflects an active mask (indicator + a way to turn it off).
+    [[nodiscard]] bool intensity_mask_enabled() const { return intensity_mask_enabled_; }
+    [[nodiscard]] float intensity_mask_lo() const { return intensity_mask_lo_; }
+    [[nodiscard]] float intensity_mask_hi() const { return intensity_mask_hi_; }
     // Level tracing: select the iso-level (>= clicked HU) region on one slice.
     long level_trace(Axis axis, int slice_index, int cx, int cy);
     void clear_active();

@@ -1,7 +1,11 @@
 #include "SliceView.h"
 
+#include <QAbstractSpinBox>
+#include <QApplication>
+#include <QEnterEvent>
 #include <QHBoxLayout>
 #include <QKeyEvent>
+#include <QLineEdit>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
@@ -11,7 +15,6 @@
 #include <QToolButton>
 #include <QWheelEvent>
 #include <algorithm>
-#include <cmath>
 #include <cmath>
 
 #include "MarkupModel.h"
@@ -222,14 +225,18 @@ void SliceView::paintEvent(QPaintEvent*) {
     // Colored mask overlay (premultiplied RGBA, transparent where unlabelled).
     if (st_->showOverlay && !st_->busy) {
         const unsigned long long revision = lumen_seg_revision(v);
+        // Show the live threshold preview only once the user has engaged threshold;
+        // an untouched load falls through to the (empty) mask overlay instead.
+        const bool showThresholdPreview =
+            st_->tool == Tool::Threshold && st_->thresholdPreviewArmed;
         if (!overlayCacheValid_ || cachedVolume_ != v ||
             cachedOverlayIndex_ != index || cachedOverlayRevision_ != revision ||
-            (st_->tool == Tool::Threshold &&
+            (showThresholdPreview &&
              (cachedOverlayThresholdLo_ != st_->thresholdLo ||
               cachedOverlayThresholdHi_ != st_->thresholdHi))) {
             int mw = 0, mh = 0;
             const unsigned char* mask = nullptr;
-            if (st_->tool == Tool::Threshold) {
+            if (showThresholdPreview) {
                 mask = lumen_extract_threshold_slice(v, axis_, index,
                                                      st_->thresholdLo,
                                                      st_->thresholdHi,
@@ -501,50 +508,48 @@ void SliceView::wheelEvent(QWheelEvent* e) {
         return;
     }
     wheelAccum_ += delta;
-    // Collapse every threshold crossed within this one event into a single net
-    // step count, then emit once at the final index. A fast trackpad swipe can
-    // deliver a large pixelDelta in one wheelEvent call; stepping+repainting
-    // once per crossed threshold inside that same call reads as stutter for no
-    // benefit over reaching the same final slice in a single repaint.
-    int steps = 0;
     while (std::abs(wheelAccum_) >= 10.0) {
         const int step = wheelAccum_ > 0 ? 1 : -1;
         wheelAccum_ -= step * 10.0;
-        steps += step;
+        stepSlice(step);
     }
-    if (steps != 0) stepSlice(steps);
     e->accept();
 }
 
-void SliceView::keyPressEvent(QKeyEvent* e) {
-    if (e->key() == Qt::Key_Up || e->key() == Qt::Key_Right) {
-        stepSlice(1);
-        e->accept();
-        return;
-    }
-    if (e->key() == Qt::Key_Down || e->key() == Qt::Key_Left) {
-        stepSlice(-1);
-        e->accept();
-        return;
-    }
-    QWidget::keyPressEvent(e);
-}
-
+// Step this pane's slice, clamped to [0, count-1]. Shared by the wheel and the
+// Up/Down arrow keys so all three stay in sync with the slider and step buttons.
 void SliceView::stepSlice(int delta) {
     LumenVolume* v = st_->volume;
-    if (!v || delta == 0) return;
+    if (!v) return;
     const int count = lumen_slice_count(v, axis_);
     if (count <= 0) return;
     const int current = std::clamp(st_->sliceIndex[axis_], 0, count - 1);
     const int next = std::clamp(current + delta, 0, count - 1);
-    if (next != current) emit sliceScrolled(axis_, next);
+    if (next != st_->sliceIndex[axis_]) emit sliceScrolled(axis_, next);
+}
+
+// Up = previous slice (-1), Down = next (+1) - matching the wheel and the on-screen
+// step buttons. The pane grabs focus on hover (see enterEvent) so the arrows drive
+// whichever pane the cursor is over.
+void SliceView::keyPressEvent(QKeyEvent* e) {
+    switch (e->key()) {
+        case Qt::Key_Up:   stepSlice(-1); e->accept(); return;
+        case Qt::Key_Down: stepSlice(1);  e->accept(); return;
+        default: QWidget::keyPressEvent(e);
+    }
+}
+
+// Give the hovered pane keyboard focus so the arrow keys act on it - but never
+// steal focus from a spin box or text field the user is editing.
+void SliceView::enterEvent(QEnterEvent* e) {
+    QWidget* focused = QApplication::focusWidget();
+    const bool editing = qobject_cast<QAbstractSpinBox*>(focused) != nullptr ||
+                         qobject_cast<QLineEdit*>(focused) != nullptr;
+    if (!editing) setFocus(Qt::MouseFocusReason);
+    QWidget::enterEvent(e);
 }
 
 void SliceView::mousePressEvent(QMouseEvent* e) {
-    // The event is handled entirely here (never chained to QWidget::mousePressEvent),
-    // which would otherwise grant click-to-focus for free — claim it explicitly so
-    // arrow-key slice navigation (keyPressEvent) targets whichever pane was clicked.
-    setFocus(Qt::MouseFocusReason);
     LumenVolume* v = st_->volume;
     if (!v) return;
     const int index = st_->sliceIndex[axis_];
@@ -563,11 +568,7 @@ void SliceView::mousePressEvent(QMouseEvent* e) {
         return;
     }
 
-    // Pan also works without a middle button: Alt+left-drag, mirroring macOS's
-    // Option+left-drag for trackpad users (app/Viewer/ScrollCatcher.swift).
-    const bool altPan =
-        e->button() == Qt::LeftButton && (e->modifiers() & Qt::AltModifier);
-    if (e->button() == Qt::RightButton || e->button() == Qt::MiddleButton || altPan) {
+    if (e->button() == Qt::RightButton || e->button() == Qt::MiddleButton) {
         if (!inside) return;
         navigation_ = e->button() == Qt::RightButton ? Navigation::Zoom
                                                        : Navigation::Pan;

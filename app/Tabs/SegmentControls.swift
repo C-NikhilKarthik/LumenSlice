@@ -122,18 +122,58 @@ struct SegmentControls: View {
     }
 
     private var maskSection: some View {
-        Section("Mask") {
-            Button {
-                seg.applyMask()
-            } label: {
-                Label("Use for masking", systemImage: "paintbrush.pointed.fill")
-                    .frame(maxWidth: .infinity)
+        Section {
+            if seg.maskActive {
+                // Active-mask indicator + edit / turn-off controls.
+                HStack(spacing: 6) {
+                    Image(systemName: "circle.fill")
+                        .font(.system(size: 8))
+                        .foregroundStyle(.green)
+                    Text("Painting limited to \(Int(seg.maskRange.lowerBound)) to "
+                         + "\(Int(seg.maskRange.upperBound)) HU")
+                        .font(.caption)
+                    Spacer()
+                }
+                HStack(spacing: 8) {
+                    // Adjust: drop the mask and return to Threshold with the same
+                    // range loaded, so the user can retune and re-apply in one step.
+                    Button {
+                        seg.editMaskRange()
+                    } label: {
+                        Label("Adjust range", systemImage: "slider.horizontal.3")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(seg.isBusy)
+                    Button(role: .destructive) {
+                        seg.deactivateMask()
+                    } label: {
+                        Label("Turn off", systemImage: "xmark.circle")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(seg.isBusy)
+                }
+            } else {
+                Button {
+                    seg.applyMask()
+                } label: {
+                    Label("Use as paint mask", systemImage: "paintbrush.pointed.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(seg.activeID == 0 || seg.isBusy)
+                Text("Limits paint and fill to the current threshold HU range, so you "
+                     + "can brush freely without spilling into other tissue.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
-            .buttonStyle(.borderedProminent)
-            .disabled(seg.activeID == 0 || seg.isBusy)
-            Text("The threshold HU range becomes an invisible Paint constraint. Paint additions outside it are ignored.")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+        } header: {
+            InfoHeader("Mask",
+                       help: "An editable-area mask confines paint and fill to a HU "
+                           + "range. A badge on the canvas shows it is active.")
         }
     }
 

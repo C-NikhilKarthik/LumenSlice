@@ -57,12 +57,18 @@ struct SlicePane: View {
 
             imageArea
 
+            // The slice scrubber, flanked by step buttons. Up = previous slice
+            // (index - 1), Down = next (index + 1). All three drive the same
+            // model.setSlice setter the scroll wheel uses, so slider, crosshair,
+            // and image stay in sync; setSlice clamps to [0, count - 1] and the
+            // buttons disable at the ends.
             HStack(spacing: 6) {
                 Button { model.setSlice(axis, model.sliceIndex[axis] - 1) } label: {
                     Image(systemName: "chevron.up")
                 }
-                .help("Previous frame")
-                .buttonStyle(.borderless)
+                .help("Previous slice")
+                .disabled(count <= 1 || model.sliceIndex[axis] <= 0)
+
                 Slider(
                     value: Binding(
                         get: { Double(model.sliceIndex[axis]) },
@@ -71,12 +77,15 @@ struct SlicePane: View {
                 )
                 .controlSize(.small)
                 .disabled(count <= 1)
+
                 Button { model.setSlice(axis, model.sliceIndex[axis] + 1) } label: {
                     Image(systemName: "chevron.down")
                 }
-                .help("Next frame")
-                .buttonStyle(.borderless)
+                .help("Next slice")
+                .disabled(count <= 1 || model.sliceIndex[axis] >= count - 1)
             }
+            .font(.caption)
+            .buttonStyle(.borderless)
         }
         .padding(12)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
@@ -184,16 +193,6 @@ struct SlicePane: View {
                     .background(.black.opacity(0.5), in: Capsule())
                     .foregroundStyle(.white.opacity(0.9))
                     .padding(10)
-            }
-            .overlay {
-                if let seg = segment, seg.isBusy {
-                    ZStack {
-                        Color.black.opacity(0.42)
-                        ProgressView("Working…")
-                            .tint(.white)
-                            .foregroundStyle(.white)
-                    }
-                }
             }
         }
     }
@@ -542,7 +541,7 @@ private struct SliceHelpPopover: View {
         let id = UUID(); let keys: String; let action: String
     }
     private let rows = [
-        Row(keys: "Scroll", action: "Change slice"),
+        Row(keys: "Scroll / ↑ ↓ arrows", action: "Change slice"),
         Row(keys: "Pinch / right-drag / ± buttons", action: "Zoom in and out"),
         Row(keys: "⌥ Option + drag", action: "Pan (when zoomed in)"),
         Row(keys: "Click", action: "Recenter all three views here"),

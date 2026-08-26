@@ -56,11 +56,37 @@ struct AppShell: View {
                 .frame(width: panelCollapsed ? 0 : 1)
             canvas
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .overlay(alignment: .top) {
+                    // Persistent reminder that paint/fill are confined to a HU range,
+                    // so masked painting is never done blind. Only on the Segment tab.
+                    if selectedTab == .segment && segmentation.maskActive {
+                        MaskBadge(range: segmentation.maskRange)
+                            .padding(.top, 10)
+                    }
+                }
+                .overlay {
+                    // Busy indicator for blocking segmentation ops. Only the Segment
+                    // tab runs mask work, so isBusy stays false elsewhere.
+                    if segmentation.isBusy {
+                        BusyOverlay(message: "Working…")
+                    }
+                }
                 .onDrop(of: [.fileURL], isTargeted: $dropTargeted) { providers in
                     handleDrop(providers, model)
                 }
         }
         .background(WindowAccessor())
+        .sheet(isPresented: Binding(
+            get: { model.pendingSeries != nil },
+            set: { presented in
+                // Dismissed without an explicit choice (Escape / click-away): treat as
+                // Cancel. chooseSeries() clears pendingSeries and sets isLoading, and
+                // cancelSeries() guards on isLoading, so a load in flight is left alone.
+                if !presented { model.cancelSeries() }
+            })) {
+            SeriesPicker()
+                .environmentObject(model)
+        }
         .toolbar {
             ToolbarItem(placement: .navigation) {
                 Button {

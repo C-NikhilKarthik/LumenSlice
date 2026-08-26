@@ -21,6 +21,7 @@
 #include "RangeSlider.h"
 #include "ViewState.h"
 
+class QButtonGroup;
 class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
@@ -62,7 +63,6 @@ protected:
 private slots:
     void openFolder();
     void onLoadReady();
-    void onSeriesListReady();
     void selectTab(int tab);
 
     // Canvas intents.
@@ -80,6 +80,8 @@ private slots:
     void applyThreshold();
     void commitThreshold();
     void useThresholdForMasking();
+    void deactivateMask();
+    void adjustMask();
     void applyOtsu();
     void growFromSeeds();
     void applyGrowPreview();
@@ -129,24 +131,26 @@ private:
 
     // Refresh helpers.
     void loadPath(const QString& path);
+    // Modal series picker for a multi-series folder; returns the chosen index or -1.
+    int pickSeries(LumenSeriesScan* scan);
     void adoptLoadedVolume(const LoadResult& result);
     void refreshAll();
     void refreshCanvas();
     void refreshSliders();
+    void updateSliceButtons();  // enable/disable the per-pane prev/next buttons
     void refreshVolumeInfo();
     void refreshVolumeTexture();
     void rebuildSegmentList();
     void rebuildExportSegmentList();
-    void rebuildThreeDSegmentList();
-    QWidget* buildSegmentVisibilityRow(int id);
-    void updateActiveMaskLabel();
     void updateSegmentCounts();      // debounced: schedules recompute
     void recomputeSegmentCounts();   // the actual full-volume histogram scan
+    void updateMaskIndicator();      // reflect the intensity-mask active state
     void updateUndoRedo();
     void updateWlControls();
     void setStatus(const QString& text);
     void showBusy(const QString& text);  // empty text hides the busy overlay
     void positionBusy();
+    void positionMaskBadge();  // keep the canvas mask badge centered at the top
     void showMetadataInspector();
     QColor nextSegmentColor() const;
 
@@ -161,6 +165,9 @@ private:
     int maximized_ = -1;
     SliceView* panes_[3] = {nullptr, nullptr, nullptr};
     QSlider* sliders_[3] = {nullptr, nullptr, nullptr};
+    // Per-pane step buttons: previous (up) / next (down) slice, beside the slider.
+    QToolButton* slicePrevBtns_[3] = {nullptr, nullptr, nullptr};
+    QToolButton* sliceNextBtns_[3] = {nullptr, nullptr, nullptr};
     MeshView* meshView_ = nullptr;
     QWidget* quadBoard_ = nullptr;
     QLabel* loadingOverlay_ = nullptr;
@@ -179,24 +186,32 @@ private:
     QDoubleSpinBox* windowSpin_ = nullptr;
     RangeSlider* wlRange_ = nullptr;
     QCheckBox* crosshairCheck_ = nullptr;
-    // Usable HU band for the Level/Window controls: a clinically useful range
-    // (covers every built-in preset) clamped to the loaded volume's actual HU
-    // span, widened only enough to include the current window. Mirrors macOS's
-    // VisualizeControls.wlBounds. Updated in refreshVolumeInfo().
+    // Clinically useful HU band for the Level/Window spin boxes: a fixed range
+    // that covers every preset, clamped to the loaded volume's HU span and
+    // widened to include the current window. Mirrors macOS VisualizeControls'
+    // wlBounds. Refined per volume in refreshVolumeInfo().
     float huBoundLo_ = -1400.0f;
     float huBoundHi_ = 1600.0f;
 
     // Segment controls.
-    QLabel* activeMaskLabel_ = nullptr;  // "Active mask: <name>" / "No active mask"
     QVBoxLayout* segListLayout_ = nullptr;
     QWidget* segListContainer_ = nullptr;
     QHash<int, QLabel*> segCountLabels_;
     QHash<int, QString> segNames_;
     QComboBox* toolCombo_ = nullptr;
+    QButtonGroup* toolGroup_ = nullptr;  // 5 tool buttons; index 0 = Threshold
     QStackedWidget* toolDetail_ = nullptr;
     RangeSlider* threshSlider_ = nullptr;
     QLabel* threshLabel_ = nullptr;
     QTimer* threshTimer_ = nullptr;
+    // Intensity-mask controls: the "Use as paint mask" button is swapped for an
+    // active indicator + Adjust/Turn-off buttons while a mask is in effect, and a
+    // canvas badge (maskBadge_) mirrors the state over the slice panes.
+    QPushButton* maskBtn_ = nullptr;
+    QLabel* maskIndicator_ = nullptr;
+    QPushButton* maskAdjustBtn_ = nullptr;
+    QPushButton* maskDeactivateBtn_ = nullptr;
+    QLabel* maskBadge_ = nullptr;
     QSlider* toleranceSlider_ = nullptr;
     QLabel* toleranceLabel_ = nullptr;
     QSlider* brushSlider_ = nullptr;
@@ -217,10 +232,6 @@ private:
     QComboBox* resolutionCombo_ = nullptr;
     QPushButton* generateBtn_ = nullptr;
     QLabel* meshInfoLabel_ = nullptr;
-    // Visibility-only segment picker, live-mirrored from the Segment tab so a
-    // segment can be shown/hidden in the 3D surface without switching tabs.
-    QVBoxLayout* threeDSegListLayout_ = nullptr;
-    bool meshAutoShownForVolume_ = false;  // one-shot: auto-Generate on first 3D visit
     QCheckBox* scissorModeCheck_ = nullptr;
     QComboBox* scissorEraseCombo_ = nullptr;
     QCheckBox* scissorActiveOnlyCheck_ = nullptr;
@@ -247,8 +258,6 @@ private:
 
     // Off-thread folder load.
     QFutureWatcher<LoadResult> loadWatcher_;
-    QFutureWatcher<QString> seriesWatcher_;
-    QString pendingSeriesPath_;
     bool loading_ = false;
     LoadResult pendingLoad_;
     bool hasPendingLoad_ = false;

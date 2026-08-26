@@ -7,6 +7,7 @@
 #include <QColorDialog>
 #include <QComboBox>
 #include <QDialog>
+#include <QDialogButtonBox>
 #include <QDir>
 #include <QDoubleSpinBox>
 #include <QDragEnterEvent>
@@ -27,6 +28,7 @@
 #include <QJsonObject>
 #include <QLabel>
 #include <QLineEdit>
+#include <QListWidget>
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QMimeData>
@@ -136,8 +138,6 @@ MainWindow::MainWindow() {
             &MainWindow::onMeshReady);
     connect(&loadWatcher_, &QFutureWatcher<LoadResult>::finished, this,
             &MainWindow::onLoadReady);
-    connect(&seriesWatcher_, &QFutureWatcher<QString>::finished, this,
-            &MainWindow::onSeriesListReady);
     connect(meshView_, &MeshView::scissorFinished, this,
             &MainWindow::onScissorFinished);
     connect(meshView_, &MeshView::generateRequested, this,
@@ -169,6 +169,10 @@ MainWindow::MainWindow() {
         refreshCanvas();
         updateSegmentCounts();
         updateUndoRedo();
+        // The intensity mask is applied inside a worker op (useThresholdForMasking),
+        // so reflect its state here, once the worker has finished. Harmless for the
+        // other mask ops that share this watcher (their mask state is unchanged).
+        updateMaskIndicator();
         if (heavyRefreshMesh_) scheduleMeshRefresh();
     });
     // Throttle slice repaints while wheel-scrolling (see onSliceScrolled).
@@ -220,7 +224,7 @@ QWidget* MainWindow::buildTabRail() {
             "QToolButton{color:#aeb4c1;border:none;border-radius:14px;font-size:12px;"
             "padding-top:5px;}"
             "QToolButton:hover{background:#22252d;color:#e7e9ef;}"
-            "QToolButton:checked{background:#16b8c9;color:white;}");
+            "QToolButton:checked{background:#4f7cf0;color:white;}");
         group->addButton(b, i);
         v->addWidget(b, 0, Qt::AlignHCenter);
     }
@@ -279,9 +283,13 @@ QWidget* MainWindow::buildVisualizePanel() {
     levelSpin_ = new QDoubleSpinBox;
     levelSpin_->setRange(huBoundLo_, huBoundHi_);
     levelSpin_->setDecimals(0);
+    levelSpin_->setToolTip(
+        "Level: image brightness - the HU value shown as mid-grey.");
     windowSpin_ = new QDoubleSpinBox;
     windowSpin_->setRange(1, huBoundHi_ - huBoundLo_);
     windowSpin_->setDecimals(0);
+    windowSpin_->setToolTip(
+        "Window: image contrast - the width of the HU range mapped black to white.");
 
     auto* spinRow = new QHBoxLayout;
     spinRow->addWidget(new QLabel("Level"));
@@ -294,6 +302,8 @@ QWidget* MainWindow::buildVisualizePanel() {
     // window=hi-lo.
     wlRange_ = new RangeSlider;
     wlRange_->setBounds(-1024, 3072);
+    wlRange_->setToolTip(
+        "Drag the two handles to set the low and high HU bounds of the visible window.");
     body(wlBox)->addWidget(wlRange_);
 
     auto setWL = [this](float lvl, float win) {
@@ -320,6 +330,7 @@ QWidget* MainWindow::buildVisualizePanel() {
     struct P { const char* name; float l, w; };
     for (P p : {P{"Bone", 400, 1500}, P{"Soft", 40, 400}, P{"Lung", -600, 1500}}) {
         auto* b = new QPushButton(p.name);
+        b->setToolTip(QString("Apply the %1 window/level preset.").arg(p.name));
         connect(b, &QPushButton::clicked, this,
                 [setWL, p] { setWL(p.l, p.w); });
         presets->addWidget(b);
@@ -363,26 +374,9 @@ QWidget* MainWindow::buildSegmentPanel() {
     auto* segBox = section("Segments");
     auto* addBtn = new QPushButton("+ Add segment");
     addBtn->setObjectName("accent");
+    addBtn->setToolTip("Add a new empty segment to label.");
     connect(addBtn, &QPushButton::clicked, this, &MainWindow::addSegment);
     body(segBox)->addWidget(addBtn);
-
-    // Persistent active-mask indicator — otherwise the only signal is the
-    // highlighted row below, invisible whenever this list scrolls out of view.
-    auto* activeRow = new QHBoxLayout;
-    activeMaskLabel_ = new QLabel("No active mask");
-    activeMaskLabel_->setStyleSheet("color:#98a0b0;");
-    activeRow->addWidget(activeMaskLabel_, 1);
-    auto* deactivateBtn = new QPushButton("Deactivate");
-    deactivateBtn->setToolTip(
-        "Stop editing into any segment — paint, threshold apply, and other "
-        "mask operations become no-ops until a segment is selected again.");
-    connect(deactivateBtn, &QPushButton::clicked, this, [this] {
-        if (st_.volume) lumen_seg_set_active(st_.volume, 0);
-        rebuildSegmentList();
-    });
-    activeRow->addWidget(deactivateBtn);
-    body(segBox)->addLayout(activeRow);
-
     segListContainer_ = new QWidget;
     segListLayout_ = new QVBoxLayout(segListContainer_);
     segListLayout_->setContentsMargins(0, 0, 0, 0);
@@ -395,6 +389,7 @@ QWidget* MainWindow::buildSegmentPanel() {
     auto* toolRow = new QHBoxLayout;
     toolRow->setSpacing(0);
     auto* toolGroup = new QButtonGroup(this);
+    toolGroup_ = toolGroup;  // kept so adjustMask() can re-check the Threshold button
     const char* toolLabels[5] = {"Thresh", "Fill", "Trace", "Paint", "Erase"};
     for (int i = 0; i < 5; ++i) {
         auto* b = new QToolButton;
@@ -408,7 +403,7 @@ QWidget* MainWindow::buildSegmentPanel() {
         b->setStyleSheet(
             "QToolButton{background:#2a2d36;border:1px solid #3a3f4c;padding:6px 2px;"
             "color:#c3c8d2;font-size:12px;" + ends +
-            "}QToolButton:checked{background:#16b8c9;color:white;border-color:#16b8c9;}");
+            "}QToolButton:checked{background:#4f7cf0;color:white;border-color:#4f7cf0;}");
         toolGroup->addButton(b, i);
         toolRow->addWidget(b, 1);
     }
@@ -424,11 +419,14 @@ QWidget* MainWindow::buildSegmentPanel() {
         auto* f = new QVBoxLayout(w);
         f->addWidget(new QLabel("Drag the handles to preview the active segment in "
                                 "the three slice views. Press Apply to update 3D."));
-        threshLabel_ = new QLabel("Low 300  —  High 3000 HU");
+        threshLabel_ = new QLabel("Low 300  -  High 3000 HU");
         f->addWidget(threshLabel_);
         threshSlider_ = new RangeSlider;
         threshSlider_->setBounds(-1000, 3000);
         threshSlider_->setValues(300, 3000);
+        threshSlider_->setToolTip(
+            "Drag the low and high handles to preview voxels in that HU range for "
+            "the active segment.");
         f->addWidget(threshSlider_);
         // Live, debounced threshold; one undo snapshot per drag.
         threshTimer_ = new QTimer(this);
@@ -441,11 +439,13 @@ QWidget* MainWindow::buildSegmentPanel() {
         });
         connect(threshSlider_, &RangeSlider::rangeChanged, this,
                 [this](double lo, double hi) {
-                    threshLabel_->setText(QString("Low %1  —  High %2 HU")
+                    threshLabel_->setText(QString("Low %1  -  High %2 HU")
                                               .arg(qRound(lo))
                                               .arg(qRound(hi)));
                     st_.thresholdLo = float(lo);
                     st_.thresholdHi = float(hi);
+                    // A real user drag of the range engages the preview.
+                    st_.thresholdPreviewArmed = true;
                     threshTimer_->start();  // debounce, then applyThreshold()
                 });
         auto* presets = new QHBoxLayout;
@@ -453,11 +453,13 @@ QWidget* MainWindow::buildSegmentPanel() {
         for (T t : {T{"Bone", 300, 3000}, T{"Soft", 40, 80},
                     T{"Lung", -900, -400}}) {
             auto* b = new QPushButton(t.n);
+            b->setToolTip(QString("Set the threshold to the %1 preset range.").arg(t.n));
             connect(b, &QPushButton::clicked, this, [this, t] {
                 threshSlider_->setValues(t.lo, t.hi);
                 st_.thresholdLo = float(t.lo);
                 st_.thresholdHi = float(t.hi);
-                threshLabel_->setText(QString("Low %1  —  High %2 HU")
+                st_.thresholdPreviewArmed = true;  // explicit engagement
+                threshLabel_->setText(QString("Low %1  -  High %2 HU")
                                           .arg(qRound(t.lo))
                                           .arg(qRound(t.hi)));
                 applyThreshold();
@@ -466,16 +468,47 @@ QWidget* MainWindow::buildSegmentPanel() {
         }
         f->addLayout(presets);
         auto* otsuBtn = new QPushButton("Otsu auto-threshold");
+        otsuBtn->setToolTip(
+            "Pick a threshold automatically that best separates foreground from "
+            "background (Otsu's method).");
         connect(otsuBtn, &QPushButton::clicked, this, &MainWindow::applyOtsu);
         f->addWidget(otsuBtn);
         auto* applyBtn = new QPushButton("Apply threshold to 3D");
         applyBtn->setObjectName("accent");
+        applyBtn->setToolTip(
+            "Commit the current threshold preview into the active segment's mask.");
         connect(applyBtn, &QPushButton::clicked, this, &MainWindow::commitThreshold);
         f->addWidget(applyBtn);
-        auto* maskBtn = new QPushButton("Use for masking / Paint");
-        connect(maskBtn, &QPushButton::clicked, this,
+        maskBtn_ = new QPushButton("Use as paint mask");
+        maskBtn_->setObjectName("accent");
+        maskBtn_->setToolTip(
+            "Limit paint and fill to the current threshold HU range, so you can "
+            "brush freely without spilling into other tissue.");
+        connect(maskBtn_, &QPushButton::clicked, this,
                 &MainWindow::useThresholdForMasking);
-        f->addWidget(maskBtn);
+        f->addWidget(maskBtn_);
+        // Active-mask indicator + edit / turn-off controls (hidden until a mask
+        // is set). A canvas badge (built in buildQuad) mirrors this state.
+        maskIndicator_ = new QLabel;
+        maskIndicator_->setStyleSheet("color:#57c785;");  // green: mask active
+        maskIndicator_->setVisible(false);
+        f->addWidget(maskIndicator_);
+        auto* maskBtnRow = new QHBoxLayout;
+        maskAdjustBtn_ = new QPushButton("Adjust range");
+        maskAdjustBtn_->setVisible(false);
+        maskAdjustBtn_->setToolTip(
+            "Drop the mask and return to Threshold with the same range, to retune "
+            "and re-apply it.");
+        connect(maskAdjustBtn_, &QPushButton::clicked, this, &MainWindow::adjustMask);
+        maskBtnRow->addWidget(maskAdjustBtn_);
+        maskDeactivateBtn_ = new QPushButton("Turn off");
+        maskDeactivateBtn_->setVisible(false);
+        maskDeactivateBtn_->setToolTip(
+            "Turn off the mask so edits are no longer constrained to it.");
+        connect(maskDeactivateBtn_, &QPushButton::clicked, this,
+                &MainWindow::deactivateMask);
+        maskBtnRow->addWidget(maskDeactivateBtn_);
+        f->addLayout(maskBtnRow);
         toolDetail_->addWidget(w);
     }
     // 1: region grow
@@ -488,6 +521,8 @@ QWidget* MainWindow::buildSegmentPanel() {
         toleranceSlider_ = new QSlider(Qt::Horizontal);
         toleranceSlider_->setRange(1, 1000);
         toleranceSlider_->setValue(100);
+        toleranceSlider_->setToolTip(
+            "How far in HU a click-to-fill may spread from the clicked voxel.");
         connect(toleranceSlider_, &QSlider::valueChanged, this, [this](int val) {
             st_.tolerance = float(val);
             toleranceLabel_->setText(QString("Tolerance: ± %1 HU").arg(val));
@@ -514,6 +549,8 @@ QWidget* MainWindow::buildSegmentPanel() {
         brushSlider_ = new QSlider(Qt::Horizontal);
         brushSlider_->setRange(1, 80);
         brushSlider_->setValue(12);
+        brushSlider_->setToolTip(
+            "Radius of the paint and erase brush, in pixels.");
         connect(brushSlider_, &QSlider::valueChanged, this, [this](int val) {
             st_.brushRadius = val;
             brushLabel_->setText(QString("Brush radius: %1 px").arg(val));
@@ -529,6 +566,9 @@ QWidget* MainWindow::buildSegmentPanel() {
             {Tool::Threshold, 0}, {Tool::RegionGrow, 1}, {Tool::LevelTrace, 2},
             {Tool::Paint, 3}, {Tool::Erase, 3}};
         st_.tool = kMap[id].tool;
+        // Selecting the threshold tool is an explicit engagement, so the preview
+        // may show from here on.
+        if (st_.tool == Tool::Threshold) st_.thresholdPreviewArmed = true;
         toolDetail_->setCurrentIndex(kMap[id].page);
         refreshCanvas();
     });
@@ -543,6 +583,8 @@ QWidget* MainWindow::buildSegmentPanel() {
     seedLocalitySlider_ = new QSlider(Qt::Horizontal);
     seedLocalitySlider_->setRange(0, 100);
     seedLocalitySlider_->setValue(0);
+    seedLocalitySlider_->setToolTip(
+        "Bias the grow toward each seed; higher keeps regions closer to their seeds.");
     connect(seedLocalitySlider_, &QSlider::valueChanged, this, [this](int val) {
         seedLocalityLabel_->setText(QString("Seed locality: %1").arg(val / 10.0, 0, 'f', 1));
     });
@@ -551,6 +593,8 @@ QWidget* MainWindow::buildSegmentPanel() {
     seedGateLabel_ = new QLabel("Seed at least two segments (0/2 seeded).");
     body(seedsBox)->addWidget(seedGateLabel_);
     growSeedsBtn_ = new QPushButton("Initialize preview");
+    growSeedsBtn_->setToolTip(
+        "Grow every seeded segment to fill the volume and show it as a preview.");
     connect(growSeedsBtn_, &QPushButton::clicked, this,
             &MainWindow::growFromSeeds);
     body(seedsBox)->addWidget(growSeedsBtn_);
@@ -560,6 +604,10 @@ QWidget* MainWindow::buildSegmentPanel() {
     growApplyBtn_->setObjectName("accent");
     growApplyBtn_->setVisible(false);
     growCancelBtn_->setVisible(false);
+    growApplyBtn_->setToolTip(
+        "Commit the grow-from-seeds preview into the segments.");
+    growCancelBtn_->setToolTip(
+        "Discard the grow-from-seeds preview and restore the previous segmentation.");
     connect(growApplyBtn_, &QPushButton::clicked, this, &MainWindow::applyGrowPreview);
     connect(growCancelBtn_, &QPushButton::clicked, this, &MainWindow::cancelGrowPreview);
     growActions->addWidget(growApplyBtn_);
@@ -572,6 +620,8 @@ QWidget* MainWindow::buildSegmentPanel() {
     auto* editRow = new QHBoxLayout;
     undoBtn_ = new QPushButton("Undo");
     redoBtn_ = new QPushButton("Redo");
+    undoBtn_->setToolTip("Undo the last segmentation edit.");
+    redoBtn_->setToolTip("Redo the last undone segmentation edit.");
     connect(undoBtn_, &QPushButton::clicked, this, &MainWindow::undo);
     connect(redoBtn_, &QPushButton::clicked, this, &MainWindow::redo);
     editRow->addWidget(undoBtn_);
@@ -587,6 +637,7 @@ QWidget* MainWindow::buildSegmentPanel() {
     totalVoxelsLabel_ = new QLabel("Total voxels: 0");
     body(editBox)->addWidget(totalVoxelsLabel_);
     auto* clearBtn = new QPushButton("Clear active segment");
+    clearBtn->setToolTip("Remove all voxels from the active segment.");
     connect(clearBtn, &QPushButton::clicked, this, &MainWindow::clearActive);
     body(editBox)->addWidget(clearBtn);
     v->addWidget(editBox);
@@ -609,16 +660,6 @@ QWidget* MainWindow::buildThreeDPanel() {
     v->addWidget(new QLabel("Build a 3D surface from the segmentation mask using "
                             "marching cubes."));
 
-    // Segment visibility, mirrored live from the Segment tab, so a segment can
-    // be shown/hidden in the surface without switching tabs to find it.
-    auto* segVisBox = section("Segments");
-    auto* threeDSegContainer = new QWidget;
-    threeDSegListLayout_ = new QVBoxLayout(threeDSegContainer);
-    threeDSegListLayout_->setContentsMargins(0, 0, 0, 0);
-    threeDSegListLayout_->setSpacing(4);
-    body(segVisBox)->addWidget(threeDSegContainer);
-    v->addWidget(segVisBox);
-
     volumeRenderCheck_ = new QCheckBox("Enable volume rendering");
     volumeRenderCheck_->setToolTip(
         "Ray-march the normalized scan texture in the 3D pane.");
@@ -634,6 +675,9 @@ QWidget* MainWindow::buildThreeDPanel() {
     smoothingSpin_ = new QSpinBox;
     smoothingSpin_->setRange(0, 5);
     smoothingSpin_->setValue(2);  // smoother default surface (less voxel-blocky)
+    smoothingSpin_->setToolTip(
+        "Number of surface-smoothing passes; 0 keeps raw voxel steps, higher is "
+        "smoother.");
     smoothRow->addWidget(smoothingSpin_);
     body(qualBox)->addLayout(smoothRow);
     auto* resRow = new QHBoxLayout;
@@ -642,12 +686,17 @@ QWidget* MainWindow::buildThreeDPanel() {
     resolutionCombo_->addItem("Full", 1);
     resolutionCombo_->addItem("Half", 2);
     resolutionCombo_->addItem("Third", 3);
+    resolutionCombo_->setToolTip(
+        "Sampling detail for the surface; lower resolution builds faster but looks "
+        "coarser.");
     resRow->addWidget(resolutionCombo_);
     body(qualBox)->addLayout(resRow);
     v->addWidget(qualBox);
 
     generateBtn_ = new QPushButton("Generate / Update 3D");
     generateBtn_->setObjectName("accent");
+    generateBtn_->setToolTip(
+        "Build or rebuild the 3D surface from the current segmentation.");
     connect(generateBtn_, &QPushButton::clicked, this,
             &MainWindow::generateMesh);
     v->addWidget(generateBtn_);
@@ -711,6 +760,8 @@ QWidget* MainWindow::buildExportPanel() {
     auto* allNone = new QHBoxLayout;
     auto* allBtn = new QPushButton("All");
     auto* noneBtn = new QPushButton("None");
+    allBtn->setToolTip("Select every segment for export.");
+    noneBtn->setToolTip("Clear all export selections.");
     connect(allBtn, &QPushButton::clicked, this, [this] {
         for (auto* c : exportSegChecks_) c->setChecked(true);
     });
@@ -723,15 +774,20 @@ QWidget* MainWindow::buildExportPanel() {
 
     oneFilePerSegCheck_ = new QCheckBox("One file per segment");
     oneFilePerSegCheck_->setChecked(true);
+    oneFilePerSegCheck_->setToolTip(
+        "Write each selected segment to its own STL file instead of one combined "
+        "file.");
     body(meshBox)->addWidget(oneFilePerSegCheck_);
 
     exportStlBtn_ = new QPushButton("Export STL…");
+    exportStlBtn_->setToolTip("Export the selected segments as STL mesh files.");
     connect(exportStlBtn_, &QPushButton::clicked, this, &MainWindow::exportStl);
     body(meshBox)->addWidget(exportStlBtn_);
     v->addWidget(meshBox);
 
     auto* sliceBox = section("Slice");
     exportPngBtn_ = new QPushButton("Export axial PNG…");
+    exportPngBtn_->setToolTip("Save the current axial slice as a PNG image.");
     connect(exportPngBtn_, &QPushButton::clicked, this, &MainWindow::exportPng);
     body(sliceBox)->addWidget(exportPngBtn_);
     v->addWidget(sliceBox);
@@ -989,25 +1045,42 @@ QWidget* MainWindow::buildQuad() {
         connect(panes_[i], &SliceView::doubleClicked, this,
                 [this, i] { toggleMaximize(i); });
         col->addWidget(panes_[i], 1);
-        auto* sliceNav = new QHBoxLayout;
-        auto* previous = new QToolButton;
-        previous->setText("▲");
-        previous->setToolTip("Previous frame");
-        auto* next = new QToolButton;
-        next->setText("▼");
-        next->setToolTip("Next frame");
         sliders_[i] = new QSlider(Qt::Horizontal);
         const int axis = axes[i];
-        connect(previous, &QToolButton::clicked, this,
-                [this, axis] { onSliceScrolled(axis, st_.sliceIndex[axis] - 1); });
-        connect(next, &QToolButton::clicked, this,
-                [this, axis] { onSliceScrolled(axis, st_.sliceIndex[axis] + 1); });
         connect(sliders_[i], &QSlider::valueChanged, this,
                 [this, axis](int val) { onSliceScrolled(axis, val); });
-        sliceNav->addWidget(previous);
-        sliceNav->addWidget(sliders_[i], 1);
-        sliceNav->addWidget(next);
-        col->addLayout(sliceNav);
+
+        // Prev (up) / next (down) frame buttons flanking the slider. They step the
+        // slice index by exactly -1 / +1 through the same setter the slider uses,
+        // and disable at the ends via updateSliceButtons() (matches the macOS UI).
+        auto makeStepBtn = [](const QString& glyph, const QString& tip) {
+            auto* b = new QToolButton;
+            b->setText(glyph);
+            b->setToolTip(tip);
+            b->setFixedSize(24, 22);
+            b->setStyleSheet(
+                "QToolButton{background:#2a2d36;border:1px solid #3a3f4c;"
+                "border-radius:6px;color:#c3c8d2;font-size:12px;}"
+                "QToolButton:hover{background:#363b47;border-color:#454b59;}"
+                "QToolButton:pressed{background:#414857;}"
+                "QToolButton:disabled{color:#5a5f6d;background:#23252c;"
+                "border-color:#2b2e37;}");
+            return b;
+        };
+        slicePrevBtns_[i] = makeStepBtn("▲", "Previous slice");
+        sliceNextBtns_[i] = makeStepBtn("▼", "Next slice");
+        connect(slicePrevBtns_[i], &QToolButton::clicked, this,
+                [this, axis] { onSliceScrolled(axis, st_.sliceIndex[axis] - 1); });
+        connect(sliceNextBtns_[i], &QToolButton::clicked, this,
+                [this, axis] { onSliceScrolled(axis, st_.sliceIndex[axis] + 1); });
+
+        auto* sliceRow = new QHBoxLayout;
+        sliceRow->setContentsMargins(0, 0, 0, 0);
+        sliceRow->setSpacing(4);
+        sliceRow->addWidget(slicePrevBtns_[i]);
+        sliceRow->addWidget(sliders_[i], 1);
+        sliceRow->addWidget(sliceNextBtns_[i]);
+        col->addLayout(sliceRow);
         quadCells_[i] = cell;
         quadLayout_->addWidget(cell, cellPos[i][0], cellPos[i][1]);
     }
@@ -1039,6 +1112,17 @@ QWidget* MainWindow::buildQuad() {
         "background:rgba(16,18,24,225);color:#e7e9ef;border:1px solid #3a4150;"
         "border-radius:14px;padding:18px 30px;font-size:15px;font-weight:600;");
     loadingOverlay_->hide();
+
+    // Non-blocking pill pinned to the top of the canvas while an intensity mask is
+    // active, so masked painting is never done blind. Informational only, so it
+    // ignores mouse events and lets clicks reach the panes beneath.
+    maskBadge_ = new QLabel(board);
+    maskBadge_->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+    maskBadge_->setAlignment(Qt::AlignCenter);
+    maskBadge_->setStyleSheet(
+        "background:rgba(37,153,110,220);color:#ffffff;border-radius:12px;"
+        "padding:5px 12px;font-size:12px;font-weight:600;");
+    maskBadge_->hide();
     return board;
 }
 
@@ -1062,9 +1146,17 @@ void MainWindow::positionBusy() {
                           (quadBoard_->height() - s.height()) / 2);
 }
 
+void MainWindow::positionMaskBadge() {
+    if (!maskBadge_ || !quadBoard_ || maskBadge_->isHidden()) return;
+    maskBadge_->adjustSize();
+    maskBadge_->move((quadBoard_->width() - maskBadge_->width()) / 2, 10);
+    maskBadge_->raise();
+}
+
 void MainWindow::resizeEvent(QResizeEvent* e) {
     QMainWindow::resizeEvent(e);
     positionBusy();
+    positionMaskBadge();
 }
 
 // The dedicated 3D tab uses the same MeshView as the quad, but expands it to
@@ -1131,79 +1223,103 @@ void MainWindow::openFolder() {
 
 void MainWindow::loadPath(const QString& path) {
     if (loading_) return;
-    loading_ = true;
-    pendingSeriesPath_ = path;
-    setStatus(QString("Inspecting DICOM scenes in %1 …").arg(path));
-    showBusy("Inspecting DICOM scenes…");
-    seriesWatcher_.setFuture(QtConcurrent::run([path]() -> QString {
-        const QByteArray p = path.toUtf8();
-        const int n = lumen_list_dicom_series(p.constData(), nullptr, 0);
-        if (n <= 0) return QString();
-        QByteArray json(n + 1, '\0');
-        lumen_list_dicom_series(p.constData(), json.data(), json.size());
-        return QString::fromUtf8(json.constData());
+    loading_ = true;  // also guards against re-entry during the scan / picker
+
+    // Scan first (header crawl, groups files into series). This is far cheaper
+    // than a full decode, so it runs synchronously behind a busy overlay.
+    setStatus(QString("Scanning %1 …").arg(path));
+    showBusy("Scanning DICOM…");
+    QCoreApplication::processEvents();  // ensure the overlay is on screen
+    char scanMsg[512] = {0};
+    LumenSeriesScan* scan =
+        lumen_scan_folder(path.toUtf8().constData(), scanMsg, sizeof(scanMsg));
+    if (!scan) {
+        loading_ = false;
+        showBusy("");
+        const QString m = QString::fromUtf8(scanMsg);
+        setStatus(QString("Could not load: %1").arg(m));
+        QMessageBox::warning(
+            this, "SurgNetra",
+            m.isEmpty() ? "Could not scan the DICOM folder." : m);
+        return;
+    }
+
+    // One series loads straight through; several pop a modal picker.
+    int chosen = 0;
+    if (lumen_series_count(scan) > 1) {
+        showBusy("");  // hide the overlay while the picker is up
+        chosen = pickSeries(scan);
+        if (chosen < 0) {
+            lumen_scan_free(scan);
+            loading_ = false;
+            setStatus("Open cancelled.");
+            return;
+        }
+    }
+
+    // Decode the chosen series off the UI thread so a large series never freezes
+    // the window; the volume is adopted back on the UI thread in onLoadReady().
+    // The scan handle is only needed for this decode, so free it in the worker.
+    setStatus(QString("Loading %1 …").arg(path));
+    showBusy("Loading DICOM…");
+    loadWatcher_.setFuture(QtConcurrent::run([scan, chosen]() -> LoadResult {
+        char msg[512] = {0};
+        LumenVolume* v = lumen_load_series(scan, chosen, msg, sizeof(msg));
+        lumen_scan_free(scan);
+        return LoadResult{v, QString::fromUtf8(msg)};
     }));
 }
 
-void MainWindow::onSeriesListReady() {
-    const QString json = seriesWatcher_.result();
-    QJsonParseError error{};
-    const QJsonDocument doc = QJsonDocument::fromJson(json.toUtf8(), &error);
-    QJsonArray series = error.error == QJsonParseError::NoError && doc.isArray()
-                            ? doc.array() : QJsonArray{};
-    QString selectedUid;
-    if (series.size() > 1) {
-        // Series Description / Modality / Size / Count / Date Created, per
-        // scene, so a multi-series folder is actually distinguishable at a
-        // glance instead of showing only dimensions and a raw UID.
-        auto formatBytes = [](double bytes) {
-            const double mb = bytes / (1024.0 * 1024.0);
-            return mb >= 1.0 ? QString("%1 MB").arg(mb, 0, 'f', 1)
-                              : QString("%1 KB").arg(bytes / 1024.0, 0, 'f', 0);
-        };
-        auto formatDate = [](const QString& yyyymmdd) {
-            if (yyyymmdd.size() != 8) return yyyymmdd.isEmpty() ? QString("—") : yyyymmdd;
-            return QString("%1-%2-%3").arg(yyyymmdd.left(4), yyyymmdd.mid(4, 2),
-                                            yyyymmdd.mid(6, 2));
-        };
-        QStringList choices;
-        for (const QJsonValue& value : series) {
-            const QJsonObject o = value.toObject();
-            const QString description = o.value("description").toString();
-            const QString modality = o.value("modality").toString();
-            choices << QString("%1 — %2 — %3 slices — %4 — %5")
-                           .arg(description.isEmpty() ? "(no description)" : description,
-                                modality.isEmpty() ? "?" : modality)
-                           .arg(o.value("slices").toInt())
-                           .arg(formatBytes(o.value("bytes").toDouble()),
-                                formatDate(o.value("date").toString()));
-        }
-        bool accepted = false;
-        const QString choice = QInputDialog::getItem(
-            this, "Choose DICOM scene", "This folder contains multiple image series:",
-            choices, 0, false, &accepted);
-        if (!accepted) {
-            loading_ = false;
-            showBusy("");
-            setStatus("DICOM opening cancelled.");
-            return;
-        }
-        const int index = choices.indexOf(choice);
-        if (index >= 0) selectedUid = series.at(index).toObject().value("uid").toString();
-    } else if (series.size() == 1) {
-        selectedUid = series.first().toObject().value("uid").toString();
+// Modal picker listing every series in a multi-series folder. Returns the chosen
+// series index, or -1 if the user cancelled.
+int MainWindow::pickSeries(LumenSeriesScan* scan) {
+    const int n = lumen_series_count(scan);
+    QDialog dlg(this);
+    dlg.setWindowTitle("Select DICOM series");
+    dlg.resize(460, 320);
+    auto* layout = new QVBoxLayout(&dlg);
+    auto* prompt = new QLabel(
+        "This folder holds multiple series. Choose one to open:");
+    prompt->setWordWrap(true);
+    layout->addWidget(prompt);
+
+    auto* list = new QListWidget(&dlg);
+    for (int i = 0; i < n; ++i) {
+        char desc[256] = {0};
+        char modality[64] = {0};
+        char created[32] = {0};
+        int sliceCount = 0;
+        int width = 0, height = 0;
+        lumen_series_info(scan, i, desc, sizeof(desc), modality,
+                          sizeof(modality), &sliceCount, &width, &height,
+                          created, sizeof(created));
+        QString d = QString::fromUtf8(desc).trimmed();
+        QString m = QString::fromUtf8(modality).trimmed();
+        const QString date = QString::fromUtf8(created).trimmed();
+        if (d.isEmpty()) d = QString("Series %1").arg(i + 1);
+        if (m.isEmpty()) m = "?";
+        // Description - Modality - Size - Count - Date Created (fields the scan
+        // did not report are omitted).
+        QStringList parts{m};
+        if (width > 0 && height > 0)
+            parts << QString("%1 × %2").arg(width).arg(height);
+        parts << QString("%1 slices").arg(sliceCount);
+        if (!date.isEmpty()) parts << date;
+        list->addItem(QString("%1  -  %2").arg(d, parts.join("  -  ")));
     }
-    const QString path = pendingSeriesPath_;
-    setStatus(QString("Loading %1 …").arg(path));
-    showBusy("Loading DICOM…");
-    loadWatcher_.setFuture(QtConcurrent::run([path, selectedUid]() -> LoadResult {
-        char msg[512] = {0};
-        const QByteArray p = path.toUtf8();
-        const QByteArray uid = selectedUid.toUtf8();
-        LumenVolume* v = lumen_load_folder_series(
-            p.constData(), uid.isEmpty() ? nullptr : uid.constData(), msg, sizeof(msg));
-        return LoadResult{v, QString::fromUtf8(msg)};
-    }));
+    list->setCurrentRow(0);
+    layout->addWidget(list, 1);
+
+    auto* buttons = new QDialogButtonBox(
+        QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
+    layout->addWidget(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+    connect(list, &QListWidget::itemDoubleClicked, &dlg, &QDialog::accept);
+
+    if (dlg.exec() != QDialog::Accepted) return -1;
+    const int row = list->currentRow();
+    return row < 0 ? -1 : row;
 }
 
 void MainWindow::onLoadReady() {
@@ -1233,6 +1349,9 @@ void MainWindow::adoptLoadedVolume(const LoadResult& r) {
     vol_.adopt(r.volume);
     growPreviewPending_ = false;
     growPreviewActive_ = false;
+    // A fresh scan starts with no threshold preview, so an untouched load never
+    // looks pre-segmented.
+    st_.thresholdPreviewArmed = false;
     const std::string status = r.message.toStdString();
     st_.volume = vol_.get();
     LumenVolume* v = st_.volume;
@@ -1261,23 +1380,6 @@ void MainWindow::adoptLoadedVolume(const LoadResult& r) {
         segNames_[id] = QString("Segment %1").arg(id);
     }
 
-    // A fresh volume gets a fresh, genuinely empty segment (SegmentEditor::reset_to
-    // already guarantees that) — but a leftover Tool::Threshold from a previous
-    // session would still paint a live threshold-preview overlay using the old HU
-    // window over this new, empty segment (SliceView::paintEvent draws it whenever
-    // showOverlay is on, with no check that segment editing is even active), which
-    // looks exactly like "a segment is already marked". Reset tool + threshold
-    // window so a new load always starts from a neutral state.
-    st_.tool = Tool::None;
-    float huLo = 0, huHi = 0;
-    lumen_hu_range(v, &huLo, &huHi);
-    st_.thresholdLo = huLo;
-    st_.thresholdHi = huHi;
-
-    // So arrow-key slice navigation works immediately after loading, without
-    // requiring the user to click a pane first.
-    if (panes_[0]) panes_[0]->setFocus(Qt::OtherFocusReason);
-
     // A fresh volume invalidates all markups (their voxel coords no longer map).
     float sx = 1, sy = 1, sz = 1;
     lumen_spacing(v, &sx, &sy, &sz);
@@ -1291,9 +1393,9 @@ void MainWindow::adoptLoadedVolume(const LoadResult& r) {
     if (volumeRenderCheck_ && volumeRenderCheck_->isChecked())
         refreshVolumeTexture();
     refreshAll();
+    updateMaskIndicator();  // a fresh load clears any intensity mask
     meshView_->clearMeshes();
     meshInfoLabel_->setText("No surface yet.");
-    meshAutoShownForVolume_ = false;  // this volume hasn't had its one-shot 3D auto-build yet
 }
 
 void MainWindow::selectTab(int tab) {
@@ -1306,17 +1408,6 @@ void MainWindow::selectTab(int tab) {
     st_.markupPlacing = (tab == 4) && markups_.placing();
     if (tab == 3) rebuildExportSegmentList();  // reflect current segments/names
     if (tab == 4) rebuildMarkupList();
-    // First-time 3D visit for this volume: build the surface automatically so
-    // segments are visible without the user needing to know to click Generate.
-    // Only once per volume (meshAutoShownForVolume_ resets on load) and only
-    // when nothing has been built yet — autoMesh3D_'s on-every-edit refresh
-    // stays opt-in (full marching cubes per paint stroke would make a real CT
-    // crawl); this is a single, one-time convenience build instead.
-    if (tab == 2 && st_.volume && !meshAutoShownForVolume_ && !generating_ &&
-        meshView_ && !meshView_->hasMesh()) {
-        meshAutoShownForVolume_ = true;
-        generateMesh();
-    }
     refreshCanvas();
 }
 
@@ -1335,6 +1426,7 @@ void MainWindow::onSliceScrolled(int axis, int index) {
             QSignalBlocker b(sliders_[i]);
             sliders_[i]->setValue(index);
         }
+    updateSliceButtons();  // reflect the new index at the range ends
     lastScrollAxis_ = axis;
     if (scrollThrottle_.isActive()) {
         scrollDirty_ = true;
@@ -1424,6 +1516,10 @@ void MainWindow::onStrokeEnded() {
 void MainWindow::onFloodClicked(int x, int y, int z) {
     if (!st_.volume || st_.busy || heavyWatcher_.isRunning()) return;
     cancelGrowPreview();
+    // Flood fill can block on a large connected structure, so run it on a worker
+    // thread behind the busy overlay instead of freezing the UI. Undo was already
+    // snapshotted in onStrokeBegan(). refreshMesh=false: a fill re-extracts the
+    // overlays but the 3D surface is rebuilt only on an explicit commit.
     const float tolerance = st_.tolerance;
     runMaskOp("Filling region…", [v = st_.volume, x, y, z, tolerance] {
         lumen_seg_region_grow(v, x, y, z, tolerance);
@@ -1433,6 +1529,8 @@ void MainWindow::onFloodClicked(int x, int y, int z) {
 void MainWindow::onLevelTraceClicked(int axis, int index, int cx, int cy) {
     if (!st_.volume || st_.busy || heavyWatcher_.isRunning()) return;
     cancelGrowPreview();
+    // Same pattern as flood fill: run the blocking trace on a worker thread
+    // behind the busy overlay.
     runMaskOp("Tracing level…", [v = st_.volume, axis, index, cx, cy] {
         lumen_seg_level_trace(v, axis, index, cx, cy);
     }, false);
@@ -1470,10 +1568,6 @@ void MainWindow::commitThreshold() {
         lumen_seg_active(v) == 0) return;
     const float lo = st_.thresholdLo;
     const float hi = st_.thresholdHi;
-    // Consistent with useThresholdForMasking() below: any action that commits
-    // voxels into the active segment drops the user into Paint to refine the
-    // result, instead of leaving them in Threshold looking at an empty preview.
-    st_.tool = Tool::Paint;
     runMaskOp("Applying threshold…", [v, lo, hi] {
         lumen_seg_threshold(v, lo, hi);
     });
@@ -1488,6 +1582,58 @@ void MainWindow::useThresholdForMasking() {
     runMaskOp("Applying intensity mask…", [v, lo, hi] {
         lumen_seg_apply_mask(v, lo, hi);
     }, false, false);
+    // The indicator is refreshed in the worker-finished handler, once the mask is
+    // actually applied (querying it here would race the worker thread).
+}
+
+void MainWindow::deactivateMask() {
+    LumenVolume* v = st_.volume;
+    // Guard on busy like every other mask mutation, so clearing the mask never
+    // races a worker op still holding the volume.
+    if (!v || st_.busy || heavyWatcher_.isRunning()) return;
+    lumen_seg_clear_mask(v);
+    updateMaskIndicator();
+}
+
+// Retune an active mask: drop it and jump back to the Threshold tool with the same
+// range still loaded, so the user tweaks and re-applies in one step. Mirrors the
+// macOS "Adjust range" control.
+void MainWindow::adjustMask() {
+    if (st_.busy || heavyWatcher_.isRunning()) return;
+    deactivateMask();
+    st_.tool = Tool::Threshold;
+    st_.thresholdPreviewArmed = true;
+    // Reflect the switch in the tool selector: Threshold is button/page 0.
+    if (toolDetail_) toolDetail_->setCurrentIndex(0);
+    if (toolGroup_ && toolGroup_->button(0)) toolGroup_->button(0)->setChecked(true);
+    refreshCanvas();
+}
+
+// Swap the "Use for masking" button for an active indicator + Adjust/Deactivate
+// buttons while an intensity mask is in effect, and show a canvas badge. Mirrors
+// the macOS control.
+void MainWindow::updateMaskIndicator() {
+    if (!maskBtn_ || !maskIndicator_ || !maskDeactivateBtn_) return;
+    LumenVolume* v = st_.volume;
+    const bool active = v != nullptr && lumen_seg_mask_enabled(v) != 0;
+    if (active) {
+        float lo = 0, hi = 0;
+        lumen_seg_mask_range(v, &lo, &hi);
+        maskIndicator_->setText(QString("Painting limited to %1 to %2 HU")
+                                    .arg(qRound(lo)).arg(qRound(hi)));
+        if (maskBadge_) {
+            maskBadge_->setText(QString("Paint mask %1 to %2 HU")
+                                    .arg(qRound(lo)).arg(qRound(hi)));
+        }
+    }
+    maskBtn_->setVisible(!active);
+    maskIndicator_->setVisible(active);
+    maskDeactivateBtn_->setVisible(active);
+    if (maskAdjustBtn_) maskAdjustBtn_->setVisible(active);
+    if (maskBadge_) {
+        maskBadge_->setVisible(active);
+        positionMaskBadge();
+    }
 }
 
 void MainWindow::applyOtsu() {
@@ -1500,8 +1646,9 @@ void MainWindow::applyOtsu() {
     lumen_hu_range(v, &lo, &hi);
     st_.thresholdLo = t;
     st_.thresholdHi = hi;
+    st_.thresholdPreviewArmed = true;  // Otsu is an explicit engagement
     if (threshSlider_) threshSlider_->setValues(t, hi);
-    if (threshLabel_) threshLabel_->setText(QString("Low %1  —  High %2 HU")
+    if (threshLabel_) threshLabel_->setText(QString("Low %1  -  High %2 HU")
                                                  .arg(qRound(t)).arg(qRound(hi)));
     refreshCanvas();
 }
@@ -1797,7 +1944,7 @@ void MainWindow::exportStl() {
     } else {
         // Fuse the chosen segments into a single STL (union via the bridge).
         const QString path = QFileDialog::getSaveFileName(
-            this, "Export fused STL", QDir::homePath() + "/LumenSlice.stl",
+            this, "Export fused STL", QDir::homePath() + "/SurgNetra.stl",
             "STL mesh (*.stl)");
         if (path.isEmpty()) return;
         QApplication::setOverrideCursor(Qt::WaitCursor);
@@ -1870,6 +2017,19 @@ void MainWindow::refreshSliders() {
         sliders_[i]->setValue(st_.sliceIndex[i]);
         sliders_[i]->setEnabled(v != nullptr);
     }
+    updateSliceButtons();
+}
+
+void MainWindow::updateSliceButtons() {
+    LumenVolume* v = st_.volume;
+    for (int i = 0; i < 3; ++i) {
+        if (!slicePrevBtns_[i] || !sliceNextBtns_[i]) continue;
+        const int axis = panes_[i] ? panes_[i]->axis() : i;
+        const int count = v ? lumen_slice_count(v, axis) : 0;
+        const int idx = st_.sliceIndex[axis];
+        slicePrevBtns_[i]->setEnabled(v && count > 0 && idx > 0);
+        sliceNextBtns_[i]->setEnabled(v && count > 0 && idx < count - 1);
+    }
 }
 
 void MainWindow::refreshVolumeInfo() {
@@ -1894,25 +2054,19 @@ void MainWindow::refreshVolumeInfo() {
     lumen_hu_range(v, &lo, &hi);
     huLabel_->setText(QString("%1 … %2").arg(lo, 0, 'f', 0).arg(hi, 0, 'f', 0));
     if (threshSlider_) threshSlider_->setBounds(lo, hi);
-    if (wlRange_) {
-        wlRange_->setBounds(lo, hi);
-        updateWlControls();  // reflect current level/window on the new bounds
-    }
-
-    // Clinically useful Level/Window band (see huBoundLo_/huBoundHi_ doc comment
-    // in MainWindow.h): clamp the volume's raw HU span into [-1400, 1600], but
-    // never so tight that it excludes the window already in effect.
+    // Clinically useful Level/Window band for the spin boxes: cap the raw HU span
+    // to a range that still covers every preset, clamped to this volume and
+    // widened to the current window so a value never sits off-range. Mirrors the
+    // macOS VisualizeControls.wlBounds. The slider keeps the full volume range.
     const float curLo = st_.level - st_.window / 2.0f;
     const float curHi = st_.level + st_.window / 2.0f;
     huBoundLo_ = std::min(std::max(lo, -1400.0f), curLo);
     huBoundHi_ = std::max(std::min(hi, 1600.0f), curHi);
-    if (levelSpin_) {
-        QSignalBlocker b(levelSpin_);
-        levelSpin_->setRange(huBoundLo_, huBoundHi_);
-    }
-    if (windowSpin_) {
-        QSignalBlocker b(windowSpin_);
-        windowSpin_->setRange(1, huBoundHi_ - huBoundLo_);
+    if (levelSpin_) levelSpin_->setRange(huBoundLo_, huBoundHi_);
+    if (windowSpin_) windowSpin_->setRange(1, huBoundHi_ - huBoundLo_);
+    if (wlRange_) {
+        wlRange_->setBounds(lo, hi);
+        updateWlControls();  // reflect current level/window on the new bounds
     }
 
     // Curated patient/study summary from the meta JSON.
@@ -1933,65 +2087,6 @@ void MainWindow::refreshVolumeInfo() {
     patientLabel_->setText(lines.isEmpty() ? "No metadata." : lines.join("\n"));
 }
 
-// A visibility checkbox + read-only color swatch + name — the part of a
-// segment row that both the Segment tab's full-featured list and the 3D tab's
-// simpler visibility-only picker need. The Segment tab adds an active-select
-// button, an editable name, a live voxel count, and delete on top of this;
-// the 3D tab uses this alone (deleting/renaming/activating stays Segment-tab-
-// only, so a glance at the 3D tab can't accidentally lose work).
-QWidget* MainWindow::buildSegmentVisibilityRow(int id) {
-    LumenVolume* v = st_.volume;
-    auto* row = new QWidget;
-    auto* h = new QHBoxLayout(row);
-    h->setContentsMargins(2, 2, 2, 2);
-    h->setSpacing(6);
-
-    auto* vis = new QCheckBox;
-    vis->setChecked(lumen_seg_get_visible(v, id) != 0);
-    connect(vis, &QCheckBox::toggled, this, [this, id](bool on) {
-        lumen_seg_set_visible(st_.volume, id, on ? 1 : 0);
-        refreshCanvas();
-        scheduleMeshRefresh();
-    });
-    h->addWidget(vis);
-
-    int r = 0, g = 0, b = 0;
-    lumen_seg_get_color(v, id, &r, &g, &b);
-    auto* swatch = new QLabel;
-    swatch->setFixedSize(16, 16);
-    swatch->setStyleSheet(
-        QString("background:rgb(%1,%2,%3);border:1px solid #555;border-radius:3px;")
-            .arg(r).arg(g).arg(b));
-    h->addWidget(swatch);
-
-    h->addWidget(new QLabel(segNames_.value(id, QString("Segment %1").arg(id))), 1);
-    return row;
-}
-
-void MainWindow::updateActiveMaskLabel() {
-    if (!activeMaskLabel_) return;
-    LumenVolume* v = st_.volume;
-    const int active = v ? lumen_seg_active(v) : 0;
-    activeMaskLabel_->setText(
-        active == 0 ? "No active mask"
-                    : QString("Active mask: %1")
-                          .arg(segNames_.value(active, QString("Segment %1").arg(active))));
-}
-
-void MainWindow::rebuildThreeDSegmentList() {
-    if (!threeDSegListLayout_) return;
-    QLayoutItem* item = nullptr;
-    while ((item = threeDSegListLayout_->takeAt(0)) != nullptr) {
-        if (item->widget()) item->widget()->deleteLater();
-        delete item;
-    }
-    LumenVolume* v = st_.volume;
-    if (!v) return;
-    const int count = lumen_seg_segment_count(v);
-    for (int i = 0; i < count; ++i)
-        threeDSegListLayout_->addWidget(buildSegmentVisibilityRow(lumen_seg_segment_id_at(v, i)));
-}
-
 void MainWindow::rebuildSegmentList() {
     // Tear down existing rows.
     QLayoutItem* item = nullptr;
@@ -2002,12 +2097,7 @@ void MainWindow::rebuildSegmentList() {
     segCountLabels_.clear();
 
     LumenVolume* v = st_.volume;
-    if (!v) {
-        rebuildThreeDSegmentList();
-        rebuildExportSegmentList();
-        updateActiveMaskLabel();
-        return;
-    }
+    if (!v) return;
     const int count = lumen_seg_segment_count(v);
     const int active = lumen_seg_active(v);
     for (int i = 0; i < count; ++i) {
@@ -2015,7 +2105,7 @@ void MainWindow::rebuildSegmentList() {
         auto* row = new QWidget;
         row->setObjectName("segmentRow");
         row->setStyleSheet(id == active
-                               ? "QWidget#segmentRow{background:#0f3a3d;border:1px solid #16b8c9;"
+                               ? "QWidget#segmentRow{background:#283b66;border:1px solid #4f7cf0;"
                                  "border-radius:6px;}"
                                : "QWidget#segmentRow{background:transparent;border:1px solid transparent;"
                                  "border-radius:6px;}");
@@ -2029,7 +2119,6 @@ void MainWindow::rebuildSegmentList() {
         connect(vis, &QCheckBox::toggled, this, [this, id](bool on) {
             lumen_seg_set_visible(st_.volume, id, on ? 1 : 0);
             refreshCanvas();
-            scheduleMeshRefresh();
         });
         h->addWidget(vis);
 
@@ -2046,7 +2135,7 @@ void MainWindow::rebuildSegmentList() {
         activeBtn->setToolTip("Select active segment");
         activeBtn->setStyleSheet(
             "QToolButton{border:1px solid transparent;border-radius:5px;padding:2px;}"
-            "QToolButton:checked{background:#16b8c9;border-color:#4fe0ec;}"
+            "QToolButton:checked{background:#4f7cf0;border-color:#79a0ff;}"
             "QToolButton:!checked{opacity:0.55;}");
         connect(activeBtn, &QToolButton::clicked, this, [this, id] {
             if (st_.volume) lumen_seg_set_active(st_.volume, id);
@@ -2108,9 +2197,6 @@ void MainWindow::rebuildSegmentList() {
 
         segListLayout_->addWidget(row);
     }
-    rebuildThreeDSegmentList();
-    rebuildExportSegmentList();
-    updateActiveMaskLabel();
 }
 
 void MainWindow::updateSegmentCounts() {
@@ -2179,6 +2265,7 @@ void MainWindow::rebuildExportSegmentList() {
                                     .arg(hist[id]));
         c->setChecked(hist[id] > 0);
         c->setEnabled(hist[id] > 0);
+        c->setToolTip("Include this segment in the STL export.");
         exportSegChecks_[id] = c;
         exportSegLayout_->addWidget(c);
     }
