@@ -98,6 +98,11 @@ struct MeshSceneView: NSViewRepresentable {
         let scene = SCNScene()
         view.scene = scene
         view.allowsCameraControl = true
+        // Use an actual orbital/arcball controller so dragging rotates around the
+        // framed surface instead of behaving like a free camera. This matches the
+        // Windows viewer's orbit-around-centre interaction.
+        view.defaultCameraController.interactionMode = .orbitArcball
+        view.defaultCameraController.inertiaEnabled = true
         view.autoenablesDefaultLighting = true
         view.backgroundColor = .black
         view.antialiasingMode = .multisampling4X
@@ -256,7 +261,19 @@ struct MeshSceneView: NSViewRepresentable {
             let y = c.y + direction.y * coordinator.cameraDistance
             let z = c.z + direction.z * coordinator.cameraDistance
             camera.position = SCNVector3(x, y, z)
-            camera.look(at: c)
+            // Supply an explicit up vector. SceneKit's implicit up direction can
+            // become unstable for the +/-Z views, making the inferior view appear
+            // empty even though the mesh is still present.
+            let up = (action == .superior || action == .inferior)
+                ? SCNVector3(0, 1, 0) : SCNVector3(0, 0, 1)
+            camera.look(at: c, up: up, localFront: SCNVector3(0, 0, -1))
+            // Reframe after changing orientation so SceneKit refreshes its target
+            // and clip range, including the underside view.
+            let nodes = view.scene?.rootNode.childNodes.filter { $0.name == "mesh" } ?? []
+            if !nodes.isEmpty {
+                view.defaultCameraController.frameNodes(nodes)
+                camera.look(at: c, up: up, localFront: SCNVector3(0, 0, -1))
+            }
         }
     }
 

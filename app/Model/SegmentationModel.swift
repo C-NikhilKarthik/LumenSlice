@@ -279,6 +279,12 @@ final class SegmentationModel: ObservableObject {
         lumen_seg_push_undo(h)
         lumen_seg_remove(h, Int32(id))
         names[id] = nil
+        // Deleting a segment must not leave its threshold preview painted over
+        // the slices. Clear the published images first so no stale frame survives
+        // while the replacement mask overlay is being extracted.
+        thresholdPreviewArmed = false
+        overlayStore.images = [nil, nil, nil]
+        if tool == .threshold { tool = .paint }
         reloadSegments()
         refreshAllOverlays()
         meshRevision &+= 1

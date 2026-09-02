@@ -9,11 +9,13 @@ struct ExportControls: View {
     @EnvironmentObject var mesh: MeshModel
     @EnvironmentObject var seg: SegmentationModel
     @State private var message: String?
+    @State private var selectedExportIDs = Set<Int>()
 
     // The segments that will go into the STL: visible + non-empty. Toggling a
     // segment's eye in the list below includes/excludes it from the export.
     private var exportIDs: [Int] {
-        seg.segments.filter { $0.visible && $0.voxels > 0 }.map(\.id)
+        seg.segments.filter { selectedExportIDs.contains($0.id) && $0.voxels > 0 }
+            .map(\.id)
     }
 
     var body: some View {
@@ -22,16 +24,23 @@ struct ExportControls: View {
             // union of the visible, non-empty ones (mirrors the 3D tab).
             if !seg.segments.isEmpty {
                 Section {
-                    ForEach(seg.segments) { row in
-                        SegmentListRow(row: row,
-                                       isActive: row.id == seg.activeID,
-                                       seg: seg)
+                    ForEach(seg.segments.filter { $0.voxels > 0 }) { row in
+                        Toggle(isOn: Binding(
+                            get: { selectedExportIDs.contains(row.id) },
+                            set: { included in
+                                if included { selectedExportIDs.insert(row.id) }
+                                else { selectedExportIDs.remove(row.id) }
+                            })) {
+                            HStack(spacing: 7) {
+                                Circle().fill(row.color).frame(width: 12, height: 12)
+                                Text("\(row.name) (\(row.voxels.formatted()) voxels)")
+                            }
+                        }
                     }
                 } header: {
                     InfoHeader("Segments",
-                               help: "The STL is the union of the visible, non-empty "
-                                   + "segments. Toggle the eye to include or exclude a "
-                                   + "segment.")
+                               help: "Choose the non-empty segments to write to STL. "
+                                   + "This selection is independent of 3D visibility.")
                 }
             }
 
@@ -83,6 +92,17 @@ struct ExportControls: View {
         }
         .formStyle(.grouped)
         .scrollContentBackground(.hidden)
+        .onAppear { reconcileSelection() }
+        .onChange(of: seg.segments) { _, _ in reconcileSelection() }
+    }
+
+    private func reconcileSelection() {
+        let available = Set(seg.segments.filter { $0.voxels > 0 }.map(\.id))
+        if selectedExportIDs.isEmpty {
+            selectedExportIDs = available
+        } else {
+            selectedExportIDs.formIntersection(available)
+        }
     }
 
     private func exportSTL() {

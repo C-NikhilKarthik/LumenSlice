@@ -2194,6 +2194,13 @@ void MainWindow::rebuildSegmentList() {
             lumen_seg_push_undo(st_.volume);
             lumen_seg_remove(st_.volume, id);
             segNames_.remove(id);
+            st_.thresholdPreviewArmed = false;
+            if (st_.tool == Tool::Threshold) {
+                st_.tool = Tool::Paint;
+                if (toolDetail_) toolDetail_->setCurrentIndex(3);
+                if (toolGroup_ && toolGroup_->button(3))
+                    toolGroup_->button(3)->setChecked(true);
+            }
             rebuildSegmentList();
             updateSegmentCounts();
             updateUndoRedo();

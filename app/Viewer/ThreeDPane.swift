@@ -90,6 +90,11 @@ struct ThreeDPane: View {
             .buttonStyle(.bordered)
             .controlSize(.small)
             .disabled(seg.voxelCount == 0 || mesh.isGenerating)
+
+            Text("Drag to orbit • scroll or pinch to zoom • Shift-drag to pan")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(12)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
