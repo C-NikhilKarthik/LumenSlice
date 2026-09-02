@@ -43,10 +43,12 @@ struct ThreeDControls: View {
 
             Section {
                 Toggle("Volume rendering", isOn: $mesh.volumeRendering)
+                Toggle("Live-update 3D on edits", isOn: $mesh.liveUpdate3D)
             } header: {
                 InfoHeader("Volume",
                            help: "Fast downsampled preview controlled by window and "
-                               + "level.")
+                               + "level. Live-update rebuilds the surface after each "
+                               + "committed edit and can be slow on large scans.")
             }
 
             Section {

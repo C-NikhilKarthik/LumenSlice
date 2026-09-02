@@ -27,6 +27,8 @@ struct MeshSceneView: NSViewRepresentable {
     var volumeTexture = Data()
     var volumeTextureDimensions: SIMD3<Int> = .zero
     var volumeTextureRevision = 0
+    var cameraAction: MeshCameraAction? = nil
+    var cameraActionRevision = 0
 
     final class Coordinator {
         // Identity of the geometry set we last built nodes for, so orbit/zoom (which
@@ -39,6 +41,10 @@ struct MeshSceneView: NSViewRepresentable {
         // Whether we've framed the camera to markups (only matters when there is no
         // mesh to frame to). Reset when markups go empty.
         var framedMarkups = false
+        var lastCameraAction: MeshCameraAction?
+        var lastCameraActionRevision = -1
+        var cameraCenter = SCNVector3Zero
+        var cameraDistance: CGFloat = 300
         // Kept fresh each update so the overlay callback reaches the current closure.
         var parent: MeshSceneView
         weak var overlay: LassoOverlayView?
@@ -148,6 +154,10 @@ struct MeshSceneView: NSViewRepresentable {
                 // volume origin (a corner of the data).
                 let (minB, maxB) = bounds(of: meshNodes)
                 let extent = max(maxB.x - minB.x, max(maxB.y - minB.y, maxB.z - minB.z))
+                coord.cameraCenter = SCNVector3((minB.x + maxB.x) / 2,
+                                                (minB.y + maxB.y) / 2,
+                                                (minB.z + maxB.z) / 2)
+                coord.cameraDistance = max(extent * 2.4, 10)
                 let gnomon = Self.makeGnomon(length: CGFloat(max(extent, 1)) * 0.18)
                 gnomon.position = minB
                 root.addChildNode(gnomon)
@@ -155,6 +165,13 @@ struct MeshSceneView: NSViewRepresentable {
                     view.defaultCameraController.frameNodes(meshNodes)
                 }
             }
+        }
+
+        if let action = cameraAction,
+           cameraActionRevision != coord.lastCameraActionRevision {
+            coord.lastCameraAction = action
+            coord.lastCameraActionRevision = cameraActionRevision
+            applyCameraAction(action, to: view, coordinator: coord)
         }
 
         // --- Markups: rebuild only when their signature changes. ------------------
@@ -206,6 +223,40 @@ struct MeshSceneView: NSViewRepresentable {
                     view.defaultCameraController.frameNodes(volumeNodes)
                 }
             }
+        }
+    }
+
+    private func applyCameraAction(_ action: MeshCameraAction, to view: SCNView,
+                                   coordinator: Coordinator) {
+        guard !geometries.isEmpty, let camera = view.pointOfView else { return }
+        let c = coordinator.cameraCenter
+        switch action {
+        case .reset:
+            let nodes = view.scene?.rootNode.childNodes.filter { $0.name == "mesh" } ?? []
+            if !nodes.isEmpty { view.defaultCameraController.frameNodes(nodes) }
+        case .zoomIn, .zoomOut:
+            let factor: CGFloat = action == .zoomIn ? 0.8 : 1.25
+            let p = camera.position
+            let x = c.x + (p.x - c.x) * factor
+            let y = c.y + (p.y - c.y) * factor
+            let z = c.z + (p.z - c.z) * factor
+            camera.position = SCNVector3(x, y, z)
+        default:
+            let direction: SCNVector3
+            switch action {
+            case .anterior: direction = SCNVector3(0, 1, 0)
+            case .posterior: direction = SCNVector3(0, -1, 0)
+            case .left: direction = SCNVector3(-1, 0, 0)
+            case .right: direction = SCNVector3(1, 0, 0)
+            case .superior: direction = SCNVector3(0, 0, 1)
+            case .inferior: direction = SCNVector3(0, 0, -1)
+            default: return
+            }
+            let x = c.x + direction.x * coordinator.cameraDistance
+            let y = c.y + direction.y * coordinator.cameraDistance
+            let z = c.z + direction.z * coordinator.cameraDistance
+            camera.position = SCNVector3(x, y, z)
+            camera.look(at: c)
         }
     }
 
@@ -509,7 +560,9 @@ struct MeshCanvas: View {
                               volumeRendering: mesh.volumeRendering,
                               volumeTexture: model.volumeTexture,
                               volumeTextureDimensions: model.volumeTextureDimensions,
-                              volumeTextureRevision: model.volumeTextureRevision)
+                              volumeTextureRevision: model.volumeTextureRevision,
+                              cameraAction: mesh.cameraAction,
+                              cameraActionRevision: mesh.cameraActionRevision)
             } else {
                 VStack(spacing: 12) {
                     Image(systemName: "cube.transparent")

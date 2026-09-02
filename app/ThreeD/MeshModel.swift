@@ -3,6 +3,11 @@ import Combine
 import SceneKit
 import LumenCore
 
+enum MeshCameraAction: Equatable {
+    case reset, zoomIn, zoomOut
+    case anterior, posterior, left, right, superior, inferior
+}
+
 // Drives marching-cubes generation and holds one colored SCNGeometry per visible
 // segment. Follows the eng review's "snapshot mask, compute off-handle" decision:
 // each segment's mask is binarized + snapshotted on the main thread, marching cubes
@@ -20,6 +25,10 @@ final class MeshModel: ObservableObject {
 
     @Published var smoothing: Int = 1
     @Published var downsample: Int = 1
+    @Published var liveUpdate3D = UserDefaults.standard.object(
+        forKey: "liveUpdate3D") as? Bool ?? false {
+        didSet { UserDefaults.standard.set(liveUpdate3D, forKey: "liveUpdate3D") }
+    }
     // Scissor mode: when on, a freehand lasso over the 3D surface cuts the mask
     // (and camera orbit is suspended while drawing). Toggled from the 3D controls.
     @Published var scissorActive = false
@@ -31,6 +40,8 @@ final class MeshModel: ObservableObject {
     @Published private(set) var triangleCount = 0
     @Published private(set) var vertexCount = 0
     @Published private(set) var geometries: [SCNGeometry] = []
+    @Published var cameraAction: MeshCameraAction? = nil
+    @Published var cameraActionRevision = 0
 
     init(volume: VolumeModel, segmentation: SegmentationModel) {
         self.volume = volume
@@ -48,7 +59,10 @@ final class MeshModel: ObservableObject {
         // Threshold slider previews and mask-source previews remain 2D-only.
         segmentation.$meshRevision
             .dropFirst()
-            .sink { [weak self] _ in self?.scheduleAutomaticGenerate() }
+            .sink { [weak self] _ in
+                guard let self, self.liveUpdate3D else { return }
+                self.scheduleAutomaticGenerate()
+            }
             .store(in: &cancellables)
     }
 

@@ -37,6 +37,8 @@ namespace lumen {
 // the number of voxels whose label changed (newly claimed or reassigned). No-op if
 // the mask is empty or carries no seeds.
 long grow_from_seeds(const Volume& vol, LabelVolume& mask, int max_iters,
-                     int margin, float distance_penalty = 0.0f);
+                     int margin, float distance_penalty = 0.0f,
+                     bool restrict_to_hu = false, float hu_lo = 0.0f,
+                     float hu_hi = 0.0f);
 
 } // namespace lumen

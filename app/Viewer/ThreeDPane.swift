@@ -22,6 +22,33 @@ struct ThreeDPane: View {
                     .font(.headline)
                 Spacer()
                 if mesh.triangleCount > 0 {
+                    Button { camera(.reset) } label: {
+                        Image(systemName: "arrow.counterclockwise")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Reset / reframe 3D view")
+                    Button { camera(.zoomOut) } label: {
+                        Image(systemName: "minus.magnifyingglass")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Zoom out")
+                    Button { camera(.zoomIn) } label: {
+                        Image(systemName: "plus.magnifyingglass")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Zoom in")
+                    Menu {
+                        Button("Anterior") { camera(.anterior) }
+                        Button("Posterior") { camera(.posterior) }
+                        Button("Left") { camera(.left) }
+                        Button("Right") { camera(.right) }
+                        Button("Superior") { camera(.superior) }
+                        Button("Inferior") { camera(.inferior) }
+                    } label: {
+                        Image(systemName: "cube")
+                    }
+                    .menuStyle(.borderlessButton)
+                    .help("Standard anatomical views")
                     Text("\(mesh.triangleCount.formatted()) tris")
                         .font(.caption)
                         .monospacedDigit()
@@ -73,6 +100,11 @@ struct ThreeDPane: View {
         .shadow(color: .black.opacity(0.25), radius: 8, y: 3)
     }
 
+    private func camera(_ action: MeshCameraAction) {
+        mesh.cameraAction = action
+        mesh.cameraActionRevision &+= 1
+    }
+
     private var buttonTitle: String {
         if mesh.isGenerating { return "Generating…" }
         return mesh.triangleCount > 0 ? "Update 3D" : "Generate 3D"
@@ -106,7 +138,9 @@ struct ThreeDPane: View {
                               volumeRendering: mesh.volumeRendering,
                               volumeTexture: model.volumeTexture,
                               volumeTextureDimensions: model.volumeTextureDimensions,
-                              volumeTextureRevision: model.volumeTextureRevision)
+                              volumeTextureRevision: model.volumeTextureRevision,
+                              cameraAction: mesh.cameraAction,
+                              cameraActionRevision: mesh.cameraActionRevision)
                     .clipShape(RoundedRectangle(cornerRadius: 10))
                     .overlay(alignment: .top) {
                         if mesh.scissorActive { ScissorBanner() }

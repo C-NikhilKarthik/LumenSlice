@@ -263,7 +263,7 @@ final class SegmentationModel: ObservableObject {
     }
 
     func addSegment() {
-        guard let h = volume.handle else { return }
+        guard let h = volume.handle, !isBusy, !growPreviewActive else { return }
         let (r, g, b) = Self.palette[nextColorIndex % Self.palette.count]
         nextColorIndex += 1
         let id = Int(lumen_seg_add(h, Int32(r * 255), Int32(g * 255), Int32(b * 255)))
@@ -274,12 +274,14 @@ final class SegmentationModel: ObservableObject {
     }
 
     func removeSegment(_ id: Int) {
-        guard let h = volume.handle else { return }
+        guard let h = volume.handle, !isBusy else { return }
+        if growPreviewActive { cancelGrowPreview() }
         lumen_seg_push_undo(h)
         lumen_seg_remove(h, Int32(id))
         names[id] = nil
         reloadSegments()
         refreshAllOverlays()
+        meshRevision &+= 1
     }
 
     func setActive(_ id: Int) {

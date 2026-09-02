@@ -45,7 +45,8 @@ bool seed_bbox(const LabelVolume& mask, int margin, int& x0, int& y0, int& z0,
 } // namespace
 
 long grow_from_seeds(const Volume& vol, LabelVolume& mask, int max_iters,
-                     int margin, float distance_penalty) {
+                     int margin, float distance_penalty, bool restrict_to_hu,
+                     float hu_lo, float hu_hi) {
     if (!vol.valid() || !mask.valid()) return 0;
     if (mask.width() != vol.width || mask.height() != vol.height ||
         mask.depth() != vol.depth) {
@@ -53,6 +54,7 @@ long grow_from_seeds(const Volume& vol, LabelVolume& mask, int max_iters,
     }
     if (max_iters < 1) max_iters = 1;
     distance_penalty = std::max(0.0f, distance_penalty);
+    if (hu_lo > hu_hi) std::swap(hu_lo, hu_hi);
 
     int x0, y0, z0, x1, y1, z1;
     if (!seed_bbox(mask, margin, x0, y0, z0, x1, y1, z1)) return 0;
@@ -138,6 +140,12 @@ long grow_from_seeds(const Volume& vol, LabelVolume& mask, int max_iters,
             if (nx < 0 || ny < 0 || nz < 0 || nx >= bw || ny >= bh || nz >= bd)
                 continue;
             const std::size_t ni = bidx(nx, ny, nz);
+            // Existing seeds remain valid sources. Only newly claimed voxels
+            // are constrained by the active intensity mask.
+            if (restrict_to_hu && labels[ni] == 0 &&
+                (hu[ni] < hu_lo || hu[ni] > hu_hi)) {
+                continue;
+            }
             const float newCost = current.cost +
                 std::fabs(hu[current.index] - hu[ni]) +
                 distance_penalty * n.distance;

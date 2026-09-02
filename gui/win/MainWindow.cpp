@@ -1543,12 +1543,13 @@ QColor MainWindow::nextSegmentColor() const {
 
 void MainWindow::addSegment() {
     LumenVolume* v = st_.volume;
-    if (!v) return;
+    if (!v || st_.busy || heavyWatcher_.isRunning() || generating_) return;
     const QColor c = nextSegmentColor();
     const int id = lumen_seg_add(v, c.red(), c.green(), c.blue());
     if (id == 0) return;
     segNames_[id] = QString("Segment %1").arg(id);
     rebuildSegmentList();
+    rebuildExportSegmentList();
     updateSegmentCounts();
     refreshCanvas();
 }
@@ -2187,11 +2188,17 @@ void MainWindow::rebuildSegmentList() {
         del->setIconSize(QSize(16, 16));
         del->setToolTip("Delete segment");
         connect(del, &QToolButton::clicked, this, [this, id] {
+            if (!st_.volume || st_.busy || heavyWatcher_.isRunning() || generating_)
+                return;
+            cancelGrowPreview();
+            lumen_seg_push_undo(st_.volume);
             lumen_seg_remove(st_.volume, id);
             segNames_.remove(id);
             rebuildSegmentList();
             updateSegmentCounts();
+            updateUndoRedo();
             refreshCanvas();
+            scheduleMeshRefresh();
         });
         h->addWidget(del);
 

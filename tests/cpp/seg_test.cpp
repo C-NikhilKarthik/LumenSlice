@@ -520,6 +520,22 @@ static void test_grow_from_seeds() {
     CHECK(editor.mask().at(0, 0, 0) == 1, "low-HU corner falls to seed 1");
     CHECK(editor.mask().at(n - 1, n - 1, n - 1) == 2,
           "high-HU corner falls to seed 2");
+
+    // An active intensity mask is a hard boundary for new grow voxels. Existing
+    // seeds remain valid, but propagation may not claim HU-outside voxels.
+    Volume masked = make_volume(7, 100.0f);
+    for (int z = 0; z < 7; ++z)
+        for (int y = 0; y < 7; ++y)
+            for (int x = 0; x < 3; ++x) set_hu(masked, x, y, z, 0.0f);
+    SegmentEditor constrained;
+    constrained.reset_to(masked, Rgb{0, 180, 180});
+    constrained.paint(Axis::Axial, 3, 1, 3, 1, true);
+    constrained.add_segment(Rgb{200, 60, 60});
+    constrained.paint(Axis::Axial, 3, 5, 3, 1, true);
+    constrained.apply_intensity_mask(0.0f, 0.0f);
+    constrained.grow_from_seeds(50, 8);
+    CHECK(constrained.mask().at(6, 0, 3) == 0,
+          "masked grow does not claim HU-outside voxels");
 }
 
 // 3D scissor: an orthographic MVP that maps voxel (x,y) to screen (x, H-y), with a
