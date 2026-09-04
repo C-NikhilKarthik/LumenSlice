@@ -562,8 +562,7 @@ struct MeshCanvas: View {
         ZStack {
             Color.black
             if !mesh.geometries.isEmpty || !markup.markups.isEmpty
-                || !markup.pending.isEmpty
-                || (mesh.volumeRendering && !model.volumeTexture.isEmpty) {
+                || !markup.pending.isEmpty {
                 MeshSceneView(geometries: mesh.geometries,
                               scissorActive: mesh.scissorActive,
                               onScissor: performScissor,
@@ -574,10 +573,6 @@ struct MeshCanvas: View {
                               focusVoxel: model.focus,
                               volumeDimensions: SIMD3(model.width, model.height, model.depth),
                               spacing: model.spacing,
-                              volumeRendering: mesh.volumeRendering,
-                              volumeTexture: model.volumeTexture,
-                              volumeTextureDimensions: model.volumeTextureDimensions,
-                              volumeTextureRevision: model.volumeTextureRevision,
                               cameraAction: mesh.cameraAction,
                               cameraActionRevision: mesh.cameraActionRevision)
             } else {
