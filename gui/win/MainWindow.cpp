@@ -12,6 +12,7 @@
 #include <QDoubleSpinBox>
 #include <QDragEnterEvent>
 #include <QDropEvent>
+#include <QEvent>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
@@ -32,6 +33,7 @@
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QMimeData>
+#include <QMouseEvent>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QSignalBlocker>
@@ -44,6 +46,7 @@
 #include <QTableWidget>
 #include <QTimer>
 #include <QToolButton>
+#include <QToolTip>
 #include <QUrl>
 #include <QVBoxLayout>
 #include <QtConcurrent/QtConcurrent>
@@ -66,10 +69,50 @@ const QColor kPalette[] = {
     QColor(255, 150, 90), QColor(160, 220, 120),
 };
 
-QGroupBox* section(const QString& title) {
+// A small "i" affordance mirroring the macOS InfoHeader: hovering shows the
+// section's help as a tooltip, and a click pins it on screen. It parents to the
+// section's QGroupBox and pins itself to the top-right of the frame, following the
+// box on resize. No Q_OBJECT: it only overrides virtuals, adds no signals/slots.
+class InfoDot : public QToolButton {
+public:
+    InfoDot(const QString& help, QWidget* parent)
+        : QToolButton(parent), help_(help) {
+        setText(QStringLiteral("i"));
+        setToolTip(help);
+        setCursor(Qt::WhatsThisCursor);
+        setFocusPolicy(Qt::NoFocus);
+        setFixedSize(16, 16);
+        setStyleSheet(
+            "QToolButton{color:#8b93a7;border:1px solid #3a3f4c;border-radius:8px;"
+            "font:italic bold 10px 'Georgia',serif;padding:0;background:transparent;}"
+            "QToolButton:hover{color:#e7e9ef;border-color:#4f7cf0;}");
+        if (parent) parent->installEventFilter(this);
+        reposition();
+    }
+
+protected:
+    bool eventFilter(QObject* obj, QEvent* ev) override {
+        if (ev->type() == QEvent::Resize || ev->type() == QEvent::Show) reposition();
+        return QToolButton::eventFilter(obj, ev);
+    }
+    void mousePressEvent(QMouseEvent* ev) override {
+        QToolTip::showText(ev->globalPosition().toPoint(), help_, this);
+    }
+
+private:
+    void reposition() {
+        if (QWidget* p = parentWidget()) move(p->width() - width() - 8, 3);
+        raise();
+    }
+    QString help_;
+};
+
+// Titled group box. When `help` is given, a top-right "i" reveals it (macOS parity).
+QGroupBox* section(const QString& title, const QString& help = QString()) {
     auto* box = new QGroupBox(title);
     auto* v = new QVBoxLayout(box);
     v->setSpacing(6);
+    if (!help.isEmpty()) new InfoDot(help, box);
     return box;
 }
 
@@ -157,9 +200,11 @@ MainWindow::MainWindow() {
     connect(&countsTimer_, &QTimer::timeout, this,
             &MainWindow::recomputeSegmentCounts);
     connect(&heavyWatcher_, &QFutureWatcher<void>::finished, this, [this] {
+        bool grewPreview = false;
         if (growPreviewPending_) {
             growPreviewPending_ = false;
             growPreviewActive_ = true;
+            grewPreview = true;
             if (growSeedsBtn_) growSeedsBtn_->setVisible(false);
             if (growApplyBtn_) growApplyBtn_->setVisible(true);
             if (growCancelBtn_) growCancelBtn_->setVisible(true);
@@ -174,6 +219,9 @@ MainWindow::MainWindow() {
         // other mask ops that share this watcher (their mask state is unchanged).
         updateMaskIndicator();
         if (heavyRefreshMesh_) scheduleMeshRefresh();
+        // A grow-from-seeds preview is a deliberate "show me the 3D result" step, so
+        // build the surface now, independent of the live-update opt-in.
+        if (grewPreview) generateMesh();
     });
     // Throttle slice repaints while wheel-scrolling (see onSliceScrolled).
     scrollThrottle_.setSingleShot(true);
@@ -255,7 +303,9 @@ QWidget* MainWindow::buildVisualizePanel() {
     body(statusBox)->addWidget(statusLabel_);
     v->addWidget(statusBox);
 
-    auto* volBox = section("Volume");
+    auto* volBox = section("Volume",
+        "Scan geometry read from the DICOM headers: the voxel grid, the physical "
+        "voxel spacing in millimetres, and the Hounsfield-unit range.");
     dimsLabel_ = new QLabel("—");
     spacingLabel_ = new QLabel("—");
     huLabel_ = new QLabel("—");
@@ -266,7 +316,9 @@ QWidget* MainWindow::buildVisualizePanel() {
     body(volBox)->addLayout(volForm);
     v->addWidget(volBox);
 
-    auto* metaBox = section("Patient / Study");
+    auto* metaBox = section("Patient / Study",
+        "Identifying study fields from the DICOM headers. Use Inspect all metadata "
+        "for the full tag list.");
     patientLabel_ = new QLabel("—");
     patientLabel_->setWordWrap(true);
     body(metaBox)->addWidget(patientLabel_);
@@ -276,7 +328,10 @@ QWidget* MainWindow::buildVisualizePanel() {
     body(metaBox)->addWidget(inspectBtn);
     v->addWidget(metaBox);
 
-    auto* wlBox = section("Window / Level (HU)");
+    auto* wlBox = section("Window / Level (HU)",
+        "Level is brightness (the HU shown mid-grey); Window is contrast (the HU "
+        "width mapped black to white). Drag the handles, drag on a slice, or type "
+        "exact values.");
     body(wlBox)->addWidget(new QLabel(
         "Drag the two handles to set the visible HU window (low … high), drag on "
         "a slice, or type exact Level / Window values."));
@@ -338,7 +393,8 @@ QWidget* MainWindow::buildVisualizePanel() {
     body(wlBox)->addLayout(presets);
     v->addWidget(wlBox);
 
-    auto* ovBox = section("Overlays");
+    auto* ovBox = section("Overlays",
+        "Toggle the crosshair, orientation letters, and other on-slice guides.");
     crosshairCheck_ = new QCheckBox("Crosshair lines");
     crosshairCheck_->setChecked(true);
     connect(crosshairCheck_, &QCheckBox::toggled, this, [this](bool on) {
@@ -371,7 +427,9 @@ QWidget* MainWindow::buildSegmentPanel() {
     v->setSpacing(10);
 
     // Segment list.
-    auto* segBox = section("Segments");
+    auto* segBox = section("Segments",
+        "Add, colour, rename, hide, and pick the active segment. Edits always target "
+        "the active segment.");
     auto* addBtn = new QPushButton("+ Add segment");
     addBtn->setObjectName("accent");
     addBtn->setToolTip("Add a new empty segment to label.");
@@ -385,7 +443,9 @@ QWidget* MainWindow::buildSegmentPanel() {
     v->addWidget(segBox);
 
     // Tool selector.
-    auto* toolBox = section("Tool");
+    auto* toolBox = section("Tool",
+        "How you edit the active segment: Threshold previews an HU range, Fill "
+        "flood-fills, Trace grabs a level set, Paint and Erase brush by hand.");
     auto* toolRow = new QHBoxLayout;
     toolRow->setSpacing(0);
     auto* toolGroup = new QButtonGroup(this);
@@ -407,7 +467,7 @@ QWidget* MainWindow::buildSegmentPanel() {
         toolGroup->addButton(b, i);
         toolRow->addWidget(b, 1);
     }
-    toolGroup->button(0)->setChecked(true);
+    toolGroup->button(3)->setChecked(true);  // open on Paint (index 3), like macOS
     body(toolBox)->addLayout(toolRow);
     v->addWidget(toolBox);
 
@@ -572,10 +632,14 @@ QWidget* MainWindow::buildSegmentPanel() {
         toolDetail_->setCurrentIndex(kMap[id].page);
         refreshCanvas();
     });
-    st_.tool = Tool::Threshold;
+    st_.tool = Tool::Paint;              // open ready to paint (macOS parity)
+    toolDetail_->setCurrentIndex(3);     // brush page matches the Paint button
 
     // Grow from seeds.
-    auto* seedsBox = section("Grow from seeds");
+    auto* seedsBox = section("Grow from seeds",
+        "Paint a seed in each region with a different segment. Initialize a preview, "
+        "inspect it through the slices, then apply it or cancel and add more seeds. "
+        "Higher seed locality keeps growth closer to the painted seeds.");
     body(seedsBox)->addWidget(new QLabel(
         "Paint a seed in each region using a different segment. Initialize a "
         "preview, inspect it through the slices, then apply or cancel it."));
@@ -616,7 +680,9 @@ QWidget* MainWindow::buildSegmentPanel() {
     v->addWidget(seedsBox);
 
     // Edit.
-    auto* editBox = section("Edit");
+    auto* editBox = section("Edit",
+        "Undo or redo the last edit, toggle the mask overlay, or clear every voxel "
+        "from the active segment.");
     auto* editRow = new QHBoxLayout;
     undoBtn_ = new QPushButton("Undo");
     redoBtn_ = new QPushButton("Redo");
@@ -660,16 +726,10 @@ QWidget* MainWindow::buildThreeDPanel() {
     v->addWidget(new QLabel("Build a 3D surface from the segmentation mask using "
                             "marching cubes."));
 
-    volumeRenderCheck_ = new QCheckBox("Enable volume rendering");
-    volumeRenderCheck_->setToolTip(
-        "Ray-march the normalized scan texture in the 3D pane.");
-    connect(volumeRenderCheck_, &QCheckBox::toggled, this, [this](bool on) {
-        if (meshView_) meshView_->setVolumeRendering(on);
-        if (on) refreshVolumeTexture();
-    });
-    v->addWidget(volumeRenderCheck_);
-
-    auto* qualBox = section("Quality");
+    auto* qualBox = section("Quality",
+        "Smoothing rounds the surface (0 keeps raw voxel steps). Lower resolution "
+        "downsamples before marching cubes: fewer triangles, faster and coarser. Use "
+        "Full for the final export.");
     auto* smoothRow = new QHBoxLayout;
     smoothRow->addWidget(new QLabel("Smoothing"));
     smoothingSpin_ = new QSpinBox;
@@ -709,14 +769,18 @@ QWidget* MainWindow::buildThreeDPanel() {
             [this](bool on) { autoMesh3D_ = on; });
     v->addWidget(autoMeshCheck);
 
-    auto* meshBox = section("Mesh");
+    auto* meshBox = section("Mesh",
+        "Triangle and vertex counts for the built surface. Drag to orbit, scroll to "
+        "zoom.");
     meshInfoLabel_ = new QLabel("No surface yet.");
     meshInfoLabel_->setWordWrap(true);
     body(meshBox)->addWidget(meshInfoLabel_);
     body(meshBox)->addWidget(new QLabel("Drag to orbit, scroll to zoom."));
     v->addWidget(meshBox);
 
-    auto* scissorBox = section("Scissor cut");
+    auto* scissorBox = section("Scissor cut",
+        "Draw a freehand loop over the surface to erase every voxel inside it through "
+        "the full depth, then the surface rebuilds. Turn it off to orbit again.");
     body(scissorBox)->addWidget(new QLabel(
         "Draw a freehand loop over the surface to cut voxels through the depth, "
         "then the surface rebuilds."));
@@ -748,7 +812,9 @@ QWidget* MainWindow::buildExportPanel() {
     auto* v = new QVBoxLayout(page);
     v->setSpacing(10);
 
-    auto* meshBox = section("3D mesh (STL)");
+    auto* meshBox = section("3D mesh (STL)",
+        "Export the chosen segments' surfaces to a binary STL, in millimetres. One "
+        "file combines them, or write one file per segment.");
     body(meshBox)->addWidget(new QLabel("Choose which segments to export:"));
 
     exportSegContainer_ = new QWidget;
@@ -1387,11 +1453,6 @@ void MainWindow::adoptLoadedVolume(const LoadResult& r) {
     if (markupPlaceCheck_) markupPlaceCheck_->setChecked(false);
 
     setStatus(QString::fromStdString(status));
-    // Volume texture extraction is intentionally lazy. It is a multi-million
-    // voxel transfer and must not block startup or the Visualize tab when the
-    // optional volume-rendering checkbox is off.
-    if (volumeRenderCheck_ && volumeRenderCheck_->isChecked())
-        refreshVolumeTexture();
     refreshAll();
     updateMaskIndicator();  // a fresh load clears any intensity mask
     meshView_->clearMeshes();
@@ -1441,25 +1502,7 @@ void MainWindow::onWindowLevelDragged(float dLevel, float dWindow) {
     st_.level = std::clamp(st_.level + dLevel, huBoundLo_, huBoundHi_);
     st_.window = std::clamp(st_.window + dWindow, 1.0f, huBoundHi_ - huBoundLo_);
     updateWlControls();
-    if (volumeRenderCheck_ && volumeRenderCheck_->isChecked())
-        refreshVolumeTexture();
     refreshCanvas();
-}
-
-void MainWindow::refreshVolumeTexture() {
-    LumenVolume* v = st_.volume;
-    if (!v || !meshView_) return;
-    int w = 0, h = 0, d = 0;
-    const unsigned char* data = lumen_extract_volume_texture(
-        v, st_.level, st_.window, 160, &w, &h, &d);
-    if (!data || w <= 0 || h <= 0 || d <= 0) {
-        meshView_->clearVolumeTexture();
-        return;
-    }
-    float sx = 1, sy = 1, sz = 1;
-    lumen_spacing(v, &sx, &sy, &sz);
-    std::vector<unsigned char> copy(data, data + size_t(w) * size_t(h) * size_t(d));
-    meshView_->setVolumeTexture(std::move(copy), w, h, d, sx, sy, sz);
 }
 
 void MainWindow::onFocusPicked(int x, int y, int z) {
@@ -1548,6 +1591,13 @@ void MainWindow::addSegment() {
     const int id = lumen_seg_add(v, c.red(), c.green(), c.blue());
     if (id == 0) return;
     segNames_[id] = QString("Segment %1").arg(id);
+    // A new empty segment starts on the Paint tool so the user can label it right
+    // away (macOS parity); only switch away from Threshold, leaving other tools be.
+    if (st_.tool == Tool::Threshold) {
+        st_.tool = Tool::Paint;
+        if (toolGroup_ && toolGroup_->button(3)) toolGroup_->button(3)->setChecked(true);
+        if (toolDetail_) toolDetail_->setCurrentIndex(3);
+    }
     rebuildSegmentList();
     rebuildExportSegmentList();
     updateSegmentCounts();

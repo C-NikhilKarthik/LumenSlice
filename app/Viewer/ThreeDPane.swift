@@ -128,8 +128,7 @@ struct ThreeDPane: View {
             RoundedRectangle(cornerRadius: 10)
                 .fill(.black)
             if !mesh.geometries.isEmpty || !markup.markups.isEmpty
-                || !markup.pending.isEmpty
-                || (mesh.volumeRendering && !model.volumeTexture.isEmpty) {
+                || !markup.pending.isEmpty {
                 MeshSceneView(geometries: mesh.geometries,
                               scissorActive: mesh.scissorActive,
                               onScissor: performScissor,
@@ -140,10 +139,6 @@ struct ThreeDPane: View {
                               focusVoxel: model.focus,
                               volumeDimensions: SIMD3(model.width, model.height, model.depth),
                               spacing: model.spacing,
-                              volumeRendering: mesh.volumeRendering,
-                              volumeTexture: model.volumeTexture,
-                              volumeTextureDimensions: model.volumeTextureDimensions,
-                              volumeTextureRevision: model.volumeTextureRevision,
                               cameraAction: mesh.cameraAction,
                               cameraActionRevision: mesh.cameraActionRevision)
                     .clipShape(RoundedRectangle(cornerRadius: 10))

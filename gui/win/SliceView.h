@@ -104,6 +104,10 @@ private:
     unsigned long long cachedOverlayRevision_ = 0;
     float cachedOverlayThresholdLo_ = 0.0f;
     float cachedOverlayThresholdHi_ = 0.0f;
+    // Which source the cached overlay was extracted from: the live threshold
+    // preview or the committed mask. Switching tools flips this, so it must
+    // invalidate the cache - otherwise a threshold preview ghosts into paint mode.
+    bool cachedOverlayThresholdPreview_ = false;
     QImage cachedOverlay_;
 };
 

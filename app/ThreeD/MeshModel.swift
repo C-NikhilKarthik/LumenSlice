@@ -32,10 +32,6 @@ final class MeshModel: ObservableObject {
     // Scissor mode: when on, a freehand lasso over the 3D surface cuts the mask
     // (and camera orbit is suspended while drawing). Toggled from the 3D controls.
     @Published var scissorActive = false
-    @Published var volumeRendering = UserDefaults.standard.object(
-        forKey: "volumeRendering") as? Bool ?? false {
-        didSet { UserDefaults.standard.set(volumeRendering, forKey: "volumeRendering") }
-    }
     @Published private(set) var isGenerating = false
     @Published private(set) var triangleCount = 0
     @Published private(set) var vertexCount = 0
@@ -62,6 +58,18 @@ final class MeshModel: ObservableObject {
             .sink { [weak self] _ in
                 guard let self, self.liveUpdate3D else { return }
                 self.scheduleAutomaticGenerate()
+            }
+            .store(in: &cancellables)
+
+        // A grow-from-seeds preview is a deliberate "show me the 3D result" step, so
+        // the surface is always (re)built when one activates - independent of the
+        // live-update opt-in that governs incremental edits. Deferred to the next
+        // runloop tick so the segment mirror has refreshed before generate() reads it.
+        segmentation.$growPreviewActive
+            .dropFirst()
+            .sink { [weak self] active in
+                guard let self, active else { return }
+                DispatchQueue.main.async { self.generate() }
             }
             .store(in: &cancellables)
     }
@@ -176,7 +184,11 @@ final class MeshModel: ObservableObject {
         ids32.withUnsafeBufferPointer { buf in
             lumen_mesh_snapshot_labels(h, buf.baseAddress, Int32(buf.count))
         }
-        _ = lumen_mesh_generate(h, Int32(max(0, smoothing)), Int32(max(1, downsample)))
+        let tris = lumen_mesh_generate(h, Int32(max(0, smoothing)), Int32(max(1, downsample)))
+        // Refuse to write a header-only STL: if marching cubes produced no triangles
+        // there is nothing to export, so report failure rather than leave the user
+        // with an 84-byte file that opens as "no mesh".
+        guard tris > 0 else { return false }
         return lumen_mesh_write_stl(h, url.path) == 0
     }
 }
