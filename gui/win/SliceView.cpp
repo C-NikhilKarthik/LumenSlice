@@ -231,6 +231,7 @@ void SliceView::paintEvent(QPaintEvent*) {
             st_->tool == Tool::Threshold && st_->thresholdPreviewArmed;
         if (!overlayCacheValid_ || cachedVolume_ != v ||
             cachedOverlayIndex_ != index || cachedOverlayRevision_ != revision ||
+            cachedOverlayThresholdPreview_ != showThresholdPreview ||
             (showThresholdPreview &&
              (cachedOverlayThresholdLo_ != st_->thresholdLo ||
               cachedOverlayThresholdHi_ != st_->thresholdHi))) {
@@ -254,6 +255,7 @@ void SliceView::paintEvent(QPaintEvent*) {
             cachedOverlayRevision_ = revision;
             cachedOverlayThresholdLo_ = st_->thresholdLo;
             cachedOverlayThresholdHi_ = st_->thresholdHi;
+            cachedOverlayThresholdPreview_ = showThresholdPreview;
             overlayCacheValid_ = true;
         }
         if (!cachedOverlay_.isNull()) painter.drawImage(target, cachedOverlay_);
@@ -568,7 +570,11 @@ void SliceView::mousePressEvent(QMouseEvent* e) {
         return;
     }
 
-    if (e->button() == Qt::RightButton || e->button() == Qt::MiddleButton) {
+    // Alt (Option) + left-drag pans a zoomed pane - the trackpad-friendly path that
+    // matches the macOS canvas - alongside the middle-button drag. Right-drag zooms.
+    const bool altPan =
+        (e->button() == Qt::LeftButton && (e->modifiers() & Qt::AltModifier));
+    if (e->button() == Qt::RightButton || e->button() == Qt::MiddleButton || altPan) {
         if (!inside) return;
         navigation_ = e->button() == Qt::RightButton ? Navigation::Zoom
                                                        : Navigation::Pan;
