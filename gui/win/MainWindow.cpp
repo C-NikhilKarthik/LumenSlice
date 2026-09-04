@@ -73,6 +73,28 @@ QGroupBox* section(const QString& title) {
     return box;
 }
 
+QToolButton* infoIcon(QWidget* parent, const QString& help) {
+    auto* b = new QToolButton(parent);
+    b->setIcon(parent->style()->standardIcon(QStyle::SP_MessageBoxInformation));
+    b->setAutoRaise(true);
+    b->setCursor(Qt::WhatsThisCursor);
+    b->setToolTip(help);
+    b->setAccessibleName("Information");
+    b->setFixedSize(22, 22);
+    return b;
+}
+
+QWidget* infoRow(QWidget* parent, const QString& text, const QString& help) {
+    auto* row = new QWidget(parent);
+    auto* h = new QHBoxLayout(row);
+    h->setContentsMargins(0, 0, 0, 0);
+    auto* label = new QLabel(text, row);
+    label->setWordWrap(true);
+    h->addWidget(label, 1);
+    h->addWidget(infoIcon(row, help), 0, Qt::AlignTop);
+    return row;
+}
+
 // Install `page` into a control-panel scroll area. Word-wraps every label and
 // forbids the horizontal scrollbar so a long line can never widen the page and
 // shift the content sideways under the icon rail.
@@ -576,9 +598,11 @@ QWidget* MainWindow::buildSegmentPanel() {
 
     // Grow from seeds.
     auto* seedsBox = section("Grow from seeds");
-    body(seedsBox)->addWidget(new QLabel(
+    body(seedsBox)->addWidget(infoRow(seedsBox,
         "Paint a seed in each region using a different segment. Initialize a "
-        "preview, inspect it through the slices, then apply or cancel it."));
+        "preview, inspect it through the slices, then apply or cancel it.",
+        "Grow from seeds needs at least two seeded segments. Initialize creates a "
+        "preview; Apply commits it and Cancel restores the seeds."));
     seedLocalityLabel_ = new QLabel("Seed locality: 0.0");
     seedLocalitySlider_ = new QSlider(Qt::Horizontal);
     seedLocalitySlider_->setRange(0, 100);
@@ -657,17 +681,10 @@ QWidget* MainWindow::buildThreeDPanel() {
     auto* v = new QVBoxLayout(page);
     v->setSpacing(10);
 
-    v->addWidget(new QLabel("Build a 3D surface from the segmentation mask using "
-                            "marching cubes."));
-
-    volumeRenderCheck_ = new QCheckBox("Enable volume rendering");
-    volumeRenderCheck_->setToolTip(
-        "Ray-march the normalized scan texture in the 3D pane.");
-    connect(volumeRenderCheck_, &QCheckBox::toggled, this, [this](bool on) {
-        if (meshView_) meshView_->setVolumeRendering(on);
-        if (on) refreshVolumeTexture();
-    });
-    v->addWidget(volumeRenderCheck_);
+    v->addWidget(infoRow(page,
+        "Build a 3D surface from the segmentation mask using marching cubes.",
+        "Generate / Update 3D rebuilds the surface from the current visible, "
+        "non-empty segments."));
 
     auto* qualBox = section("Quality");
     auto* smoothRow = new QHBoxLayout;
@@ -749,7 +766,9 @@ QWidget* MainWindow::buildExportPanel() {
     v->setSpacing(10);
 
     auto* meshBox = section("3D mesh (STL)");
-    body(meshBox)->addWidget(new QLabel("Choose which segments to export:"));
+    body(meshBox)->addWidget(infoRow(meshBox, "Choose which segments to export:",
+        "Only checked, non-empty segments are written. Visibility in the 3D view "
+        "does not change this export selection."));
 
     exportSegContainer_ = new QWidget;
     exportSegLayout_ = new QVBoxLayout(exportSegContainer_);
@@ -1401,6 +1420,14 @@ void MainWindow::adoptLoadedVolume(const LoadResult& r) {
 void MainWindow::selectTab(int tab) {
     currentTab_ = tab;
     panels_->setCurrentIndex(tab);
+    if (tab == 1 && !segmentTabInitialized_) {
+        // Match macOS: the first visit opens on Paint so a new user can label
+        // immediately instead of seeing a threshold preview tool.
+        segmentTabInitialized_ = true;
+        st_.tool = Tool::Paint;
+        if (toolDetail_) toolDetail_->setCurrentIndex(3);
+        if (toolGroup_ && toolGroup_->button(3)) toolGroup_->button(3)->setChecked(true);
+    }
     // Segment tab enables canvas tool interactions; others keep left-drag = W/L.
     st_.segmentInteractive = (tab == 1);
     setThreeDTabLayout(tab == 2);
@@ -1547,6 +1574,9 @@ void MainWindow::addSegment() {
     const QColor c = nextSegmentColor();
     const int id = lumen_seg_add(v, c.red(), c.green(), c.blue());
     if (id == 0) return;
+    st_.tool = Tool::Paint;
+    if (toolDetail_) toolDetail_->setCurrentIndex(3);
+    if (toolGroup_ && toolGroup_->button(3)) toolGroup_->button(3)->setChecked(true);
     segNames_[id] = QString("Segment %1").arg(id);
     rebuildSegmentList();
     rebuildExportSegmentList();

@@ -10,9 +10,10 @@ struct ExportControls: View {
     @EnvironmentObject var seg: SegmentationModel
     @State private var message: String?
     @State private var selectedExportIDs = Set<Int>()
+    @State private var exportSelectionInitialized = false
 
-    // The segments that will go into the STL: visible + non-empty. Toggling a
-    // segment's eye in the list below includes/excludes it from the export.
+    // The segments that will go into the STL: selected + non-empty. Export does
+    // not depend on visibility in the 3D tab.
     private var exportIDs: [Int] {
         seg.segments.filter { selectedExportIDs.contains($0.id) && $0.voxels > 0 }
             .map(\.id)
@@ -20,8 +21,8 @@ struct ExportControls: View {
 
     var body: some View {
         Form {
-            // Choose which segments to export by toggling their eye — the STL is the
-            // union of the visible, non-empty ones (mirrors the 3D tab).
+            // Choose which segments to export. This is intentionally separate from
+            // the 3D visibility controls.
             if !seg.segments.isEmpty {
                 Section {
                     ForEach(seg.segments.filter { $0.voxels > 0 }) { row in
@@ -60,7 +61,7 @@ struct ExportControls: View {
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 } else if exportIDs.isEmpty {
-                    Text("Nothing to export. Segment a structure and make it visible.")
+                    Text("Nothing to export. Select a non-empty segment first.")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 } else {
@@ -98,8 +99,9 @@ struct ExportControls: View {
 
     private func reconcileSelection() {
         let available = Set(seg.segments.filter { $0.voxels > 0 }.map(\.id))
-        if selectedExportIDs.isEmpty {
+        if !exportSelectionInitialized {
             selectedExportIDs = available
+            exportSelectionInitialized = true
         } else {
             selectedExportIDs.formIntersection(available)
         }

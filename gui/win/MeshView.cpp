@@ -689,6 +689,27 @@ void MeshView::mouseMoveEvent(QMouseEvent* e) {
         }
         return;
     }
+    const bool panGesture = (e->buttons() & Qt::MiddleButton) ||
+                            ((e->buttons() & Qt::LeftButton) &&
+                             (e->modifiers() & (Qt::ShiftModifier | Qt::AltModifier)));
+    if (panGesture) {
+        const QPoint d = e->pos() - lastMouse_;
+        lastMouse_ = e->pos();
+        // Move the orbit centre in camera-plane world units. Support both the
+        // Mac-style Option-drag and the conventional middle-button drag.
+        constexpr float kPi = 3.14159265358979323846f;
+        const float scale = (2.0f * dist_ * std::tan(20.0f * kPi / 180.0f)) /
+                            std::max(1, height());
+        const QVector3D right = rot_.inverted().mapVector(QVector3D(1, 0, 0));
+        const QVector3D up = rot_.inverted().mapVector(QVector3D(0, 1, 0));
+        const QVector3D shift = right * float(d.x()) * scale -
+                                up * float(d.y()) * scale;
+        center_[0] += shift.x();
+        center_[1] += shift.y();
+        center_[2] += shift.z();
+        update();
+        return;
+    }
     if (!(e->buttons() & Qt::LeftButton)) return;
     const QPoint d = e->pos() - lastMouse_;
     lastMouse_ = e->pos();

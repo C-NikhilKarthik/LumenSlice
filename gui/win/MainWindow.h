@@ -273,6 +273,7 @@ private:
     bool heavyRefreshMesh_ = true;
     bool growPreviewPending_ = false;
     bool growPreviewActive_ = false;
+    bool segmentTabInitialized_ = false;
     QTimer scrollThrottle_;  // caps slice re-extraction rate during wheel-scroll
     int lastScrollAxis_ = -1;
     bool scrollDirty_ = false;

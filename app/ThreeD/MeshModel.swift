@@ -64,6 +64,15 @@ final class MeshModel: ObservableObject {
                 self.scheduleAutomaticGenerate()
             }
             .store(in: &cancellables)
+
+        // Grow-from-seeds is previewed before Apply, but it should still be
+        // visible in 3D immediately after the preview is initialized.
+        segmentation.$growPreviewActive
+            .dropFirst()
+            .sink { [weak self] active in
+                if active { self?.scheduleAutomaticGenerate() }
+            }
+            .store(in: &cancellables)
     }
 
     private struct SegmentSpec {
@@ -176,7 +185,9 @@ final class MeshModel: ObservableObject {
         ids32.withUnsafeBufferPointer { buf in
             lumen_mesh_snapshot_labels(h, buf.baseAddress, Int32(buf.count))
         }
-        _ = lumen_mesh_generate(h, Int32(max(0, smoothing)), Int32(max(1, downsample)))
-        return lumen_mesh_write_stl(h, url.path) == 0
+        let triangles = lumen_mesh_generate(h, Int32(max(0, smoothing)),
+                                            Int32(max(1, downsample)))
+        guard triangles > 0 else { return false }
+        return url.path.withCString { lumen_mesh_write_stl(h, $0) == 0 }
     }
 }
