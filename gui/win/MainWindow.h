@@ -139,7 +139,6 @@ private:
     void refreshSliders();
     void updateSliceButtons();  // enable/disable the per-pane prev/next buttons
     void refreshVolumeInfo();
-    void refreshVolumeTexture();
     void rebuildSegmentList();
     void rebuildExportSegmentList();
     void updateSegmentCounts();      // debounced: schedules recompute
@@ -235,7 +234,6 @@ private:
     QCheckBox* scissorModeCheck_ = nullptr;
     QComboBox* scissorEraseCombo_ = nullptr;
     QCheckBox* scissorActiveOnlyCheck_ = nullptr;
-    QCheckBox* volumeRenderCheck_ = nullptr;
 
     // Export controls.
     QWidget* exportSegContainer_ = nullptr;
