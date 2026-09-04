@@ -34,6 +34,7 @@
 #include <QMimeData>
 #include <QPushButton>
 #include <QScrollArea>
+#include <QSet>
 #include <QSignalBlocker>
 #include <QSlider>
 #include <QSpinBox>
@@ -129,6 +130,11 @@ QString sanitizeFilename(const QString& name) {
         out += (c.isLetterOrNumber() || c == '-' || c == '_') ? c : QChar('_');
     return out.isEmpty() ? QStringLiteral("segment") : out;
 }
+
+QString withStlExtension(QString path) {
+    if (!path.endsWith(".stl", Qt::CaseInsensitive)) path += ".stl";
+    return path;
+}
 }  // namespace
 
 MainWindow::MainWindow() {
@@ -214,8 +220,18 @@ MainWindow::MainWindow() {
         // Grow-from-seeds is a preview of a complete volume result, so show its
         // 3D result immediately even when general live-update is disabled and no
         // previous mesh exists.
-        if (generateGrowPreviewMesh) generateMesh();
-        else if (heavyRefreshMesh_) scheduleMeshRefresh();
+        if (generateGrowPreviewMesh) {
+            // Leave the QFutureWatcher::finished dispatch before starting another
+            // asynchronous job. Starting marching cubes re-entrantly from this
+            // callback is unreliable on Windows even though the mask operation has
+            // completed. This queued call is unconditional: it does not depend on
+            // Live-update being enabled or on an older mesh already existing.
+            QTimer::singleShot(0, this, [this] {
+                if (st_.volume && !st_.busy && !generating_) generateMesh();
+            });
+        } else if (heavyRefreshMesh_) {
+            scheduleMeshRefresh();
+        }
     });
     // Throttle slice repaints while wheel-scrolling (see onSliceScrolled).
     scrollThrottle_.setSingleShot(true);
@@ -859,7 +875,8 @@ QWidget* MainWindow::buildExportPanel() {
     allNone->addWidget(noneBtn);
     body(meshBox)->addLayout(allNone);
 
-    oneFilePerSegCheck_ = new QCheckBox("One file per segment");
+    oneFilePerSegCheck_ = new QCheckBox(
+        "Separate STL file for each selected segment");
     oneFilePerSegCheck_->setChecked(true);
     oneFilePerSegCheck_->setToolTip(
         "Write each selected segment to its own STL file instead of one combined "
@@ -1685,6 +1702,10 @@ void MainWindow::useThresholdForMasking() {
     const float lo = float(threshSlider_->lowValue());
     const float hi = float(threshSlider_->highValue());
     st_.tool = Tool::Paint;
+    // Synchronize the visible selector/detail with the interaction state.
+    if (toolDetail_) toolDetail_->setCurrentIndex(3);
+    if (toolGroup_ && toolGroup_->button(3))
+        toolGroup_->button(3)->setChecked(true);
     runMaskOp("Applying intensity mask…", [v, lo, hi] {
         lumen_seg_apply_mask(v, lo, hi);
     }, false, false);
@@ -2030,10 +2051,25 @@ void MainWindow::exportStl() {
     const int down = effectiveDownsample();
 
     if (oneFilePerSegCheck_->isChecked()) {
-        // One STL per segment into a chosen directory.
-        const QString dir = QFileDialog::getExistingDirectory(
-            this, "Export one STL per segment to folder", QDir::homePath());
-        if (dir.isEmpty()) return;
+        // Use a real Save As dialog (rather than a directory picker) so Windows
+        // exposes the filename and "Save as type: STL". With several selected
+        // segments, the chosen name becomes a base for one clearly named file per
+        // segment; with one selected segment, it is the exact output filename.
+        const QString suggested = ids.size() == 1
+            ? sanitizeFilename(segNames_.value(
+                  ids.front(), QString("Segment %1").arg(ids.front()))) + ".stl"
+            : QStringLiteral("SurgNetra.stl");
+        QString basePath = QFileDialog::getSaveFileName(
+            this,
+            ids.size() == 1 ? "Export segment as STL"
+                            : "Choose base name for separate STL files",
+            QDir::homePath() + "/" + suggested,
+            "STL mesh (*.stl);;All files (*.*)");
+        if (basePath.isEmpty()) return;
+        basePath = withStlExtension(basePath);
+        const QFileInfo baseInfo(basePath);
+        const QString dir = baseInfo.absolutePath();
+        const QString baseStem = baseInfo.completeBaseName();
         QApplication::setOverrideCursor(Qt::WaitCursor);
         int written = 0;
         for (int id : ids) {
@@ -2041,7 +2077,9 @@ void MainWindow::exportStl() {
             if (lumen_mesh_generate(v, smooth, down) <= 0) continue;
             const QString name = sanitizeFilename(
                 segNames_.value(id, QString("Segment %1").arg(id)));
-            const QString path = QString("%1/%2.stl").arg(dir, name);
+            const QString path = ids.size() == 1
+                ? basePath
+                : QString("%1/%2_%3_%4.stl").arg(dir, baseStem, name).arg(id);
             if (lumen_mesh_write_stl(v, path.toUtf8().constData()) == 0) ++written;
         }
         QApplication::restoreOverrideCursor();
@@ -2049,10 +2087,11 @@ void MainWindow::exportStl() {
             QString("Wrote %1 STL file(s) to %2").arg(written).arg(dir));
     } else {
         // Fuse the chosen segments into a single STL (union via the bridge).
-        const QString path = QFileDialog::getSaveFileName(
+        QString path = QFileDialog::getSaveFileName(
             this, "Export fused STL", QDir::homePath() + "/SurgNetra.stl",
-            "STL mesh (*.stl)");
+            "STL mesh (*.stl);;All files (*.*)");
         if (path.isEmpty()) return;
+        path = withStlExtension(path);
         QApplication::setOverrideCursor(Qt::WaitCursor);
         lumen_mesh_snapshot_labels(v, ids.data(), int(ids.size()));
         const int tris = lumen_mesh_generate(v, smooth, down);
@@ -2364,6 +2403,15 @@ void MainWindow::recomputeSegmentCounts() {
 
 void MainWindow::rebuildExportSegmentList() {
     if (!exportSegLayout_) return;
+    // Retain the user's explicit per-segment selection when names/counts refresh
+    // or when they leave and return to Export. The first build still selects all
+    // available segments, matching macOS.
+    const bool hadPreviousSelectionUI = !exportSegChecks_.isEmpty();
+    QSet<int> previouslySelected;
+    for (auto it = exportSegChecks_.constBegin(); it != exportSegChecks_.constEnd();
+         ++it) {
+        if (it.value()->isChecked()) previouslySelected.insert(it.key());
+    }
     QLayoutItem* item = nullptr;
     while ((item = exportSegLayout_->takeAt(0)) != nullptr) {
         if (item->widget()) item->widget()->deleteLater();
@@ -2382,7 +2430,8 @@ void MainWindow::rebuildExportSegmentList() {
                                     .arg(segNames_.value(
                                         id, QString("Segment %1").arg(id)))
                                     .arg(hist[id]));
-        c->setChecked(hist[id] > 0);
+        c->setChecked(hist[id] > 0 &&
+                      (!hadPreviousSelectionUI || previouslySelected.contains(id)));
         c->setEnabled(hist[id] > 0);
         c->setToolTip("Include this segment in the STL export.");
         exportSegChecks_[id] = c;

@@ -403,13 +403,17 @@ final class SegmentationModel: ObservableObject {
         guard let h = volume.handle, activeID > 0, !isBusy else { return }
         let lo = min(thresholdLo, thresholdHi)
         let hi = max(thresholdLo, thresholdHi)
-        runAsyncMaskOperation(h, committed: false, captureUndo: false) { _ in
+        runAsyncMaskOperation(
+            h, committed: false, captureUndo: false,
+            completion: { [weak self] in
+                guard let self else { return }
+                self.maskActive = true
+                self.maskRange = lo...hi
+                self.tool = .paint
+            }) { _ in
             lumen_seg_apply_mask(h, lo, hi)
             return 0
         }
-        maskActive = true
-        maskRange = lo...hi
-        tool = .paint
     }
 
     // Turn off the editable-area mask so painting is unconstrained again. Guarded
@@ -432,6 +436,7 @@ final class SegmentationModel: ObservableObject {
 
     private func runAsyncMaskOperation(_ handle: OpaquePointer, committed: Bool = true,
                                         captureUndo: Bool = true,
+                                        completion: (@MainActor @Sendable () -> Void)? = nil,
                                         _ operation: @escaping (OpaquePointer) -> Int64) {
         guard !isBusy else { return }
         guard let pinnedHandle = volume.pinHandle() else { return }
@@ -444,6 +449,7 @@ final class SegmentationModel: ObservableObject {
                 self.volume.releaseHandle()
                 self.isBusy = false
                 self.didMutateMask(committed: committed)
+                completion?()
             }
         }
     }
@@ -511,8 +517,11 @@ final class SegmentationModel: ObservableObject {
         lumen_seg_push_undo(h)
         thresholdNeedsUndoCapture = true
         if lumen_seg_grow_from_seeds(h, 1, growSeedLocality) > 0 {
-            growPreviewActive = true
+            // Refresh the segment rows/counts first. MeshModel observes the
+            // transition to growPreviewActive and must see the completed preview
+            // when it captures the visible non-empty segment list.
             didMutateMask(committed: true)
+            growPreviewActive = true
         }
         else { refreshUndoState() }
     }
