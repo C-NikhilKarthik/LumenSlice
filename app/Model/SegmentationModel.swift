@@ -63,7 +63,9 @@ final class SegmentationModel: ObservableObject {
     private let volume: VolumeModel
     private var cancellables = Set<AnyCancellable>()
 
-    @Published var tool: SegTool = .threshold {
+    // Open the Segment tab ready to paint (the common first action). Threshold is
+    // one selection away; selecting it arms its preview (see the didSet).
+    @Published var tool: SegTool = .paint {
         didSet {
             thresholdNeedsUndoCapture = true
             // Selecting the threshold tool is an explicit engagement, so the
