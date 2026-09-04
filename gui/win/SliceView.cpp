@@ -10,6 +10,7 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QPaintEvent>
+#include <QMessageBox>
 #include <QResizeEvent>
 #include <QStyle>
 #include <QToolButton>
@@ -73,6 +74,17 @@ void SliceView::buildZoomBar() {
         h->addWidget(b);
         return b;
     };
+    auto* info = mk(QStyle::SP_MessageBoxInformation,
+                    "How to zoom, pan, and navigate this view");
+    connect(info, &QToolButton::clicked, this, [this] {
+        QMessageBox::information(
+            this, "Slice navigation",
+            "Ctrl + wheel: Zoom\n"
+            "Right-drag: Zoom\n"
+            "Middle-drag or Alt + left-drag: Pan (when zoomed in)\n"
+            "Wheel or Up/Down: Previous / next slice\n"
+            "Ctrl + click: Recenter all three views");
+    });
     connect(mk(QStyle::SP_ArrowUp, "Zoom in"), &QToolButton::clicked, this,
             [this] { zoomStep(1.25); });
     connect(mk(QStyle::SP_ArrowDown, "Zoom out"), &QToolButton::clicked, this,
@@ -229,8 +241,12 @@ void SliceView::paintEvent(QPaintEvent*) {
         // an untouched load falls through to the (empty) mask overlay instead.
         const bool showThresholdPreview =
             st_->tool == Tool::Threshold && st_->thresholdPreviewArmed;
+        const int activeSegment = lumen_seg_active(v);
         if (!overlayCacheValid_ || cachedVolume_ != v ||
             cachedOverlayIndex_ != index || cachedOverlayRevision_ != revision ||
+            cachedOverlayWasThreshold_ != showThresholdPreview ||
+            (showThresholdPreview &&
+             cachedOverlayActiveSegment_ != activeSegment) ||
             (showThresholdPreview &&
              (cachedOverlayThresholdLo_ != st_->thresholdLo ||
               cachedOverlayThresholdHi_ != st_->thresholdHi))) {
@@ -254,6 +270,8 @@ void SliceView::paintEvent(QPaintEvent*) {
             cachedOverlayRevision_ = revision;
             cachedOverlayThresholdLo_ = st_->thresholdLo;
             cachedOverlayThresholdHi_ = st_->thresholdHi;
+            cachedOverlayWasThreshold_ = showThresholdPreview;
+            cachedOverlayActiveSegment_ = activeSegment;
             overlayCacheValid_ = true;
         }
         if (!cachedOverlay_.isNull()) painter.drawImage(target, cachedOverlay_);
@@ -568,10 +586,13 @@ void SliceView::mousePressEvent(QMouseEvent* e) {
         return;
     }
 
-    if (e->button() == Qt::RightButton || e->button() == Qt::MiddleButton) {
+    const bool altPan = e->button() == Qt::LeftButton &&
+                        (e->modifiers() & Qt::AltModifier);
+    if (e->button() == Qt::RightButton || e->button() == Qt::MiddleButton ||
+        altPan) {
         if (!inside) return;
         navigation_ = e->button() == Qt::RightButton ? Navigation::Zoom
-                                                       : Navigation::Pan;
+                                                      : Navigation::Pan;
         lastNavigationPos_ = e->pos();
         if (navigation_ == Navigation::Zoom) zoomAnchor_ = e->pos();
         setCursor(navigation_ == Navigation::Zoom ? Qt::SizeVerCursor

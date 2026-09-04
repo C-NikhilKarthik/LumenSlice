@@ -3,7 +3,8 @@
 // Chosen as a QOpenGLWidget (core-profile 3.3) rather than Qt Quick 3D: it
 // consumes the bridge's raw interleaved vertex/normal float buffers directly with
 // no QML/Quick3D dependency or scene-graph marshaling, and matches the immediate,
-// data-oriented style of the rest of the app. Left-drag orbits, wheel zooms.
+// data-oriented style of the rest of the app. Blender-style middle-drag orbits,
+// Shift+middle-drag pans, and the wheel zooms (legacy left-drag remains available).
 //
 // The surface is a set of colored sub-meshes — one per visible segment — packed
 // into a single vertex/index buffer and drawn as ranges, each with its own colour

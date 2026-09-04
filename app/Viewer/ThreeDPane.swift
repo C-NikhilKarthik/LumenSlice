@@ -91,7 +91,7 @@ struct ThreeDPane: View {
             .controlSize(.small)
             .disabled(seg.voxelCount == 0 || mesh.isGenerating)
 
-            Text("Drag to orbit • scroll or pinch to zoom • Shift-drag to pan")
+            Text("Middle-drag to orbit • Shift + middle-drag to pan • scroll or pinch to zoom")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)

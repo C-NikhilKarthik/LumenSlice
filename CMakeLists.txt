@@ -90,6 +90,14 @@ if(WIN32)
         comctl32 shell32 ole32)
     target_compile_definitions(SurgNetra PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 
+    # Make the build-tree executable directly runnable. A successful link is not
+    # enough for a Qt app: Qt's DLLs and the platforms/qwindows.dll plugin must
+    # sit beside the exe. Resolve windeployqt from the same Qt installation CMake
+    # selected so this also works when CI or a developer uses a different Qt path.
+    get_target_property(_qt_qmake_executable Qt6::qmake IMPORTED_LOCATION)
+    get_filename_component(_qt_bin_dir "${_qt_qmake_executable}" DIRECTORY)
+    find_program(WINDEPLOYQT_EXECUTABLE windeployqt HINTS "${_qt_bin_dir}" REQUIRED)
+
     # Keep the DICOM dictionary and app icon beside the executable in packaged
     # builds (main.cpp loads resources/app.ico from here for the runtime window
     # icon; app.rc embeds the same file into the .exe itself for Explorer/taskbar).
@@ -97,5 +105,9 @@ if(WIN32)
         COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:SurgNetra>/resources"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${CMAKE_CURRENT_SOURCE_DIR}/gui/win/resources/app.ico"
-            "$<TARGET_FILE_DIR:SurgNetra>/resources/app.ico")
+            "$<TARGET_FILE_DIR:SurgNetra>/resources/app.ico"
+        COMMAND "${WINDEPLOYQT_EXECUTABLE}"
+            --release --no-translations --compiler-runtime
+            "$<TARGET_FILE:SurgNetra>"
+        COMMENT "Deploying the Qt runtime beside SurgNetra.exe")
 endif()

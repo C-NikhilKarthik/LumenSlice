@@ -79,7 +79,10 @@ struct ThreeDControls: View {
                     LabeledContent("Triangles", value: mesh.triangleCount.formatted())
                     LabeledContent("Vertices", value: mesh.vertexCount.formatted())
                 } header: {
-                    InfoHeader("Mesh", help: "Drag to orbit, scroll to zoom.")
+                    InfoHeader("Mesh",
+                               help: "Blender-style controls: middle-drag to orbit, "
+                                   + "Shift + middle-drag to pan, and scroll or pinch "
+                                   + "to zoom.")
                 }
 
                 Section {

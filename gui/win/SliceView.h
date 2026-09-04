@@ -104,6 +104,8 @@ private:
     unsigned long long cachedOverlayRevision_ = 0;
     float cachedOverlayThresholdLo_ = 0.0f;
     float cachedOverlayThresholdHi_ = 0.0f;
+    bool cachedOverlayWasThreshold_ = false;
+    int cachedOverlayActiveSegment_ = 0;
     QImage cachedOverlay_;
 };
 

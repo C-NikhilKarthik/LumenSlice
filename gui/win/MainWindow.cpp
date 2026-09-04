@@ -81,6 +81,9 @@ QToolButton* infoIcon(QWidget* parent, const QString& help) {
     b->setToolTip(help);
     b->setAccessibleName("Information");
     b->setFixedSize(22, 22);
+    QObject::connect(b, &QToolButton::clicked, b, [b, help] {
+        QMessageBox::information(b, "Information", help);
+    });
     return b;
 }
 
@@ -93,6 +96,17 @@ QWidget* infoRow(QWidget* parent, const QString& text, const QString& help) {
     h->addWidget(label, 1);
     h->addWidget(infoIcon(row, help), 0, Qt::AlignTop);
     return row;
+}
+
+QVBoxLayout* body(QGroupBox* box);
+
+// Windows counterpart of macOS InfoHeader: a section title with an adjacent
+// info.circle-equivalent button. Hover shows the native tooltip; click opens the
+// complete, identically worded explanation.
+QGroupBox* infoSection(const QString& title, const QString& help) {
+    auto* box = section(QString());
+    body(box)->addWidget(infoRow(box, title, help));
+    return box;
 }
 
 // Install `page` into a control-panel scroll area. Word-wraps every label and
@@ -179,12 +193,14 @@ MainWindow::MainWindow() {
     connect(&countsTimer_, &QTimer::timeout, this,
             &MainWindow::recomputeSegmentCounts);
     connect(&heavyWatcher_, &QFutureWatcher<void>::finished, this, [this] {
+        bool generateGrowPreviewMesh = false;
         if (growPreviewPending_) {
             growPreviewPending_ = false;
             growPreviewActive_ = true;
             if (growSeedsBtn_) growSeedsBtn_->setVisible(false);
             if (growApplyBtn_) growApplyBtn_->setVisible(true);
             if (growCancelBtn_) growCancelBtn_->setVisible(true);
+            generateGrowPreviewMesh = true;
         }
         st_.busy = false;
         showBusy("");
@@ -195,7 +211,11 @@ MainWindow::MainWindow() {
         // so reflect its state here, once the worker has finished. Harmless for the
         // other mask ops that share this watcher (their mask state is unchanged).
         updateMaskIndicator();
-        if (heavyRefreshMesh_) scheduleMeshRefresh();
+        // Grow-from-seeds is a preview of a complete volume result, so show its
+        // 3D result immediately even when general live-update is disabled and no
+        // previous mesh exists.
+        if (generateGrowPreviewMesh) generateMesh();
+        else if (heavyRefreshMesh_) scheduleMeshRefresh();
     });
     // Throttle slice repaints while wheel-scrolling (see onSliceScrolled).
     scrollThrottle_.setSingleShot(true);
@@ -298,7 +318,11 @@ QWidget* MainWindow::buildVisualizePanel() {
     body(metaBox)->addWidget(inspectBtn);
     v->addWidget(metaBox);
 
-    auto* wlBox = section("Window / Level (HU)");
+    auto* wlBox = infoSection(
+        "Window / Level (HU)",
+        "Level = brightness (the HU shown as mid-gray). Window = contrast (the HU "
+        "span mapped black to white). Drag the handles to set the visible HU range, "
+        "or drag on a slice.");
     body(wlBox)->addWidget(new QLabel(
         "Drag the two handles to set the visible HU window (low … high), drag on "
         "a slice, or type exact Level / Window values."));
@@ -439,6 +463,10 @@ QWidget* MainWindow::buildSegmentPanel() {
     {
         auto* w = new QWidget;
         auto* f = new QVBoxLayout(w);
+        f->addWidget(infoRow(
+            w, "Threshold (HU)",
+            "Preview this HU range in the three slice views. Apply commits it to "
+            "the active segment and 3D."));
         f->addWidget(new QLabel("Drag the handles to preview the active segment in "
                                 "the three slice views. Press Apply to update 3D."));
         threshLabel_ = new QLabel("Low 300  -  High 3000 HU");
@@ -501,6 +529,10 @@ QWidget* MainWindow::buildSegmentPanel() {
             "Commit the current threshold preview into the active segment's mask.");
         connect(applyBtn, &QPushButton::clicked, this, &MainWindow::commitThreshold);
         f->addWidget(applyBtn);
+        f->addWidget(infoRow(
+            w, "Mask",
+            "An editable-area mask confines paint and fill to a HU range. A badge "
+            "on the canvas shows it is active."));
         maskBtn_ = new QPushButton("Use as paint mask");
         maskBtn_->setObjectName("accent");
         maskBtn_->setToolTip(
@@ -537,6 +569,11 @@ QWidget* MainWindow::buildSegmentPanel() {
     {
         auto* w = new QWidget;
         auto* f = new QVBoxLayout(w);
+        f->addWidget(infoRow(
+            w, "Fill (flood)",
+            "Click a structure in any slice to flood-fill connected voxels within "
+            "the tolerance of the clicked voxel. Each click fills; this is not the "
+            "seed brush for Grow from seeds (use Paint for that)."));
         f->addWidget(new QLabel("Click a structure to flood-fill connected "
                                 "voxels within tolerance."));
         toleranceLabel_ = new QLabel("Tolerance: ± 100 HU");
@@ -557,6 +594,11 @@ QWidget* MainWindow::buildSegmentPanel() {
     {
         auto* w = new QWidget;
         auto* f = new QVBoxLayout(w);
+        f->addWidget(infoRow(
+            w, "Level Trace",
+            "Click a bright structure on any slice to select its whole level set: "
+            "every connected pixel at or above the clicked HU is added to the active "
+            "segment. Works on the clicked slice only."));
         f->addWidget(new QLabel("Click a bright structure to add every connected "
                                 "pixel at or above the clicked HU (this slice)."));
         toolDetail_->addWidget(w);
@@ -565,6 +607,10 @@ QWidget* MainWindow::buildSegmentPanel() {
     {
         auto* w = new QWidget;
         auto* f = new QVBoxLayout(w);
+        f->addWidget(infoRow(
+            w, "Paint / Erase brush",
+            "Drag over the slice to paint the active segment. When Erase is selected, "
+            "drag over the slice to erase the active segment."));
         f->addWidget(new QLabel("Drag over the slice to paint/erase the active "
                                 "segment."));
         brushLabel_ = new QLabel("Brush radius: 12 px");
@@ -597,12 +643,11 @@ QWidget* MainWindow::buildSegmentPanel() {
     st_.tool = Tool::Threshold;
 
     // Grow from seeds.
-    auto* seedsBox = section("Grow from seeds");
-    body(seedsBox)->addWidget(infoRow(seedsBox,
-        "Paint a seed in each region using a different segment. Initialize a "
-        "preview, inspect it through the slices, then apply or cancel it.",
-        "Grow from seeds needs at least two seeded segments. Initialize creates a "
-        "preview; Apply commits it and Cancel restores the seeds."));
+    auto* seedsBox = infoSection(
+        "Grow from seeds",
+        "Paint a seed in each region with a different segment. Initialize a preview, "
+        "inspect the result through the slices, then apply it or cancel and add more "
+        "seeds. Seed locality: higher values keep growth closer to the painted seeds.");
     seedLocalityLabel_ = new QLabel("Seed locality: 0.0");
     seedLocalitySlider_ = new QSlider(Qt::Horizontal);
     seedLocalitySlider_->setRange(0, 100);
@@ -681,12 +726,16 @@ QWidget* MainWindow::buildThreeDPanel() {
     auto* v = new QVBoxLayout(page);
     v->setSpacing(10);
 
-    v->addWidget(infoRow(page,
-        "Build a 3D surface from the segmentation mask using marching cubes.",
-        "Generate / Update 3D rebuilds the surface from the current visible, "
-        "non-empty segments."));
+    v->addWidget(infoRow(
+        page, "Segments",
+        "Toggle the eye to include or exclude a segment. "
+        "The surface is built from exactly the visible, non-empty segments."));
 
-    auto* qualBox = section("Quality");
+    auto* qualBox = infoSection(
+        "Quality",
+        "Smoothing rounds the surface (0 = raw voxel steps). Resolution downsamples "
+        "before marching cubes: lower = fewer triangles, faster and coarser. Use Full "
+        "for the final export.");
     auto* smoothRow = new QHBoxLayout;
     smoothRow->addWidget(new QLabel("Smoothing"));
     smoothingSpin_ = new QSpinBox;
@@ -710,30 +759,48 @@ QWidget* MainWindow::buildThreeDPanel() {
     body(qualBox)->addLayout(resRow);
     v->addWidget(qualBox);
 
+    auto* surfaceBox = infoSection(
+        "3D surface",
+        "Build a colored 3D surface for each visible segment using marching cubes. "
+        "Hidden or empty segments are skipped.");
     generateBtn_ = new QPushButton("Generate / Update 3D");
     generateBtn_->setObjectName("accent");
     generateBtn_->setToolTip(
         "Build or rebuild the 3D surface from the current segmentation.");
     connect(generateBtn_, &QPushButton::clicked, this,
             &MainWindow::generateMesh);
-    v->addWidget(generateBtn_);
+    body(surfaceBox)->addWidget(generateBtn_);
+    v->addWidget(surfaceBox);
 
+    auto* volumeBox = infoSection(
+        "Volume",
+        "Live-update rebuilds the surface after each committed edit and can be slow "
+        "on large scans.");
     auto* autoMeshCheck = new QCheckBox("Live-update 3D on edits");
     autoMeshCheck->setToolTip(
         "Rebuild the surface automatically after each segmentation edit. Off by "
         "default — it can be slow on large scans.");
     connect(autoMeshCheck, &QCheckBox::toggled, this,
             [this](bool on) { autoMesh3D_ = on; });
-    v->addWidget(autoMeshCheck);
+    body(volumeBox)->addWidget(autoMeshCheck);
+    v->addWidget(volumeBox);
 
-    auto* meshBox = section("Mesh");
+    auto* meshBox = infoSection(
+        "Mesh",
+        "Blender-style controls: middle-drag to orbit, Shift + middle-drag to pan, "
+        "and scroll to zoom. Double-click maximizes or restores the view.");
     meshInfoLabel_ = new QLabel("No surface yet.");
     meshInfoLabel_->setWordWrap(true);
     body(meshBox)->addWidget(meshInfoLabel_);
-    body(meshBox)->addWidget(new QLabel("Drag to orbit, scroll to zoom."));
+    body(meshBox)->addWidget(new QLabel(
+        "Middle-drag: orbit  |  Shift + middle-drag: pan  |  Wheel: zoom"));
     v->addWidget(meshBox);
 
-    auto* scissorBox = section("Scissor cut");
+    auto* scissorBox = infoSection(
+        "Scissor",
+        "When on, draw a freehand loop over the surface to erase every voxel inside "
+        "it (through the full depth), then the surface rebuilds. Turn off to orbit "
+        "again.");
     body(scissorBox)->addWidget(new QLabel(
         "Draw a freehand loop over the surface to cut voxels through the depth, "
         "then the surface rebuilds."));
@@ -766,9 +833,10 @@ QWidget* MainWindow::buildExportPanel() {
     v->setSpacing(10);
 
     auto* meshBox = section("3D mesh (STL)");
-    body(meshBox)->addWidget(infoRow(meshBox, "Choose which segments to export:",
-        "Only checked, non-empty segments are written. Visibility in the 3D view "
-        "does not change this export selection."));
+    body(meshBox)->addWidget(infoRow(
+        meshBox, "Segments",
+        "Choose the non-empty segments to write to STL. This selection is "
+        "independent of 3D visibility."));
 
     exportSegContainer_ = new QWidget;
     exportSegLayout_ = new QVBoxLayout(exportSegContainer_);
@@ -834,7 +902,10 @@ QWidget* MainWindow::buildMarkupPanel() {
         "Drop points on any slice; they show in the 3D view. Point = 1 click, "
         "Line = 2, Plane = 3 (a triangle)."));
 
-    auto* typeBox = section("Type");
+    auto* typeBox = infoSection(
+        "Type",
+        "Drop points on any slice pane; they show in the 3D pane. A Point is one "
+        "click, a Line is two, a Plane is three (a triangle).");
     markupKindCombo_ = new QComboBox;
     markupKindCombo_->addItem("Point", int(MarkupModel::Kind::Point));
     markupKindCombo_->addItem("Line", int(MarkupModel::Kind::Line));
@@ -848,7 +919,11 @@ QWidget* MainWindow::buildMarkupPanel() {
     body(typeBox)->addWidget(markupKindCombo_);
     v->addWidget(typeBox);
 
-    auto* colorBox = section("Colour");
+    auto* colorBox = infoSection(
+        "Colour",
+        "New markups use this colour (the points you drop show it live) and keep "
+        "using it until you pick another. Recolour an existing markup from the list "
+        "below.");
     auto* palRow = new QHBoxLayout;
     palRow->setSpacing(4);
     for (int i = 0; i < int(MarkupModel::palette().size()); ++i) {

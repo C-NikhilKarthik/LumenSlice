@@ -2,6 +2,46 @@ import SwiftUI
 import SceneKit
 import simd
 
+// Blender-style camera input layered over SceneKit's native scroll/pinch zoom.
+// A physical middle-button drag orbits; holding Shift changes it to a pan.
+final class BlenderSceneView: SCNView {
+    private var lastMiddlePoint: CGPoint?
+
+    override func otherMouseDown(with event: NSEvent) {
+        guard event.buttonNumber == 2 else {
+            super.otherMouseDown(with: event)
+            return
+        }
+        lastMiddlePoint = convert(event.locationInWindow, from: nil)
+    }
+
+    override func otherMouseDragged(with event: NSEvent) {
+        guard event.buttonNumber == 2, let previous = lastMiddlePoint else {
+            super.otherMouseDragged(with: event)
+            return
+        }
+        let current = convert(event.locationInWindow, from: nil)
+        let dx = Float(current.x - previous.x)
+        let dy = Float(current.y - previous.y)
+        lastMiddlePoint = current
+        if event.modifierFlags.contains(.shift) {
+            defaultCameraController.translateInCameraSpaceBy(
+                x: -dx * 0.25, y: -dy * 0.25, z: 0)
+        } else {
+            defaultCameraController.rotateBy(x: dx * 0.005, y: dy * 0.005)
+        }
+        needsDisplay = true
+    }
+
+    override func otherMouseUp(with event: NSEvent) {
+        guard event.buttonNumber == 2 else {
+            super.otherMouseUp(with: event)
+            return
+        }
+        lastMiddlePoint = nil
+    }
+}
+
 // SceneKit viewport for the marching-cubes surfaces. Built-in camera control gives
 // orbit/zoom/pan; the camera is framed to the meshes whenever they change. Each
 // visible segment is its own colored node; a small R/A/S axis gnomon at the volume
@@ -94,7 +134,7 @@ struct MeshSceneView: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     func makeNSView(context: Context) -> SCNView {
-        let view = SCNView()
+        let view = BlenderSceneView()
         let scene = SCNScene()
         view.scene = scene
         view.allowsCameraControl = true

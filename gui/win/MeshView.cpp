@@ -111,6 +111,7 @@ MeshView::MeshView(QWidget* parent) : QOpenGLWidget(parent) {
     fmt.setSamples(4);
     setFormat(fmt);
     setMinimumSize(200, 200);
+    setToolTip("Middle-drag: orbit | Shift + middle-drag: pan | Wheel: zoom");
     buildToolbar();
     resetView();
 }
@@ -686,17 +687,23 @@ void MeshView::mouseMoveEvent(QMouseEvent* e) {
                 QLineF(lasso_.last(), p).length() > 2.0)
                 lasso_.append(p);
             update();
+            return;
         }
-        return;
+        // Keep Blender camera navigation available while left-drag is reserved
+        // for the scissor outline.
+        if (!(e->buttons() & Qt::MiddleButton)) return;
     }
-    const bool panGesture = (e->buttons() & Qt::MiddleButton) ||
+    // Blender convention: MMB orbit and Shift+MMB pan. The old left-button
+    // gestures remain as compatibility shortcuts.
+    const bool panGesture =
+                            ((e->buttons() & Qt::MiddleButton) &&
+                             (e->modifiers() & Qt::ShiftModifier)) ||
                             ((e->buttons() & Qt::LeftButton) &&
                              (e->modifiers() & (Qt::ShiftModifier | Qt::AltModifier)));
     if (panGesture) {
         const QPoint d = e->pos() - lastMouse_;
         lastMouse_ = e->pos();
-        // Move the orbit centre in camera-plane world units. Support both the
-        // Mac-style Option-drag and the conventional middle-button drag.
+        // Move the orbit centre in camera-plane world units.
         constexpr float kPi = 3.14159265358979323846f;
         const float scale = (2.0f * dist_ * std::tan(20.0f * kPi / 180.0f)) /
                             std::max(1, height());
@@ -710,7 +717,9 @@ void MeshView::mouseMoveEvent(QMouseEvent* e) {
         update();
         return;
     }
-    if (!(e->buttons() & Qt::LeftButton)) return;
+    const bool orbitGesture = (e->buttons() & Qt::MiddleButton) ||
+                              (e->buttons() & Qt::LeftButton);
+    if (!orbitGesture) return;
     const QPoint d = e->pos() - lastMouse_;
     lastMouse_ = e->pos();
     QMatrix4x4 dq;

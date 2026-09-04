@@ -32,7 +32,9 @@ struct ViewState {
     float window = 400.0f;
     // Non-destructive Threshold preview range. This is rendered in the slice
     // panes and is committed to the labelmap only by the explicit Apply action.
-    float thresholdLo = 150.0f;
+    // Keep these defaults in lockstep with the Windows RangeSlider. This makes
+    // merely selecting Threshold render exactly what its handles show.
+    float thresholdLo = 300.0f;
     float thresholdHi = 3000.0f;
     // The threshold preview stays hidden until the user actually engages threshold
     // (selects the tool, drags the range, or runs Otsu). Otherwise a freshly loaded

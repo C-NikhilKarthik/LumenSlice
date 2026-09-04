@@ -7,6 +7,18 @@
 namespace lumen {
 namespace {
 
+// Both macOS (CGImage premultipliedLast) and Windows
+// (QImage::Format_RGBA8888_Premultiplied) consume overlay pixels as premultiplied
+// RGBA. Keeping the threshold preview in that same representation prevents Qt
+// from interpreting bright blue/green channels greater than alpha as invalid
+// premultiplied data and displaying a different hue.
+constexpr std::uint8_t kThresholdAlpha = 150;
+
+inline std::uint8_t Premultiply(std::uint8_t channel, std::uint8_t alpha) {
+    return static_cast<std::uint8_t>(static_cast<unsigned int>(channel) * alpha /
+                                     255U);
+}
+
 inline uint8_t Apply(float hu, float lower, float inv_span) {
     float t = (hu - lower) * inv_span;
     t = std::clamp(t, 0.0f, 1.0f);
@@ -72,7 +84,10 @@ void ExtractThresholdOverlay(const Volume& vol, Axis axis, int index, float lo,
             const float hu = vol.voxel_buffer[vol.index(c.x, c.y, c.z)];
             if (hu < lo || hu > hi) continue;
             std::uint8_t* p = &out.rgba[(static_cast<std::size_t>(py) * d.width + px) * 4];
-            p[0] = r; p[1] = g; p[2] = b; p[3] = 150;
+            p[0] = Premultiply(r, kThresholdAlpha);
+            p[1] = Premultiply(g, kThresholdAlpha);
+            p[2] = Premultiply(b, kThresholdAlpha);
+            p[3] = kThresholdAlpha;
         }
     }
 }

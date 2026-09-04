@@ -110,6 +110,9 @@ final class SegmentationModel: ObservableObject {
     private var thresholdPreviewArmed = false
     // Coalesces a run of live-threshold edits into a single undo entry.
     private var thresholdNeedsUndoCapture = true
+    // The first visit to Segments starts ready to paint. Threshold remains an
+    // explicit tool choice whose current range is previewed immediately.
+    private var segmentTabInitialized = false
     // Set when we apply a threshold programmatically (Otsu) so the debounced
     // CombineLatest sink skips the redundant second full-volume threshold pass.
     private var skipNextThresholdSink = false
@@ -134,7 +137,14 @@ final class SegmentationModel: ObservableObject {
 
     // Set by the shell when the Segment tab is shown/hidden.
     var isActive = false {
-        didSet { if isActive && !oldValue { refreshAllOverlays() } }
+        didSet {
+            guard isActive && !oldValue else { return }
+            if !segmentTabInitialized {
+                segmentTabInitialized = true
+                tool = .paint
+            }
+            refreshAllOverlays()
+        }
     }
 
     init(volume: VolumeModel) {
@@ -182,6 +192,9 @@ final class SegmentationModel: ObservableObject {
                 self.maskActive = false
                 self.overlayStore.images = [nil, nil, nil]
                 if has {
+                    // A newly loaded study always starts in the directly usable
+                    // Paint tool, matching a first visit to the Segments tab.
+                    self.tool = .paint
                     self.reloadSegments()
                     // Reconcile the threshold window with this scan's HU range so the
                     // slider and the stored values agree (a previous scan may have left
@@ -269,7 +282,7 @@ final class SegmentationModel: ObservableObject {
         let id = Int(lumen_seg_add(h, Int32(r * 255), Int32(g * 255), Int32(b * 255)))
         guard id > 0 else { return }
         reloadSegments()
-        if tool == .threshold { tool = .paint } // new empty segment -> paint into it
+        tool = .paint // every new empty segment starts ready to paint into it
         thresholdNeedsUndoCapture = true
     }
 
@@ -295,6 +308,9 @@ final class SegmentationModel: ObservableObject {
         lumen_seg_set_active(h, Int32(id))
         activeID = id
         thresholdNeedsUndoCapture = true
+        // If Threshold is open, immediately repaint all panes in the newly active
+        // segment's colour rather than waiting for a slider or slice change.
+        if tool == .threshold { refreshAllOverlays() }
     }
 
     func setVisible(_ id: Int, _ visible: Bool) {
