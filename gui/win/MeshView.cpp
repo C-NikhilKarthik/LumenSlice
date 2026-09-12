@@ -5,6 +5,7 @@
 #include <QHBoxLayout>
 #include <QLineF>
 #include <QMenu>
+#include <QMessageBox>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPolygonF>
@@ -111,7 +112,8 @@ MeshView::MeshView(QWidget* parent) : QOpenGLWidget(parent) {
     fmt.setSamples(4);
     setFormat(fmt);
     setMinimumSize(200, 200);
-    setToolTip("Middle-drag: orbit | Shift + middle-drag: pan | Wheel: zoom");
+    // Navigation help lives on the toolbar's info button (see buildToolbar), matching
+    // the slice panes, rather than a hover tooltip over the whole viewport.
     buildToolbar();
     resetView();
 }
@@ -149,6 +151,21 @@ void MeshView::buildToolbar() {
         h->addWidget(b);
         return b;
     };
+
+    // Info button: navigation help in a dialog, mirroring the slice panes' info
+    // button, so the controls are discoverable from the toolbar (not a hover-only
+    // tooltip).
+    connect(mk("ⓘ", "How to orbit, pan, and zoom this view"),
+            &QToolButton::clicked, this, [this] {
+        QMessageBox::information(
+            this, "3D view controls",
+            "Middle-drag: Orbit\n"
+            "Shift + middle-drag: Pan\n"
+            "Left-drag: Orbit\n"
+            "Wheel: Zoom\n"
+            "Reset (⟲): Reframe to fit\n"
+            "Views ▾: Standard anatomical views");
+    });
 
     connect(mk("⟲", "Reset / reframe"), &QToolButton::clicked, this,
             &MeshView::resetView);

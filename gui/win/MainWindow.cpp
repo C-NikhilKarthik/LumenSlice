@@ -877,7 +877,9 @@ QWidget* MainWindow::buildExportPanel() {
 
     oneFilePerSegCheck_ = new QCheckBox(
         "Separate STL file for each selected segment");
-    oneFilePerSegCheck_->setChecked(true);
+    // Default off: selecting several segments writes ONE combined STL (matching the
+    // macOS export). Tick this only when you want a separate file per segment.
+    oneFilePerSegCheck_->setChecked(false);
     oneFilePerSegCheck_->setToolTip(
         "Write each selected segment to its own STL file instead of one combined "
         "file.");
@@ -2086,9 +2088,15 @@ void MainWindow::exportStl() {
         exportMsgLabel_->setText(
             QString("Wrote %1 STL file(s) to %2").arg(written).arg(dir));
     } else {
-        // Fuse the chosen segments into a single STL (union via the bridge).
+        // Fuse the chosen segments into a single STL (union via the bridge). Seed the
+        // filename with the segment's name for a lone selection; use a generic base
+        // when several are fused.
+        const QString suggested = ids.size() == 1
+            ? sanitizeFilename(segNames_.value(
+                  ids.front(), QString("Segment %1").arg(ids.front()))) + ".stl"
+            : QStringLiteral("SurgNetra.stl");
         QString path = QFileDialog::getSaveFileName(
-            this, "Export fused STL", QDir::homePath() + "/SurgNetra.stl",
+            this, "Export fused STL", QDir::homePath() + "/" + suggested,
             "STL mesh (*.stl);;All files (*.*)");
         if (path.isEmpty()) return;
         path = withStlExtension(path);
