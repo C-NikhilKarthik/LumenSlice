@@ -289,6 +289,42 @@ const unsigned int* lumen_mesh_indices(const LumenVolume* v);
 // non-zero errno-style code.
 int lumen_mesh_write_stl(const LumenVolume* v, const char* path);
 
+// --- Per-segment statistics -------------------------------------------------
+// Quantify one segment into a caller-provided double array indexed by LUMEN_STAT_*.
+// The closed-surface figures come from a padded marching-cubes surface with light
+// smoothing, the same pipeline 3D Slicer uses (constant-pad the labelmap so the
+// surface always closes, contour, smooth), so they line up with Slicer's numbers:
+//   - LUMEN_STAT_VOLUME_MM3      = label-map volume (voxel count * voxel volume);
+//     the reference measure, matches Slicer's "Volume (LM)" exactly.
+//   - LUMEN_STAT_MESH_VOLUME_MM3 = closed-surface enclosed volume ("Volume (CS)").
+//   - LUMEN_STAT_SURFACE_AREA_MM2= closed-surface area ("Surface area").
+//   - LUMEN_STAT_HU_*            = the intensity distribution over the voxels.
+
+enum {
+    LUMEN_STAT_VOXEL_COUNT = 0,   // labelled voxels (a whole number)
+    LUMEN_STAT_VOLUME_MM3,        // voxel_count * voxel volume (label-map volume)
+    LUMEN_STAT_MESH_VOLUME_MM3,   // closed-surface enclosed volume
+    LUMEN_STAT_SURFACE_AREA_MM2,  // closed-surface area, lightly smoothed
+    LUMEN_STAT_HU_MIN,
+    LUMEN_STAT_HU_MAX,
+    LUMEN_STAT_HU_MEAN,
+    LUMEN_STAT_HU_STDDEV,         // population standard deviation
+    LUMEN_STAT_COUNT              // number of entries (array length)
+};
+
+// Freeze the current mask into the handle's statistics snapshot. Main-thread only,
+// exactly like lumen_mesh_snapshot: call this before dispatching lumen_seg_stats to
+// a worker thread, so the measurement reads a stable copy and never races live mask
+// edits (paint, threshold, undo, ...).
+void lumen_seg_stats_snapshot(LumenVolume* v);
+
+// Fill `out` (at least LUMEN_STAT_COUNT doubles) with segment `id`'s statistics,
+// measured from the snapshot taken by lumen_seg_stats_snapshot (call that first, on
+// the main thread). Zero-fills when `id` is empty/invalid or no snapshot exists.
+// Reads only the frozen snapshot + the immutable HU volume and writes no shared
+// handle buffers, so it is safe on a worker thread while the handle is pinned.
+void lumen_seg_stats(const LumenVolume* v, int id, double* out);
+
 #ifdef __cplusplus
 }
 #endif

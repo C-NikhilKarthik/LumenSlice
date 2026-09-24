@@ -4,6 +4,7 @@
 // mutation snapshots undo first. Mesh generation runs off the UI thread.
 #pragma once
 
+#include <QColor>
 #include <QFutureWatcher>
 #include <QHash>
 #include <QElapsedTimer>
@@ -32,6 +33,7 @@ class QPushButton;
 class QSlider;
 class QSpinBox;
 class QStackedWidget;
+class QTableWidget;
 class QTimer;
 class QToolButton;
 class QVBoxLayout;
@@ -59,6 +61,7 @@ protected:
     void dragEnterEvent(QDragEnterEvent*) override;
     void dropEvent(QDropEvent*) override;
     void resizeEvent(QResizeEvent*) override;
+    void closeEvent(QCloseEvent*) override;
 
 private slots:
     void openFolder();
@@ -98,6 +101,11 @@ private slots:
     void exportStl();
     void exportPng();
 
+    // Quantify.
+    void measureStats();
+    void onStatsReady();
+    void exportStatsCsv();
+
     // Markups.
     void onMarkupPointPicked(int x, int y, int z);
 
@@ -108,6 +116,9 @@ private:
     QWidget* buildSegmentPanel();
     QWidget* buildThreeDPanel();
     QWidget* buildExportPanel();
+    QWidget* buildQuantifyPanel();
+    QWidget* buildStatsPage();  // the Quantify-tab canvas: a results table
+    void populateStatsTable(const std::vector<std::vector<double>>& rows);
     QWidget* buildMarkupPanel();
     QWidget* buildQuad();
     void toggleMaximize(int cell);
@@ -245,6 +256,19 @@ private:
     QPushButton* exportStlBtn_ = nullptr;
     QPushButton* exportPngBtn_ = nullptr;
     QLabel* exportMsgLabel_ = nullptr;
+
+    // Quantify controls + canvas table.
+    QStackedWidget* canvasStack_ = nullptr;  // page 0 = quad, page 1 = stats table
+    QTableWidget* statsTable_ = nullptr;
+    QPushButton* measureStatsBtn_ = nullptr;
+    QPushButton* exportCsvBtn_ = nullptr;
+    QLabel* statsInfoLabel_ = nullptr;
+    QLabel* statsMsgLabel_ = nullptr;
+    QFutureWatcher<std::vector<std::vector<double>>> statsWatcher_;
+    std::vector<int> pendingStatIds_;
+    std::vector<QString> pendingStatNames_;
+    std::vector<QColor> pendingStatColors_;
+    std::vector<std::vector<double>> lastStats_;  // last measured rows, for CSV
 
     // Markups (client-side).
     MarkupModel markups_;

@@ -12,6 +12,7 @@ enum WorkspaceTab: String, CaseIterable, Identifiable {
     case segment
     case markups
     case threeD
+    case quantify
     case export
 
     var id: String { rawValue }
@@ -22,6 +23,7 @@ enum WorkspaceTab: String, CaseIterable, Identifiable {
         case .segment: return "Segment"
         case .markups: return "Markups"
         case .threeD: return "3D"
+        case .quantify: return "Quantify"
         case .export: return "Export"
         }
     }
@@ -33,6 +35,7 @@ enum WorkspaceTab: String, CaseIterable, Identifiable {
         case .segment: return "scribble.variable"
         case .markups: return "mappin.and.ellipse"
         case .threeD: return "cube"
+        case .quantify: return "tablecells"
         case .export: return "square.and.arrow.up"
         }
     }

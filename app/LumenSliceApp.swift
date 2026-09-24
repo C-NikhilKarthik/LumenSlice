@@ -33,6 +33,7 @@ struct LumenSliceApp: App {
     @StateObject private var segmentation: SegmentationModel
     @StateObject private var mesh: MeshModel
     @StateObject private var markup: MarkupModel
+    @StateObject private var statistics: StatisticsModel
     // The active workspace tab lives here so the global Undo command can route to
     // the right model (markup points on the Markups tab, mask edits elsewhere).
     @State private var selectedTab: WorkspaceTab = .visualize
@@ -49,6 +50,9 @@ struct LumenSliceApp: App {
         _mesh = StateObject(wrappedValue: MeshModel(volume: volume,
                                                     segmentation: segmentation))
         _markup = StateObject(wrappedValue: MarkupModel(volume: volume))
+        // Quantify tab: measures the same segmentation the other models drive.
+        _statistics = StateObject(wrappedValue: StatisticsModel(volume: volume,
+                                                                segmentation: segmentation))
 
         // When running from a distributed .app bundle, DCMTK can't find its data
         // dictionary at the Homebrew path. Point it at the copy we bundle in
@@ -70,6 +74,7 @@ struct LumenSliceApp: App {
                 .environmentObject(segmentation)
                 .environmentObject(mesh)
                 .environmentObject(markup)
+                .environmentObject(statistics)
                 .frame(minWidth: 1000, minHeight: 660)
                 .onAppear {
                     // Auto-load a folder passed on the command line.

@@ -109,6 +109,15 @@ let package = Package(
             dependencies: ["LumenCore"],
             path: "tools/sliceshot"
         ),
+        // Headless statistics calibration: threshold a real DICOM folder and sweep
+        // closed-surface smoothing against a reference. Dev tool, run with
+        // `swift run -c release StatsShot <folder> <lowHU> <highHU>`.
+        .executableTarget(
+            name: "StatsShot",
+            dependencies: ["LumenCore"],
+            path: "tools/statsshot",
+            cxxSettings: [.headerSearchPath("../../src")]
+        ),
         // Headless 3D pipeline check (threshold -> marching cubes -> binary STL).
         .executableTarget(
             name: "MeshShot",

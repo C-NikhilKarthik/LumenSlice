@@ -14,74 +14,29 @@
 #include <cstdint>
 
 #include "lumen_handle.hpp"
+#include "mesh_crop.hpp"
 #include "segmentation/label_volume.hpp"
 #include "segmentation/marching_cubes.hpp"
 #include "segmentation/stl_export.hpp"
 
 namespace {
 
-// Crop the mask into the snapshot buffer, keeping only voxels for which keep(id) is
-// true, binarized to 0/1. The snapshot covers the labelled region's bounding box
-// (plus a one-voxel zero margin so marching cubes closes the surface at the box
-// edges) rather than the whole volume — this is what makes 3D generation scale with
-// what was segmented, not with the loaded scan size. Empties the snapshot when
-// nothing matches. The origin within the full volume is recorded so the generated
-// vertices can be shifted back into volume space.
+// Crop the mask into the handle's snapshot buffer, keeping only voxels for which
+// keep(id) is true. Thin wrapper over the shared crop_label_region (mesh_crop.hpp)
+// that stores the result on the handle for the next generate. The snapshot covers
+// the labelled region's bounding box plus a one-voxel zero margin, so marching cubes
+// scales with what was segmented, not the loaded scan size; the origin is recorded
+// so the generated vertices can be shifted back into volume space.
 template <class KeepFn>
 void crop_snapshot(LumenVolume* v, KeepFn keep) {
-    const lumen::LabelVolume& mask = v->editor.mask();
-    const int W = mask.width(), H = mask.height(), D = mask.depth();
-    const std::uint8_t* src = mask.data();
-
-    // One linear pass to find the inclusive bounding box of kept voxels.
-    int x0 = W, y0 = H, z0 = D, x1 = -1, y1 = -1, z1 = -1;
-    for (int z = 0; z < D; ++z) {
-        for (int y = 0; y < H; ++y) {
-            const std::uint8_t* row =
-                src + (static_cast<std::size_t>(z) * H + y) * W;
-            for (int x = 0; x < W; ++x) {
-                if (!keep(row[x])) continue;
-                if (x < x0) x0 = x;
-                if (x > x1) x1 = x;
-                if (y < y0) y0 = y;
-                if (y > y1) y1 = y;
-                if (z < z0) z0 = z;
-                if (z > z1) z1 = z;
-            }
-        }
-    }
-    if (x1 < 0) { // nothing labelled — empty surface
-        v->mesh_snapshot.clear();
-        v->snap_w = v->snap_h = v->snap_d = 0;
-        v->snap_ox = v->snap_oy = v->snap_oz = 0;
-        return;
-    }
-
-    // One-voxel margin (clamped to the volume) so the field has a zero border.
-    x0 = std::max(0, x0 - 1);
-    y0 = std::max(0, y0 - 1);
-    z0 = std::max(0, z0 - 1);
-    x1 = std::min(W - 1, x1 + 1);
-    y1 = std::min(H - 1, y1 + 1);
-    z1 = std::min(D - 1, z1 + 1);
-
-    const int cw = x1 - x0 + 1, ch = y1 - y0 + 1, cd = z1 - z0 + 1;
-    v->snap_w = cw;
-    v->snap_h = ch;
-    v->snap_d = cd;
-    v->snap_ox = x0;
-    v->snap_oy = y0;
-    v->snap_oz = z0;
-    v->mesh_snapshot.resize(static_cast<std::size_t>(cw) * ch * cd);
-
-    std::size_t o = 0;
-    for (int z = z0; z <= z1; ++z)
-        for (int y = y0; y <= y1; ++y) {
-            const std::uint8_t* row =
-                src + (static_cast<std::size_t>(z) * H + y) * W;
-            for (int x = x0; x <= x1; ++x)
-                v->mesh_snapshot[o++] = keep(row[x]) ? 1 : 0;
-        }
+    const auto r = lumen_bridge_detail::crop_label_region(v->editor.mask(), keep,
+                                                          v->mesh_snapshot);
+    v->snap_w = r.w;
+    v->snap_h = r.h;
+    v->snap_d = r.d;
+    v->snap_ox = r.ox;
+    v->snap_oy = r.oy;
+    v->snap_oz = r.oz;
 }
 
 } // namespace

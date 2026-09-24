@@ -131,6 +131,7 @@ struct AppShell: View {
             case .segment:   SegmentControls()
             case .markups:   MarkupControls()
             case .threeD:    ThreeDControls()
+            case .quantify:  QuantifyControls()
             case .export:    ExportControls()
             }
         }
@@ -150,6 +151,8 @@ struct AppShell: View {
             SliceBoard(dropTargeted: $dropTargeted)
         case .threeD, .export:
             MeshCanvas()
+        case .quantify:
+            StatsTable()
         }
     }
 }

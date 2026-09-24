@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "core/volume.h"
+#include "segmentation/label_volume.hpp"
 #include "segmentation/marching_cubes.hpp"
 #include "segmentation/segment_editor.hpp"
 #include "visualization/slice_view.h"
@@ -61,6 +62,13 @@ struct LumenVolume {
     int snap_ox = 0;
     int snap_oy = 0;
     int snap_oz = 0;
+
+    // Frozen copy of the label mask for off-thread statistics. Taken on the main
+    // thread (lumen_seg_stats_snapshot) so a background measurement reads only this
+    // stable copy and never races live mask edits - the same discipline the mesh
+    // snapshot uses. Kept separate from mesh_snapshot so a measurement can't collide
+    // with lumen_mesh_generate.
+    lumen::LabelVolume stats_mask;
 };
 
 namespace lumen_bridge_detail {

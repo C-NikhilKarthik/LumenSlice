@@ -22,6 +22,7 @@
 #include "segmentation/segment.hpp"
 #include "segmentation/segment_editor.hpp"
 #include "segmentation/segment_table.hpp"
+#include "segmentation/statistics.hpp"
 #include "segmentation/stl_export.hpp"
 #include "segmentation/undo_stack.hpp"
 #include "visualization/volume_texture.h"
@@ -597,6 +598,102 @@ static void test_level_trace() {
     CHECK(bg == 64, "clicking level 0 fills the whole slice (all >= 0)");
 }
 
+// 20. per-segment statistics: voxel count / volume / voxel-face area / HU stats
+//     from the label map, plus closed-surface area & volume from marching cubes.
+static void test_statistics() {
+    std::printf("statistics\n");
+
+    // A solid 4x4x4 box of label 1 at HU 100, on non-unit spacing so a face-area
+    // axis mix-up would show. Background is -1000 HU.
+    Volume v = make_volume(12, -1000.0f);
+    v.spacing_x = 1.0f;
+    v.spacing_y = 2.0f;
+    v.spacing_z = 3.0f;
+    LabelVolume mask;
+    mask.reset_to(v);
+    for (int z = 4; z < 8; ++z)
+        for (int y = 4; y < 8; ++y)
+            for (int x = 4; x < 8; ++x) {
+                mask.set(x, y, z, 1);
+                set_hu(v, x, y, z, 100.0f);
+            }
+
+    const SegmentStats s = compute_label_stats(mask, v, 1);
+    CHECK(s.voxel_count == 64, "64 labelled voxels");
+    CHECK(std::abs(s.volume_mm3 - 64.0 * 1.0 * 2.0 * 3.0) < 1e-6,
+          "voxel volume == count * sx*sy*sz");
+    // Closed form for an a*b*c box: 2(bc*fx + ac*fy + ab*fz), f = the two-axis face.
+    const double expected_area =
+        2.0 * 4 * 4 * (2.0 * 3.0) + 2.0 * 4 * 4 * (1.0 * 3.0) +
+        2.0 * 4 * 4 * (1.0 * 2.0);
+    CHECK(std::abs(s.surface_area_mm2 - expected_area) < 1e-6,
+          "voxel-face surface area matches the closed form");
+    CHECK(std::abs(s.hu_mean - 100.0) < 1e-6 && std::abs(s.hu_stddev) < 1e-6,
+          "constant HU: mean 100, stddev 0");
+    CHECK(std::abs(s.hu_min - 100.0) < 1e-6 && std::abs(s.hu_max - 100.0) < 1e-6,
+          "HU min == max == 100");
+
+    // An empty / absent label reports all zeros (never NaN).
+    const SegmentStats none = compute_label_stats(mask, v, 7);
+    CHECK(none.voxel_count == 0 && none.volume_mm3 == 0.0 && none.hu_stddev == 0.0,
+          "absent label yields zeroed stats");
+
+    // Population stddev over a known two-value set: half 100, half 200 -> mean 150,
+    // stddev 50.
+    Volume v2 = make_volume(12, 0.0f);
+    LabelVolume m2;
+    m2.reset_to(v2);
+    int parity = 0;
+    for (int z = 4; z < 8; ++z)
+        for (int y = 4; y < 8; ++y)
+            for (int x = 4; x < 8; ++x) {
+                m2.set(x, y, z, 1);
+                set_hu(v2, x, y, z, (parity++ % 2 == 0) ? 100.0f : 200.0f);
+            }
+    const SegmentStats s2 = compute_label_stats(m2, v2, 1);
+    CHECK(std::abs(s2.hu_mean - 150.0) < 1e-6, "two-value HU mean is 150");
+    CHECK(std::abs(s2.hu_stddev - 50.0) < 1e-6, "two-value population stddev is 50");
+
+    // A single-voxel segment: n == 1, so the population stddev is exactly 0 (the
+    // variance guard must not divide-by-zero or return a tiny negative).
+    Volume v1 = make_volume(6, 0.0f);
+    LabelVolume m1;
+    m1.reset_to(v1);
+    m1.set(3, 3, 3, 1);
+    set_hu(v1, 3, 3, 3, 42.0f);
+    const SegmentStats s1 = compute_label_stats(m1, v1, 1);
+    CHECK(s1.voxel_count == 1, "single-voxel segment counts one voxel");
+    CHECK(std::abs(s1.hu_mean - 42.0) < 1e-6 && s1.hu_stddev == 0.0,
+          "single voxel: mean is the value, stddev is 0");
+
+    // Closed-surface metrics: march the same box at unit spacing. Marching cubes
+    // chamfers edges/corners, so the enclosed volume is a little under the 64 mm^3
+    // voxel volume but the same order of magnitude, and both measures are positive.
+    Volume vc = make_volume(12, 0.0f);
+    LabelVolume mc;
+    mc.reset_to(vc);
+    for (int z = 4; z < 8; ++z)
+        for (int y = 4; y < 8; ++y)
+            for (int x = 4; x < 8; ++x) mc.set(x, y, z, 1);
+    std::vector<std::uint8_t> field(mc.voxel_count());
+    for (std::size_t k = 0; k < field.size(); ++k) field[k] = mc.data()[k] ? 1 : 0;
+    Mesh mesh;
+    const int tris = marching_cubes(field.data(), mc.width(), mc.height(),
+                                    mc.depth(), 1, 1, 1, 0, 1, mesh);
+    CHECK(tris > 0, "marching cubes produced a surface for stats");
+    const MeshMetrics mm = compute_mesh_metrics(mesh);
+    CHECK(mm.surface_area_mm2 > 0.0 && mm.volume_mm3 > 0.0,
+          "closed-surface metrics are positive");
+    CHECK(mm.volume_mm3 > 40.0 && mm.volume_mm3 < 70.0,
+          "closed-surface volume is near the 64 mm^3 voxel volume");
+
+    // An empty mesh measures as zero, not NaN.
+    Mesh empty;
+    const MeshMetrics zero = compute_mesh_metrics(empty);
+    CHECK(zero.surface_area_mm2 == 0.0 && zero.volume_mm3 == 0.0,
+          "empty mesh measures zero");
+}
+
 int main() {
     std::printf("== SegTest ==\n");
     test_plane_map_roundtrip();
@@ -619,6 +716,7 @@ int main() {
     test_grow_from_seeds();
     test_scissor();
     test_level_trace();
+    test_statistics();
     if (g_failures == 0) {
         std::printf("All segmentation tests passed.\n");
         return 0;
